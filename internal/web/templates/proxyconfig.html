@@ -1,0 +1,515 @@
+{{define "proxyconfig"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>代理配置 - GoWAF</title>
+    
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <style>
+        .header-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .add-btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+        .add-btn:hover {
+            background: #2980b9;
+            transform: translateY(-1px);
+        }
+        
+        /* 表格样式 */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th {
+            background: #f8f9fa;
+            color: #596275;
+            padding: 12px;
+            text-align: left;
+            font-weight: 500;
+            border-bottom: 2px solid #e8e9ed;
+        }
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        tr:hover {
+            background-color: #f8f9fa;
+        }
+        
+        /* 状态徽章 */
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .status-enabled {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status-disabled {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        /* 操作按钮 */
+        .edit-btn {
+            color: #3498db;
+            text-decoration: none;
+            padding: 4px 12px;
+            border-radius: 4px;
+            transition: all 0.3s;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .edit-btn:hover {
+            background-color: #3498db;
+            color: white;
+        }
+        .toggle-btn {
+            color: #f39c12;
+            text-decoration: none;
+            padding: 4px 12px;
+            border-radius: 4px;
+            transition: all 0.3s;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .toggle-btn:hover {
+            background-color: #f39c12;
+            color: white;
+        }
+        .delete-btn {
+            color: #e74c3c;
+            text-decoration: none;
+            padding: 4px 12px;
+            border-radius: 4px;
+            transition: all 0.3s;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .delete-btn:hover {
+            background-color: #e74c3c;
+            color: white;
+        }
+        
+        /* 模态框样式 */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            animation: fadeIn 0.3s;
+        }
+        .modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .modal-content {
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            width: 400px;
+            max-width: 90%;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            animation: slideIn 0.3s;
+        }
+        @keyframes slideIn {
+            from { transform: translateY(-50px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .modal-header {
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #e8e9ed;
+        }
+        .modal-header h3 {
+            margin: 0;
+            color: #2c3e50;
+            font-size: 18px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #596275;
+            font-weight: 500;
+            font-size: 14px;
+        }
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #dce1e8;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s, box-shadow 0.3s;
+            box-sizing: border-box;
+        }
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #3498db;
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+        }
+        .form-group .hint {
+            font-size: 12px;
+            color: #95a5a6;
+            margin-top: 5px;
+        }
+        .form-group .error {
+            font-size: 12px;
+            color: #e74c3c;
+            margin-top: 5px;
+            display: none;
+        }
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .checkbox-group input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+        .checkbox-group label {
+            margin: 0;
+            cursor: pointer;
+        }
+        .modal-footer {
+            margin-top: 25px;
+            padding-top: 20px;
+            border-top: 1px solid #e8e9ed;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #2980b9;
+        }
+        .btn-secondary {
+            background: #f5f6fa;
+            color: #596275;
+        }
+        .btn-secondary:hover {
+            background: #e8e9ed;
+        }
+    </style>
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main">
+        <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+                <h3>代理配置列表</h3>
+                <button class="btn btn-primary" onclick="showAddModal()">+ 添加代理</button>
+            </div>
+            <table>
+                <thead><tr><th>监听地址</th><th>协议</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody id="proxyList"></tbody>
+            </table>
+            <div class="pagination" id="pagination" style="display:none;">
+                <div class="pagination-info">
+                    <span id="pageInfo">第1 页 / 第1 页</span>
+                    <select class="page-size-select" id="pageSize" onchange="changePageSize()">
+                        <option value="5">5 条</option>
+                        <option value="10" selected>10 条</option>
+                        <option value="20">20 条</option>
+                        <option value="50">50 条</option>
+                    </select>
+                </div>
+                <div class="pagination-btns">
+                    <button class="pagination-btn" id="prevBtn" onclick="prevPage()">上一页</button>
+                    <button class="pagination-btn" id="nextBtn" onclick="nextPage()">下一页</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal" id="addModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">添加代理</h3>
+            </div>
+            <div class="form-group">
+                <label for="listenAddr">监听地址 *</label>
+                <input type="text" id="listenAddr" placeholder=":80 或 :443" oninput="validateListenAddr()">
+                <div class="hint">格式：端口 或 IP:端口，例如：80 或 0.0.0.0:443</div>
+                <div class="error" id="addrError">请输入有效的监听地址</div>
+            </div>
+            <div class="form-group">
+                <label for="protocol">协议</label>
+                <select id="protocol">
+                    <option value="http">HTTP</option>
+                    <option value="https">HTTPS</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="enabled" checked>
+                    <label for="enabled">启用</label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+                <button class="btn btn-primary" onclick="saveProxy()" id="saveBtn">保存</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        (function() {
+            var editingId = null;
+            var allData = [];
+            var currentPage = 1;
+            var pageSize = 10;
+
+            function escapeHtml(text) {
+                if (text == null) return '';
+                var div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+
+            window.validateListenAddr = function() {
+                var addr = document.getElementById('listenAddr').value.trim();
+                var errorEl = document.getElementById('addrError');
+                var saveBtn = document.getElementById('saveBtn');
+                
+                if (!addr) {
+                    errorEl.style.display = 'none';
+                    saveBtn.disabled = false;
+                    return true;
+                }
+
+                var portRegex = /^(:[0-9]{1,5}|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}:[0-9]{1,5})$/;
+                if (!portRegex.test(addr)) {
+                    errorEl.style.display = 'block';
+                    saveBtn.disabled = true;
+                    return false;
+                }
+
+                var portMatch = addr.match(/:([0-9]+)$/);
+                if (portMatch) {
+                    var port = parseInt(portMatch[1]);
+                    if (port < 1 || port > 65535) {
+                        errorEl.textContent = '端口号必须在1-65535之间';
+                        errorEl.style.display = 'block';
+                        saveBtn.disabled = true;
+                        return false;
+                    }
+                }
+
+                errorEl.style.display = 'none';
+                saveBtn.disabled = false;
+                return true;
+            };
+
+            function loadList() {
+                fetch('/api/proxy/list').then(r => r.json()).then(data => {
+                    allData = data || [];
+                    renderData();
+                });
+            }
+
+            function renderData() {
+                var tbody = document.getElementById('proxyList');
+                var pagination = document.getElementById('pagination');
+                
+                if (!allData || allData.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#95a5a6;padding:20px;">暂无配置</td></tr>';
+                    pagination.style.display = 'none';
+                    return;
+                }
+                
+                var totalPages = Math.ceil(allData.length / pageSize);
+                if (currentPage > totalPages) currentPage = totalPages;
+                if (currentPage < 1) currentPage = 1;
+                
+                var start = (currentPage - 1) * pageSize;
+                var end = Math.min(start + pageSize, allData.length);
+                var pageData = allData.slice(start, end);
+                
+                tbody.innerHTML = '';
+                pageData.forEach(function(item) {
+                    var tr = document.createElement('tr');
+                    var escapedAddr = escapeHtml(item.listen_addr);
+                    var toggleText = item.enabled ? '禁用' : '启用';
+                    tr.innerHTML = '<td><code>' + escapedAddr + '</code></td>' +
+                        '<td>' + item.protocol.toUpperCase() + '</td>' +
+                        '<td><span class="status-badge ' + (item.enabled ? 'status-enabled' : 'status-disabled') + '">' + (item.enabled ? '已启用' : '已禁用') + '</span></td>' +
+                        '<td>' +
+                            '<button class="edit-btn" data-id="' + escapeHtml(item.id) + '" data-addr="' + escapeHtml(item.listen_addr) + '" data-protocol="' + escapeHtml(item.protocol) + '" data-enabled="' + item.enabled + '">编辑</button> ' +
+                            '<button class="toggle-btn" data-id="' + escapeHtml(item.id) + '" data-enabled="' + !item.enabled + '">' + toggleText + '</button> ' +
+                            '<button class="delete-btn" data-id="' + escapeHtml(item.id) + '">删除</button>' +
+                        '</td>';
+                    tbody.appendChild(tr);
+                });
+
+                tbody.addEventListener('click', function(e) {
+                    var target = e.target;
+                    var id = target.dataset.id;
+                    if (!id) return;
+                    
+                    if (target.classList.contains('delete-btn')) {
+                        if (confirm('确定删除？')) {
+                            fetch('/api/proxy/delete', {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({id: id})
+                            }).then(r => r.json()).then(res => {
+                                if (res.success) loadList();
+                                else alert('删除失败: ' + (res.error || '未知错误'));
+                            }).catch(err => alert('删除失败: ' + err.message));
+                        }
+                    } else if (target.classList.contains('edit-btn')) {
+                        editProxy(id, target.dataset.addr, target.dataset.protocol, target.dataset.enabled === 'true');
+                    } else if (target.classList.contains('toggle-btn')) {
+                        var enabled = target.dataset.enabled === 'true';
+                        var item = allData.find(p => p.id === id);
+                        if (item) {
+                            var data = {
+                                id: id,
+                                listen_addr: item.listen_addr,
+                                protocol: item.protocol,
+                                enabled: enabled
+                            };
+                            fetch('/api/proxy/update', {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify(data)
+                            }).then(r => r.json()).then(res => {
+                                if (res.success) loadList();
+                                else alert('操作失败: ' + (res.error || '未知错误'));
+                            }).catch(err => alert('操作失败: ' + err.message));
+                        }
+                    }
+                });
+                
+                document.getElementById('pageInfo').textContent = '第' + currentPage + ' 页 / 第' + totalPages + ' 页（共' + allData.length + ' 条）';
+                document.getElementById('prevBtn').disabled = currentPage <= 1;
+                document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+                pagination.style.display = 'flex';
+            }
+
+            window.prevPage = function() { if (currentPage > 1) { currentPage--; renderData(); } };
+            window.nextPage = function() { var totalPages = Math.ceil(allData.length / pageSize); if (currentPage < totalPages) { currentPage++; renderData(); } };
+            window.changePageSize = function() { pageSize = parseInt(document.getElementById('pageSize').value); currentPage = 1; renderData(); };
+
+            window.showAddModal = function() {
+                editingId = null;
+                document.getElementById('modalTitle').textContent = '添加代理';
+                document.getElementById('listenAddr').value = '';
+                document.getElementById('protocol').value = 'http';
+                document.getElementById('enabled').checked = true;
+                document.getElementById('addrError').style.display = 'none';
+                document.getElementById('saveBtn').disabled = false;
+                document.getElementById('addModal').classList.add('show');
+            };
+
+            window.closeModal = function() {
+                document.getElementById('addModal').classList.remove('show');
+            };
+
+            function editProxy(id, addr, protocol, enabled) {
+                editingId = id;
+                document.getElementById('modalTitle').textContent = '编辑代理';
+                document.getElementById('listenAddr').value = addr;
+                document.getElementById('protocol').value = protocol;
+                document.getElementById('enabled').checked = enabled;
+                document.getElementById('addrError').style.display = 'none';
+                document.getElementById('saveBtn').disabled = false;
+                document.getElementById('addModal').classList.add('show');
+            }
+
+            window.saveProxy = function() {
+                if (!validateListenAddr()) {
+                    alert('请检查监听地址格式');
+                    return;
+                }
+
+                var data = {
+                    listen_addr: document.getElementById('listenAddr').value.trim(),
+                    protocol: document.getElementById('protocol').value,
+                    enabled: document.getElementById('enabled').checked
+                };
+
+                if (!data.listen_addr) {
+                    alert('请输入监听地址');
+                    return;
+                }
+
+                var url = '/api/proxy/add';
+                if (editingId) {
+                    data.id = editingId;
+                    url = '/api/proxy/update';
+                }
+
+                fetch(url, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                }).then(r => r.json()).then(res => {
+                    if (res.success) {
+                        closeModal();
+                        loadList();
+                    } else {
+                        alert('保存失败: ' + (res.error || '未知错误'));
+                    }
+                }).catch(err => {
+                    console.error('保存失败:', err);
+                    alert('保存失败: ' + err.message);
+                });
+            };
+
+            loadList();
+        })();
+    </script>
+</body>
+</html>
+{{end}}

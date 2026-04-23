@@ -1,0 +1,402 @@
+{{define "cert"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>证书管理 - GoWAF</title>
+    
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <style>
+        /* 页面特定样式可以在这里添加 */
+        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .btn-primary { background: #3498db; color: white; }
+        .btn-danger { background: #e74c3c; color: white; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; margin-bottom: 8px; color: #555; font-weight: 500; }
+        .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-family: monospace; }
+        .form-group textarea { height: 150px; resize: vertical; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
+        .modal.show { display: flex; }
+        .modal-content { background: white; border-radius: 12px; padding: 24px; width: 600px; max-height: 90vh; overflow-y: auto; }
+        .modal-title { font-size: 18px; font-weight: 600; margin-bottom: 20px; }
+        .modal-actions { display: flex; gap: 12px; margin-top: 24px; }
+        .status-badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+        .status-normal { background: #d4edda; color: #155724; }
+        .status-warning { background: #fff3cd; color: #856404; }
+        .status-critical { background: #f8d7da; color: #721c24; }
+        .status-expired { background: #721c24; color: white; }
+        .backend-checkbox { margin: 4px 0; }
+        .backend-checkbox label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+        .backend-checkbox input { width: auto; }
+        .tip { font-size: 12px; color: #7f8c8d; margin-top: 4px; }
+    </style>
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main">
+        <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+                <h3>SSL证书列表</h3>
+                <button class="btn btn-primary" onclick="showUploadModal()">+ 上传证书</button>
+            </div>
+            <table>
+                <thead><tr><th>证书名称</th><th>域名</th><th>颁发者</th><th>有效期至</th><th>剩余天数</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody id="certList"></tbody>
+            </table>
+            <div class="pagination" id="pagination" style="display:none;">
+                <div class="pagination-info">
+                    <span id="pageInfo">第1 页 / 第1 页</span>
+                    <select class="page-size-select" id="pageSize" onchange="changePageSize()">
+                        <option value="5">5 条</option>
+                        <option value="10" selected>10 条</option>
+                        <option value="20">20 条</option>
+                        <option value="50">50 条</option>
+                    </select>
+                </div>
+                <div class="pagination-btns">
+                    <button class="pagination-btn" id="prevBtn" onclick="prevPage()">上一页</button>
+                    <button class="pagination-btn" id="nextBtn" onclick="nextPage()">下一页</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal" id="uploadModal">
+        <div class="modal-content">
+            <h3 class="modal-title" id="modalTitle">上传SSL证书</h3>
+            <input type="hidden" id="editId">
+            
+            <div class="form-group">
+                <label>证书名称（可选）</label>
+                <input type="text" id="certName" placeholder="例如：example.com 证书" oninput="validateCertName()">
+                <small id="nameError" style="color:#e74c3c;display:none;">证书名称不能超过100个字符</small>
+            </div>
+            
+            <div class="form-group">
+                <label>上传方式</label>
+                <div style="display:flex;gap:12px;margin-bottom:12px;">
+                    <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+                        <input type="radio" name="uploadMode" value="file" checked onchange="switchUploadMode()"> 文件上传
+                    </label>
+                    <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+                        <input type="radio" name="uploadMode" value="text" onchange="switchUploadMode()"> 文本粘贴
+                    </label>
+                </div>
+            </div>
+            <div id="fileUploadSection">
+                <div class="form-group">
+                    <label>证书文件 (.crt / .pem)</label>
+                    <input type="file" id="certFile" accept=".crt,.pem" onchange="readFile(this, 'certPem')">
+                    <small id="certFileError" style="color:#e74c3c;display:none;">请选择有效的证书文件</small>
+                </div>
+                <div class="form-group">
+                    <label>私钥文件 (.key / .pem)</label>
+                    <input type="file" id="keyFile" accept=".key,.pem" onchange="readFile(this, 'keyPem')">
+                    <small id="keyFileError" style="color:#e74c3c;display:none;">请选择有效的私钥文件</small>
+                </div>
+            </div>
+            <div id="textUploadSection" style="display:none;">
+                <div class="form-group">
+                    <label>证书内容 (PEM格式)</label>
+                    <textarea id="certPemText" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" oninput="validateCertText()"></textarea>
+                    <small id="certTextError" style="color:#e74c3c;display:none;">证书内容不能为空</small>
+                </div>
+                <div class="form-group">
+                    <label>私钥内容 (PEM格式)</label>
+                    <textarea id="keyPemText" placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----" oninput="validateKeyText()"></textarea>
+                    <small id="keyTextError" style="color:#e74c3c;display:none;">私钥内容不能为空</small>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn" style="background:#ecf0f1;" onclick="closeModal()">取消</button>
+                <button class="btn btn-primary" onclick="uploadCert()" id="saveBtn">保存</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        (function() {
+            var certPemContent = '';
+            var keyPemContent = '';
+            var editingId = null;
+            var allData = [];
+            var currentPage = 1;
+            var pageSize = 10;
+
+            function escapeHtml(text) {
+                if (text == null) return '';
+                var div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+
+            window.validateCertName = function() {
+                var name = document.getElementById('certName').value.trim();
+                var errorEl = document.getElementById('nameError');
+                var saveBtn = document.getElementById('saveBtn');
+                if (name.length > 100) {
+                    errorEl.style.display = 'block';
+                    saveBtn.disabled = true;
+                    return false;
+                }
+                errorEl.style.display = 'none';
+                saveBtn.disabled = false;
+                return true;
+            };
+
+            window.validateCertText = function() {
+                var certText = document.getElementById('certPemText').value.trim();
+                var errorEl = document.getElementById('certTextError');
+                var saveBtn = document.getElementById('saveBtn');
+                if (!certText) {
+                    errorEl.style.display = 'block';
+                    saveBtn.disabled = true;
+                    return false;
+                }
+                if (!certText.includes('-----BEGIN CERTIFICATE-----') || !certText.includes('-----END CERTIFICATE-----')) {
+                    errorEl.textContent = '证书格式不正确，应为PEM格式';
+                    errorEl.style.display = 'block';
+                    saveBtn.disabled = true;
+                    return false;
+                }
+                errorEl.style.display = 'none';
+                saveBtn.disabled = false;
+                return true;
+            };
+
+            window.validateKeyText = function() {
+                var keyText = document.getElementById('keyPemText').value.trim();
+                var errorEl = document.getElementById('keyTextError');
+                var saveBtn = document.getElementById('saveBtn');
+                if (!keyText) {
+                    errorEl.style.display = 'block';
+                    saveBtn.disabled = true;
+                    return false;
+                }
+                if (!keyText.includes('-----BEGIN') || !keyText.includes('-----END')) {
+                    errorEl.textContent = '私钥格式不正确，应为PEM格式';
+                    errorEl.style.display = 'block';
+                    saveBtn.disabled = true;
+                    return false;
+                }
+                errorEl.style.display = 'none';
+                saveBtn.disabled = false;
+                return true;
+            };
+
+            function validateFileInput(fileInput, errorId) {
+                var file = fileInput.files[0];
+                var errorEl = document.getElementById(errorId);
+                var saveBtn = document.getElementById('saveBtn');
+                if (!file) {
+                    errorEl.style.display = 'block';
+                    saveBtn.disabled = true;
+                    return false;
+                }
+                if (file.size > 5 * 1024 * 1024) {
+                    errorEl.textContent = '文件大小不能超过5MB';
+                    errorEl.style.display = 'block';
+                    saveBtn.disabled = true;
+                    return false;
+                }
+                var validExtensions = ['.crt', '.pem', '.key'];
+                var fileName = file.name.toLowerCase();
+                var isValid = validExtensions.some(ext => fileName.endsWith(ext));
+                if (!isValid) {
+                    errorEl.textContent = '文件类型无效，请选择.crt、.pem、.key文件';
+                    errorEl.style.display = 'block';
+                    saveBtn.disabled = true;
+                    return false;
+                }
+                errorEl.style.display = 'none';
+                saveBtn.disabled = false;
+                return true;
+            }
+
+            window.readFile = function(input, target) {
+                var file = input.files[0];
+                if (!file) return;
+                var errorId = target === 'certPem' ? 'certFileError' : 'keyFileError';
+                if (!validateFileInput(input, errorId)) return;
+                var reader = new FileReader();
+                reader.onload = function(e) {
+                    if (target === 'certPem') certPemContent = e.target.result;
+                    else keyPemContent = e.target.result;
+                };
+                reader.readAsText(file);
+            };
+
+            window.showUploadModal = function() {
+                editingId = null;
+                document.getElementById('modalTitle').textContent = '上传SSL证书';
+                document.getElementById('certName').value = '';
+                document.getElementById('certFile').value = '';
+                document.getElementById('keyFile').value = '';
+                document.getElementById('certPemText').value = '';
+                document.getElementById('keyPemText').value = '';
+                certPemContent = '';
+                keyPemContent = '';
+                document.querySelector('input[name="uploadMode"][value="file"]').checked = true;
+                switchUploadMode();
+                document.getElementById('nameError').style.display = 'none';
+                document.getElementById('certFileError').style.display = 'none';
+                document.getElementById('keyFileError').style.display = 'none';
+                document.getElementById('certTextError').style.display = 'none';
+                document.getElementById('keyTextError').style.display = 'none';
+                document.getElementById('saveBtn').disabled = false;
+                document.getElementById('uploadModal').classList.add('show');
+            };
+
+            window.switchUploadMode = function() {
+                var isFile = document.querySelector('input[name="uploadMode"]:checked').value === 'file';
+                document.getElementById('fileUploadSection').style.display = isFile ? 'block' : 'none';
+                document.getElementById('textUploadSection').style.display = isFile ? 'none' : 'block';
+                document.getElementById('saveBtn').disabled = false;
+            };
+
+            window.closeModal = function() {
+                document.getElementById('uploadModal').classList.remove('show');
+            };
+
+            window.uploadCert = function() {
+                var isFile = document.querySelector('input[name="uploadMode"]:checked').value === 'file';
+                var certPem = isFile ? certPemContent : document.getElementById('certPemText').value.trim();
+                var keyPem = isFile ? keyPemContent : document.getElementById('keyPemText').value.trim();
+                
+                if (!validateCertName()) { alert('请检查证书名称'); return; }
+                
+                if (isFile) {
+                    if (!certPem || !keyPem) { alert('请选择证书和私钥文件'); return; }
+                } else {
+                    if (!validateCertText() || !validateKeyText()) { alert('请检查证书和私钥内容'); return; }
+                }
+                
+                if (!editingId && (!certPem || !keyPem)) { alert('请提供证书和私钥'); return; }
+                
+                var data = { name: document.getElementById('certName').value.trim() };
+                if (certPem && keyPem) {
+                    data.cert_pem = certPem;
+                    data.key_pem = keyPem;
+                }
+                
+                var url = '/api/cert/upload';
+                if (editingId) {
+                    data.id = editingId;
+                    url = '/api/cert/update';
+                }
+                
+                fetch(url, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                }).then(r => r.json()).then(res => {
+                    if (res.success) {
+                        alert('证书保存成功' + (res.days_left ? '，剩余' + res.days_left + ' 天' : ''));
+                        closeModal();
+                        loadList();
+                    } else {
+                        alert('保存失败: ' + (res.error || '未知错误'));
+                    }
+                }).catch(err => {
+                    console.error('保存失败:', err);
+                    alert('保存失败: ' + err.message);
+                });
+            };
+
+            function loadList() {
+                fetch('/api/cert/list').then(r => r.json()).then(data => {
+                    allData = data || [];
+                    renderData();
+                });
+            }
+
+            function renderData() {
+                var tbody = document.getElementById('certList');
+                var pagination = document.getElementById('pagination');
+                
+                if (!allData || allData.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#95a5a6;">暂无证书</td></tr>';
+                    pagination.style.display = 'none';
+                    return;
+                }
+                
+                var totalPages = Math.ceil(allData.length / pageSize);
+                if (currentPage > totalPages) currentPage = totalPages;
+                if (currentPage < 1) currentPage = 1;
+                
+                var start = (currentPage - 1) * pageSize;
+                var end = Math.min(start + pageSize, allData.length);
+                var pageData = allData.slice(start, end);
+                
+                tbody.innerHTML = '';
+                pageData.forEach((item, index) => {
+                    var expireDate = new Date(item.not_after * 1000).toLocaleDateString();
+                    var statusClass = 'status-' + item.status;
+                    var statusText = item.status === 'normal' ? '正常' : item.status === 'warning' ? '即将过期' : item.status === 'critical' ? '紧急' : '已过期';
+                    var domains = item.domains && item.domains.length > 0 ? item.domains.join(', ') : '-';
+                    
+                    var tr = document.createElement('tr');
+                    tr.innerHTML = '<td>' + escapeHtml(item.name || '-') + '</td>' +
+                        '<td style="max-width:200px;word-break:break-all;">' + escapeHtml(domains) + '</td>' +
+                        '<td>' + escapeHtml(item.issuer || '-') + '</td>' +
+                        '<td>' + expireDate + '</td>' +
+                        '<td>' + item.days_left + ' 天</td>' +
+                        '<td><span class="status-badge ' + statusClass + '">' + statusText + '</span></td>' +
+                        '<td>' +
+                            '<button class="btn btn-primary edit-btn" style="margin-right:8px;" data-index="' + index + '">编辑</button>' +
+                            '<button class="btn btn-danger delete-btn" data-id="' + escapeHtml(item.id) + '">删除</button>' +
+                        '</td>';
+                    tbody.appendChild(tr);
+                });
+
+                tbody.addEventListener('click', function(e) {
+                    var target = e.target;
+                    if (target.classList.contains('delete-btn')) {
+                        var id = target.dataset.id;
+                        if (id && confirm('确定删除？')) {
+                            fetch('/api/cert/delete', {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({id: id})
+                            }).then(r => r.json()).then(res => {
+                                if (res.success) loadList();
+                                else alert('删除失败: ' + (res.error || '未知错误'));
+                            }).catch(err => alert('删除失败: ' + err.message));
+                        }
+                    } else if (target.classList.contains('edit-btn')) {
+                        var index = parseInt(target.dataset.index);
+                        if (!isNaN(index) && index >= 0 && index < pageData.length) {
+                            editCert(pageData[index]);
+                        }
+                    }
+                });
+                
+                document.getElementById('pageInfo').textContent = '第' + currentPage + ' 页 / 第' + totalPages + ' 页（共' + allData.length + ' 条）';
+                document.getElementById('prevBtn').disabled = currentPage <= 1;
+                document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+                pagination.style.display = 'flex';
+            }
+
+            function editCert(item) {
+                editingId = item.id;
+                document.getElementById('modalTitle').textContent = '编辑SSL证书';
+                document.getElementById('certName').value = item.name || '';
+                document.querySelector('input[name="uploadMode"][value="text"]').checked = true;
+                switchUploadMode();
+                document.getElementById('uploadModal').classList.add('show');
+                fetch('/api/cert/get?id=' + item.id).then(r => r.json()).then(data => {
+                    document.getElementById('certPemText').value = data.cert_pem || '';
+                    document.getElementById('keyPemText').value = data.key_pem || '';
+                });
+            }
+
+            window.prevPage = function() { if (currentPage > 1) { currentPage--; renderData(); } };
+            window.nextPage = function() { var totalPages = Math.ceil(allData.length / pageSize); if (currentPage < totalPages) { currentPage++; renderData(); } };
+            window.changePageSize = function() { pageSize = parseInt(document.getElementById('pageSize').value); currentPage = 1; renderData(); };
+
+            loadList();
+        })();
+    </script>
+</body>
+</html>
+{{end}}

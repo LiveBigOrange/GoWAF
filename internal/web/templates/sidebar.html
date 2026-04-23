@@ -1,0 +1,143 @@
+{{define "sidebar"}}
+<div class="sidebar">
+    <div class="sidebar-header">
+        <h2>🛡️ GoWAF</h2>
+        <small>v1.0.0</small>
+    </div>
+    <div class="nav">
+        <!-- 仪表盘 - 一级菜单 -->
+        <a href="/" class="nav-item{{if eq .Active "dashboard"}} active{{end}}" data-menu-id="dashboard">
+            📊 仪表盘
+        </a>
+        
+        <!-- 代理服务 - 一级菜单（可展开） -->
+        <div class="nav-group{{if or (eq .Active "proxyconfig") (eq .Active "domain") (eq .Active "cert") (eq .Active "backend")}} expanded{{end}}" data-group="proxy">
+            <div class="nav-group-header">
+                <span>🔌 代理服务</span>
+                <span class="nav-arrow">▼</span>
+            </div>
+            <div class="nav-group-items">
+                <a href="/proxyconfig" class="nav-item sub-item{{if eq .Active "proxyconfig"}} active{{end}}">代理配置</a>
+                <a href="/domain" class="nav-item sub-item{{if eq .Active "domain"}} active{{end}}">域名管理</a>
+                <a href="/cert" class="nav-item sub-item{{if eq .Active "cert"}} active{{end}}">证书管理</a>
+                <a href="/backend" class="nav-item sub-item{{if eq .Active "backend"}} active{{end}}">后端服务</a>
+            </div>
+        </div>
+        
+        <!-- 安全防护 - 一级菜单（可展开） -->
+        <div class="nav-group{{if or (eq .Active "detector") (eq .Active "rules") (eq .Active "ua") (eq .Active "path") (eq .Active "ratelimit")}} expanded{{end}}" data-group="security">
+            <div class="nav-group-header">
+                <span>🛡️ 安全防护</span>
+                <span class="nav-arrow">▼</span>
+            </div>
+            <div class="nav-group-items">
+                <a href="/detector" class="nav-item sub-item{{if eq .Active "detector"}} active{{end}}">攻击检测</a>
+                <a href="/rules" class="nav-item sub-item{{if eq .Active "rules"}} active{{end}}">IP规则</a>
+                <a href="/ua" class="nav-item sub-item{{if eq .Active "ua"}} active{{end}}">UA规则</a>
+                <a href="/path" class="nav-item sub-item{{if eq .Active "path"}} active{{end}}">路径规则</a>
+                <a href="/ratelimit" class="nav-item sub-item{{if eq .Active "ratelimit"}} active{{end}}">限流配置</a>
+            </div>
+        </div>
+        
+        <!-- 日志中心 - 一级菜单（可展开） -->
+        <div class="nav-group{{if or (eq .Active "intercepts") (eq .Active "logs") (eq .Active "adminlog")}} expanded{{end}}" data-group="logs">
+            <div class="nav-group-header">
+                <span>📋 日志中心</span>
+                <span class="nav-arrow">▼</span>
+            </div>
+            <div class="nav-group-items">
+                <a href="/intercepts" class="nav-item sub-item{{if eq .Active "intercepts"}} active{{end}}">拦截数据</a>
+                <a href="/logs" class="nav-item sub-item{{if eq .Active "logs"}} active{{end}}">访问日志</a>
+                <a href="/adminlog" class="nav-item sub-item{{if eq .Active "adminlog"}} active{{end}}">管理日志</a>
+            </div>
+        </div>
+    </div>
+    <div class="sidebar-footer">
+        <a href="/logout">🚪 退出登录</a>
+    </div>
+</div>
+<script>
+(function() {
+    // CSRF Token处理
+    function getCSRFToken() {
+        var cookies = document.cookie.split(';');
+        for (var i = 0; i < cookies.length; i++) {
+            var c = cookies[i].trim();
+            if (c.startsWith('csrf_token=')) {
+                return c.substring('csrf_token='.length);
+            }
+        }
+        return '';
+    }
+
+    var originalFetch = window.fetch;
+    window.fetch = function(url, options) {
+        options = options || {};
+        var method = (options.method || 'GET').toUpperCase();
+        if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+            var token = getCSRFToken();
+            if (token) {
+                options.headers = options.headers || {};
+                if (options.headers instanceof Headers) {
+                    options.headers.set('X-CSRF-Token', token);
+                } else if (typeof options.headers === 'object') {
+                    options.headers['X-CSRF-Token'] = token;
+                }
+            }
+        }
+        return originalFetch.call(this, url, options);
+    };
+
+    // 菜单展开/收起功能
+    document.querySelectorAll('.nav-group-header').forEach(function(header) {
+        header.addEventListener('click', function(e) {
+            e.preventDefault();
+            var group = this.parentElement;
+            var isExpanded = group.classList.contains('expanded');
+            
+            // 手风琴模式：收起其他展开的菜单
+            document.querySelectorAll('.nav-group.expanded').forEach(function(expandedGroup) {
+                if (expandedGroup !== group) {
+                    expandedGroup.classList.remove('expanded');
+                }
+            });
+            
+            // 切换当前菜单的展开状态
+            if (isExpanded) {
+                group.classList.remove('expanded');
+            } else {
+                group.classList.add('expanded');
+            }
+            
+            // 保存展开状态到localStorage
+            var expandedGroups = Array.from(document.querySelectorAll('.nav-group.expanded'))
+                .map(function(g) { return g.getAttribute('data-group'); });
+            localStorage.setItem('expandedMenuGroups', JSON.stringify(expandedGroups));
+        });
+    });
+
+    // 页面加载时恢复菜单展开状态
+    var savedExpandedGroups = localStorage.getItem('expandedMenuGroups');
+    if (savedExpandedGroups) {
+        try {
+            var groups = JSON.parse(savedExpandedGroups);
+            // 如果当前页面有激活的菜单，优先展开该菜单
+            var hasActiveMenu = document.querySelector('.nav-item.active');
+            if (!hasActiveMenu) {
+                // 没有激活菜单时，恢复保存的状态
+                document.querySelectorAll('.nav-group').forEach(function(group) {
+                    var groupId = group.getAttribute('data-group');
+                    if (groups.includes(groupId)) {
+                        group.classList.add('expanded');
+                    } else {
+                        group.classList.remove('expanded');
+                    }
+                });
+            }
+        } catch (e) {
+            console.error('Failed to restore menu state:', e);
+        }
+    }
+})();
+</script>
+{{end}}

@@ -1,0 +1,374 @@
+{{define "ratelimit"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>限流配置 - GoWAF</title>
+    
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <style>
+        .config-card {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .config-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #e8e9ed;
+        }
+        .config-header h2 {
+            margin: 0;
+            color: #2c3e50;
+            font-size: 18px;
+        }
+        .status-badge {
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .status-enabled {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status-disabled {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .form-group {
+            margin-bottom: 25px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #596275;
+            font-weight: 500;
+            font-size: 14px;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #dce1e8;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s, box-shadow 0.3s;
+            box-sizing: border-box;
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: #3498db;
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+        }
+        .form-group .hint {
+            font-size: 12px;
+            color: #95a5a6;
+            margin-top: 6px;
+        }
+        .form-row {
+            display: flex;
+            gap: 20px;
+        }
+        .form-row .form-group {
+            flex: 1;
+        }
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #2980b9;
+        }
+        .btn-secondary {
+            background: #f5f6fa;
+            color: #596275;
+        }
+        .btn-secondary:hover {
+            background: #e8e9ed;
+        }
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 30px;
+        }
+        .info-box {
+            background: #f8f9fa;
+            border-left: 4px solid #3498db;
+            padding: 15px;
+            margin-bottom: 25px;
+            border-radius: 4px;
+        }
+        .info-box p {
+            margin: 0;
+            color: #596275;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        .current-config {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+        .config-item {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .config-item .label {
+            font-size: 13px;
+            color: #95a5a6;
+            margin-bottom: 8px;
+        }
+        .config-item .value {
+            font-size: 28px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        .config-item .unit {
+            font-size: 14px;
+            color: #7f8c8d;
+            margin-left: 4px;
+        }
+    </style>
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main">
+        <div class="config-card">
+            <div class="config-header">
+                <h2>当前配置</h2>
+                <div>
+                    <span class="status-badge" id="statusBadge">加载中...</span>
+                    <button class="btn btn-primary" id="toggleBtn" style="margin-left: 10px; padding: 6px 16px; font-size: 13px;" onclick="toggleRateLimit()">启用</button>
+                </div>
+            </div>
+            
+            <div class="current-config">
+                <div class="config-item">
+                    <div class="label">QPS (每秒请求数)</div>
+                    <div class="value" id="currentQps">-</div>
+                </div>
+                <div class="config-item">
+                    <div class="label">Burst (突发容量)</div>
+                    <div class="value" id="currentBurst">-</div>
+                </div>
+                <div class="config-item">
+                    <div class="label">状态</div>
+                    <div class="value" id="currentStatus" style="font-size: 20px;">-</div>
+                </div>
+            </div>
+            
+            <div class="info-box" id="infoBox">
+                <p><strong>说明：</strong></p>
+                <p>1. <strong>限流模式</strong>：针对每个IP地址独立限流，不同IP的请求互不影响</p>
+                <p>2. <strong>QPS (Queries Per Second)</strong>：每个IP每秒允许的最大请求数</p>
+                <p>3. <strong>Burst</strong>：每个IP允许的突发请求数量，用于处理短时间内的请求峰值</p>
+                <p>4. <strong>拦截规则</strong>：当某个IP的请求超过限制时，该IP的请求将被拦截并返回 429 状态码</p>
+                <p style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #ddd;"><strong>示例：</strong></p>
+                <p>• QPS=100, Burst=200：每个IP每秒最多100个请求，最多突发200个请求</p>
+                <p>• 如果QPS或Burst为0，表示不进行限流，所有请求都会通过</p>
+            </div>
+        </div>
+        
+        <div class="config-card">
+            <div class="config-header">
+                <h2>修改配置</h2>
+            </div>
+            
+            <form id="configForm">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="qps">QPS (每IP每秒请求数) *</label>
+                        <input type="number" id="qps" name="qps" min="1" max="10000" required placeholder="例如: 100">
+                        <div class="hint">建议值：50-500，根据服务器性能和业务需求调整</div>
+                    </div>
+                    <div class="form-group">
+                        <label for="burst">Burst (每IP突发容量) *</label>
+                        <input type="number" id="burst" name="burst" min="1" max="10000" required placeholder="例如: 200">
+                        <div class="hint">建议值：QPS的1.5-2倍，用于处理正常突发流量</div>
+                    </div>
+                </div>
+                
+                <div class="btn-group">
+                    <button type="submit" class="btn btn-primary">保存配置</button>
+                    <button type="button" class="btn btn-secondary" onclick="resetForm()">重置</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <script>
+        (function() {
+            function loadConfig() {
+                fetch('/api/ratelimit')
+                    .then(r => r.json())
+                    .then(data => {
+                        var statusBadge = document.getElementById('statusBadge');
+                        var currentStatus = document.getElementById('currentStatus');
+                        var toggleBtn = document.getElementById('toggleBtn');
+                        var infoBox = document.getElementById('infoBox');
+                        
+                        if (data.enabled) {
+                            statusBadge.textContent = '已启用';
+                            statusBadge.className = 'status-badge status-enabled';
+                            currentStatus.textContent = '已启用';
+                            currentStatus.style.color = '#27ae60';
+                            toggleBtn.textContent = '禁用';
+                            toggleBtn.style.background = '#e74c3c';
+                            document.getElementById('qps').disabled = false;
+                            document.getElementById('burst').disabled = false;
+                            document.querySelector('#configForm .btn-primary').disabled = false;
+                        } else {
+                            statusBadge.textContent = '未启用';
+                            statusBadge.className = 'status-badge status-disabled';
+                            currentStatus.textContent = '未启用';
+                            currentStatus.style.color = '#e74c3c';
+                            toggleBtn.textContent = '启用';
+                            toggleBtn.style.background = '#27ae60';
+                            document.getElementById('qps').disabled = false;
+                            document.getElementById('burst').disabled = false;
+                            document.querySelector('#configForm .btn-primary').disabled = false;
+                            
+                            infoBox.innerHTML = `
+                                <p><strong style="color: #e74c3c;">⚠️ 限流功能当前未启用</strong></p>
+                                <p>1. 点击上方"启用"按钮即可启用限流功能</p>
+                                <p>2. 启用前请先配置QPS和Burst参数</p>
+                                <p>3. 启用后配置会自动保存，重启服务后仍然有效</p>
+                            `;
+                            infoBox.style.borderLeftColor = '#e74c3c';
+                        }
+                        
+                        var currentQps = document.getElementById('currentQps');
+                        var currentBurst = document.getElementById('currentBurst');
+                        
+                        if (data.qps === 0 || data.burst === 0) {
+                            currentQps.innerHTML = '<span style="color: #e74c3c;">0 <small>(不限制)</small></span>';
+                            currentBurst.innerHTML = '<span style="color: #e74c3c;">0 <small>(不限制)</small></span>';
+                        } else {
+                            currentQps.textContent = data.qps || 0;
+                            currentBurst.textContent = data.burst || 0;
+                        }
+                        
+                        if (data.qps > 0) {
+                            document.getElementById('qps').value = data.qps;
+                        } else {
+                            document.getElementById('qps').value = 100;
+                        }
+                        if (data.burst > 0) {
+                            document.getElementById('burst').value = data.burst;
+                        } else {
+                            document.getElementById('burst').value = 200;
+                        }
+                    })
+                    .catch(e => {
+                        console.error('加载配置失败', e);
+                        document.getElementById('statusBadge').textContent = '加载失败';
+                        document.getElementById('statusBadge').className = 'status-badge status-disabled';
+                    });
+            }
+
+            window.toggleRateLimit = function() {
+                var toggleBtn = document.getElementById('toggleBtn');
+                var isEnabled = toggleBtn.textContent === '禁用';
+                var newEnabled = !isEnabled;
+                
+                var action = newEnabled ? '启用' : '禁用';
+                if (!confirm('确认' + action + '限流功能？')) return;
+                
+                var qps = parseInt(document.getElementById('qps').value);
+                var burst = parseInt(document.getElementById('burst').value);
+                
+                if (newEnabled) {
+                    if (!qps || qps < 1 || qps > 10000) {
+                        alert('QPS必须在1-10000之间');
+                        return;
+                    }
+                    if (!burst || burst < 1 || burst > 10000) {
+                        alert('Burst必须在1-10000之间');
+                        return;
+                    }
+                }
+                
+                fetch('/api/ratelimit', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ qps: qps, burst: burst, enabled: newEnabled })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('限流功能已' + action);
+                        loadConfig();
+                    } else {
+                        alert('操作失败: ' + (data.error || '未知错误'));
+                    }
+                })
+                .catch(e => {
+                    console.error('操作失败', e);
+                    alert('操作失败: ' + e.message);
+                });
+            };
+
+            document.getElementById('configForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                var qps = parseInt(document.getElementById('qps').value);
+                var burst = parseInt(document.getElementById('burst').value);
+                
+                if (!qps || qps < 1 || qps > 10000) {
+                    alert('QPS必须在1-10000之间');
+                    return;
+                }
+                if (!burst || burst < 1 || burst > 10000) {
+                    alert('Burst必须在1-10000之间');
+                    return;
+                }
+                
+                fetch('/api/ratelimit', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ qps: qps, burst: burst })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('配置保存成功');
+                        loadConfig();
+                    } else {
+                        alert('保存失败: ' + (data.error || '未知错误'));
+                    }
+                })
+                .catch(e => {
+                    console.error('保存失败', e);
+                    alert('保存失败: ' + e.message);
+                });
+            });
+
+            window.resetForm = function() {
+                loadConfig();
+            };
+
+            loadConfig();
+        })();
+    </script>
+</body>
+</html>
+{{end}}

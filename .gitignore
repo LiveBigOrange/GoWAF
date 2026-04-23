@@ -1,0 +1,57 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace file
+go.work
+
+# Build artifacts
+waf
+waf-*
+build/
+
+# Database files
+*.db
+*.db-journal
+
+# Log files
+*.log
+
+# Configuration files with sensitive data
+config.local.yaml
+.env
+.env.local
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Dependency directories
+vendor/
+
+# CodeArts
+.arts/
+.codeartsdoer/
+
+# Deployment files (keep templates)
+deploy/*.sh
+!deploy/deploy.sh
+!deploy/install.sh

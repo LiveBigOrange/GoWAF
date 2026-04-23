@@ -1,0 +1,365 @@
+{{define "adminlog"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理日志 - GoWAF</title>
+    
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <style>
+        .filter-bar {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .filter-bar select, .filter-bar input {
+            padding: 8px 12px;
+            border: 1px solid #dcdfe6;
+            border-radius: 4px;
+            font-size: 14px;
+            background: white;
+        }
+        .filter-bar select:focus, .filter-bar input:focus {
+            outline: none;
+            border-color: #409eff;
+        }
+        .log-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+        }
+        .log-table th {
+            background: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-weight: 500;
+            color: #2c3e50;
+            font-size: 13px;
+            border-bottom: 1px solid #e8e9ed;
+        }
+        .log-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 13px;
+        }
+        .log-table tr:hover {
+            background: #f8f9fa;
+        }
+        .log-table tr:last-child td {
+            border-bottom: none;
+        }
+        .action-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .action-badge.login_success { background: #d4edda; color: #155724; }
+        .action-badge.login_fail { background: #f8d7da; color: #721c24; }
+        .action-badge.logout { background: #cce5ff; color: #004085; }
+        .action-badge.api_call { background: #e3f2fd; color: #1976d2; }
+        .action-badge.page_view { background: #f5f5f5; color: #666; }
+        .action-badge.captcha { background: #fff3e0; color: #f57c00; }
+        .action-badge.unauthorized { background: #ffebee; color: #c62828; }
+        .action-badge.forbidden { background: #fce4ec; color: #880e4f; }
+        .status-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .status-badge.success { background: #d4edda; color: #155724; }
+        .status-badge.redirect { background: #cce5ff; color: #004085; }
+        .status-badge.client-error { background: #fff3e0; color: #f57c00; }
+        .status-badge.server-error { background: #f8d7da; color: #721c24; }
+        .empty-message {
+            text-align: center;
+            padding: 40px;
+            color: #95a5a6;
+            font-size: 14px;
+        }
+        .stats-row {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            flex: 1;
+            background: white;
+            border-radius: 8px;
+            padding: 16px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+            text-align: center;
+        }
+        .stat-card .label {
+            font-size: 13px;
+            color: #7f8c8d;
+            margin-bottom: 8px;
+        }
+        .stat-card .value {
+            font-size: 24px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+    </style>
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main">
+        <h2 style="margin-bottom: 20px; font-size: 20px; color: #2c3e50;">📋 管理日志</h2>
+        
+        <!-- 统计卡片 -->
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="label">总记录数</div>
+                <div class="value" id="totalCount">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">登录成功</div>
+                <div class="value" id="loginSuccessCount" style="color: #28a745;">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">登录失败</div>
+                <div class="value" id="loginFailCount" style="color: #dc3545;">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">API 调用</div>
+                <div class="value" id="apiCallCount" style="color: #007bff;">-</div>
+            </div>
+        </div>
+        
+        <!-- 筛选栏 -->
+        <div class="filter-bar">
+            <select id="loadLimit" onchange="loadLogs()">
+                <option value="500">加载 500 条</option>
+                <option value="1000" selected>加载 1000 条</option>
+                <option value="2000">加载 2000 条</option>
+                <option value="5000">加载 5000 条</option>
+            </select>
+            <select id="filterAction" onchange="applyFilters()">
+                <option value="">所有操作</option>
+                <option value="login_success">登录成功</option>
+                <option value="login_fail">登录失败</option>
+                <option value="logout">登出</option>
+                <option value="api_call">API调用</option>
+                <option value="page_view">页面访问</option>
+                <option value="captcha">验证码</option>
+                <option value="unauthorized">未授权</option>
+                <option value="forbidden">禁止访问</option>
+            </select>
+            <select id="filterStatus" onchange="applyFilters()">
+                <option value="">所有状态</option>
+                <option value="2xx">2xx 成功</option>
+                <option value="3xx">3xx 重定向</option>
+                <option value="4xx">4xx 客户端错误</option>
+                <option value="5xx">5xx 服务器错误</option>
+            </select>
+            <input type="text" id="filterIP" placeholder="筛选IP地址" oninput="applyFilters()" style="width: 150px;">
+            <input type="text" id="filterPath" placeholder="筛选路径" oninput="applyFilters()" style="width: 200px;">
+            <button class="btn btn-primary" onclick="loadLogs()" style="padding: 8px 16px; background: #409eff; color: white; border: none; border-radius: 4px; cursor: pointer;">刷新</button>
+            <button class="btn" onclick="exportLogs()" style="padding: 8px 16px; background: #67c23a; color: white; border: none; border-radius: 4px; cursor: pointer;">导出</button>
+        </div>
+        
+        <!-- 日志表格 -->
+        <table class="log-table">
+            <thead>
+                <tr>
+                    <th style="width: 150px;">时间</th>
+                    <th style="width: 120px;">客户端IP</th>
+                    <th style="width: 70px;">方法</th>
+                    <th>路径</th>
+                    <th style="width: 70px;">状态码</th>
+                    <th style="width: 100px;">操作类型</th>
+                    <th style="width: 80px;">耗时</th>
+                </tr>
+            </thead>
+            <tbody id="logBody">
+                <tr><td colspan="7" class="empty-message">加载中...</td></tr>
+            </tbody>
+        </table>
+        
+        <!-- 分页 -->
+        <div class="pagination" id="pagination" style="display:none;">
+            <div class="pagination-info">
+                <span id="pageInfo">第1 页 / 第1 页</span>
+                <select class="page-size-select" id="pageSize" onchange="changePageSize()">
+                    <option value="20">20 条</option>
+                    <option value="50" selected>50 条</option>
+                    <option value="100">100 条</option>
+                    <option value="200">200 条</option>
+                </select>
+            </div>
+            <div class="pagination-btns">
+                <button class="pagination-btn" id="prevBtn" onclick="prevPage()">上一页</button>
+                <button class="pagination-btn" id="nextBtn" onclick="nextPage()">下一页</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        (function() {
+            var allLogs = [];
+            var filteredLogs = [];
+            var currentPage = 1;
+            var pageSize = 50;
+            
+            function escapeHtml(text) {
+                if (text == null) return '';
+                var div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+            
+            window.loadLogs = function() {
+                var limit = document.getElementById('loadLimit').value;
+                fetch('/api/adminlog/list?limit=' + limit)
+                    .then(r => r.json())
+                    .then(data => {
+                        allLogs = data || [];
+                        applyFilters();
+                        updateStats();
+                    })
+                    .catch(err => {
+                        console.error('加载日志失败:', err);
+                        document.getElementById('logBody').innerHTML = '<tr><td colspan="7" class="empty-message">加载失败</td></tr>';
+                    });
+            }
+            
+            function applyFilters() {
+                var actionFilter = document.getElementById('filterAction').value;
+                var statusFilter = document.getElementById('filterStatus').value;
+                var ipFilter = document.getElementById('filterIP').value.toLowerCase().trim();
+                var pathFilter = document.getElementById('filterPath').value.toLowerCase().trim();
+                
+                filteredLogs = allLogs.filter(function(log) {
+                    if (actionFilter && log.action !== actionFilter) return false;
+                    
+                    if (statusFilter) {
+                        var status = log.status;
+                        if (statusFilter === '2xx' && (status < 200 || status >= 300)) return false;
+                        if (statusFilter === '3xx' && (status < 300 || status >= 400)) return false;
+                        if (statusFilter === '4xx' && (status < 400 || status >= 500)) return false;
+                        if (statusFilter === '5xx' && status < 500) return false;
+                    }
+                    
+                    if (ipFilter && log.client_ip && log.client_ip.toLowerCase().indexOf(ipFilter) === -1) return false;
+                    if (pathFilter && log.path && log.path.toLowerCase().indexOf(pathFilter) === -1) return false;
+                    
+                    return true;
+                });
+                
+                currentPage = 1;
+                renderLogs();
+            }
+            
+            function updateStats() {
+                document.getElementById('totalCount').textContent = allLogs.length;
+                
+                var loginSuccess = allLogs.filter(function(l) { return l.action === 'login_success'; }).length;
+                var loginFail = allLogs.filter(function(l) { return l.action === 'login_fail'; }).length;
+                var apiCall = allLogs.filter(function(l) { return l.action === 'api_call'; }).length;
+                
+                document.getElementById('loginSuccessCount').textContent = loginSuccess;
+                document.getElementById('loginFailCount').textContent = loginFail;
+                document.getElementById('apiCallCount').textContent = apiCall;
+            }
+            
+            function renderLogs() {
+                var tbody = document.getElementById('logBody');
+                var pagination = document.getElementById('pagination');
+                
+                if (!filteredLogs || filteredLogs.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="empty-message">暂无日志记录</td></tr>';
+                    pagination.style.display = 'none';
+                    return;
+                }
+                
+                var totalPages = Math.ceil(filteredLogs.length / pageSize);
+                if (currentPage > totalPages) currentPage = totalPages;
+                if (currentPage < 1) currentPage = 1;
+                
+                var start = (currentPage - 1) * pageSize;
+                var end = Math.min(start + pageSize, filteredLogs.length);
+                var pageData = filteredLogs.slice(start, end);
+                
+                tbody.innerHTML = '';
+                pageData.forEach(function(log) {
+                    var tr = document.createElement('tr');
+                    
+                    var statusClass = 'success';
+                    if (log.status >= 300 && log.status < 400) statusClass = 'redirect';
+                    else if (log.status >= 400 && log.status < 500) statusClass = 'client-error';
+                    else if (log.status >= 500) statusClass = 'server-error';
+                    
+                    var actionText = log.action || '-';
+                    var actionClass = log.action || '';
+                    
+                    tr.innerHTML = 
+                        '<td style="color:#7f8c8d;">' + escapeHtml(log.timestamp) + '</td>' +
+                        '<td style="color:#e74c3c;font-weight:500;">' + escapeHtml(log.client_ip) + '</td>' +
+                        '<td><span style="background:#f0f0f0;padding:2px 6px;border-radius:3px;font-size:11px;">' + escapeHtml(log.method) + '</span></td>' +
+                        '<td style="color:#2c3e50;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(log.path) + '">' + escapeHtml(log.path) + '</td>' +
+                        '<td><span class="status-badge ' + statusClass + '">' + log.status + '</span></td>' +
+                        '<td><span class="action-badge ' + actionClass + '">' + escapeHtml(actionText) + '</span></td>' +
+                        '<td style="color:#95a5a6;">' + (log.latency_ms || 0) + 'ms</td>';
+                    
+                    tbody.appendChild(tr);
+                });
+                
+                document.getElementById('pageInfo').textContent = '第' + currentPage + ' 页 / 第' + totalPages + ' 页（共' + filteredLogs.length + ' 条）';
+                document.getElementById('prevBtn').disabled = currentPage <= 1;
+                document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+                pagination.style.display = 'flex';
+            }
+            
+            window.prevPage = function() {
+                if (currentPage > 1) {
+                    currentPage--;
+                    renderLogs();
+                }
+            };
+            
+            window.nextPage = function() {
+                var totalPages = Math.ceil(filteredLogs.length / pageSize);
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    renderLogs();
+                }
+            };
+            
+            window.changePageSize = function() {
+                pageSize = parseInt(document.getElementById('pageSize').value);
+                currentPage = 1;
+                renderLogs();
+            };
+            
+            window.exportLogs = function() {
+                var dataStr = JSON.stringify(filteredLogs, null, 2);
+                var blob = new Blob([dataStr], { type: 'application/json' });
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = 'admin_logs_' + new Date().toISOString().slice(0, 10) + '.json';
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+            
+            // 初始加载
+            loadLogs();
+            
+            // 每30秒自动刷新
+            setInterval(loadLogs, 30000);
+        })();
+    </script>
+</body>
+</html>
+{{end}}

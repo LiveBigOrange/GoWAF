@@ -1,0 +1,10 @@
+body {
+    font-family: 'Segoe UI', Roboto, sans-serif;
+    margin: 40px;
+    background-color: #fff;
+    color: #333;
+}
+h1 { color: #2c3e50; }
+a { color: #3498db; text-decoration: none; }
+a:hover { text-decoration: underline; }
+button, input { font-family: inherit; }

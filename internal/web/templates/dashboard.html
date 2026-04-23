@@ -1,0 +1,890 @@
+{{define "dashboard"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>仪表盘 - GoWAF</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <style>
+        .status-bar {
+            background: white;
+            border-radius: 12px;
+            padding: 16px 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+            display: flex;
+            gap: 40px;
+            font-size: 14px;
+            flex-wrap: wrap;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+        .stat-card {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+        }
+        .stat-card h3 {
+            font-size: 14px;
+            color: #7f8c8d;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+        .stat-card .value {
+            font-size: 32px;
+            font-weight: 300;
+            color: #2c3e50;
+        }
+        .events-panel {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+        }
+        .events-panel h2 {
+            font-size: 16px;
+            color: #2c3e50;
+            font-weight: 500;
+        }
+        .event-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .event-item {
+            padding: 10px 0;
+            border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 14px;
+        }
+        .event-item:last-child {
+            border-bottom: none;
+        }
+        .event-time {
+            color: #95a5a6;
+            font-size: 12px;
+            min-width: 70px;
+        }
+        .event-ip {
+            color: #e74c3c;
+            font-weight: 500;
+            min-width: 120px;
+        }
+        .event-path {
+            color: #2c3e50;
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .event-rule {
+            color: #7f8c8d;
+            font-size: 12px;
+        }
+        .empty-message {
+            color: #95a5a6;
+            text-align: center;
+            padding: 20px;
+            font-size: 14px;
+        }
+        .time-btn {
+            padding: 6px 12px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+        .time-btn:hover {
+            background: #f5f5f5;
+        }
+        .time-btn.active {
+            background: #1abc9c;
+            color: white;
+            border-color: #1abc9c;
+        }
+        .tab-btn {
+            padding: 8px 16px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 14px;
+            color: #7f8c8d;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .tab-btn:hover {
+            color: #2c3e50;
+        }
+        .tab-btn.active {
+            color: #1abc9c;
+            border-bottom-color: #1abc9c;
+        }
+    </style>
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main">
+        <!-- 系统状态栏 -->
+        <div class="status-bar" id="statusBar" style="gap: 15px; padding: 12px 20px;">
+            <div style="min-width: 120px; text-align: center;"><span style="color: #7f8c8d; font-size: 13px;">代理端口</span><br><strong id="proxyPorts" style="font-size: 16px;">-</strong></div>
+            <div style="min-width: 120px; text-align: center;"><span style="color: #7f8c8d; font-size: 13px;">域名配置</span><br><strong id="domainCount" style="font-size: 16px;">-</strong></div>
+            <div style="min-width: 120px; text-align: center;"><span style="color: #7f8c8d; font-size: 13px;">管理后台</span><br><strong id="adminAddr" style="font-size: 16px;">-</strong></div>
+            <div style="min-width: 120px; text-align: center;"><span style="color: #7f8c8d; font-size: 13px;">后端服务</span><br><strong id="backendAddr" style="font-size: 16px;">-</strong></div>
+            <div style="min-width: 120px; text-align: center;"><span style="color: #7f8c8d; font-size: 13px;">证书数量</span><br><strong id="certCount" style="font-size: 16px;">-</strong></div>
+            <div style="min-width: 120px; text-align: center;"><span style="color: #7f8c8d; font-size: 13px;">限流状态</span><br><strong id="rateLimitStatus" style="font-size: 16px;">-</strong></div>
+            <div style="min-width: 120px; text-align: center;"><span style="color: #7f8c8d; font-size: 13px;">SQL注入</span><br><strong id="sqlInjectionStatus" style="font-size: 16px;">-</strong></div>
+            <div style="min-width: 120px; text-align: center;"><span style="color: #7f8c8d; font-size: 13px;">XSS检测</span><br><strong id="xssStatus" style="font-size: 16px;">-</strong></div>
+            <div style="min-width: 120px; text-align: center;"><span style="color: #7f8c8d; font-size: 13px;">命令注入</span><br><strong id="cmdInjectionStatus" style="font-size: 16px;">-</strong></div>
+        </div>
+        
+        <!-- 核心指标卡片 -->
+        <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:15px;margin-bottom:20px;">
+            <div class="stat-card" style="padding:15px; text-align: center;">
+                <h3 style="font-size:13px;margin-bottom:6px;color:#7f8c8d;">总请求数</h3>
+                <div class="value" id="total" style="font-size:22px;">-</div>
+            </div>
+            <div class="stat-card" style="padding:15px; text-align: center;">
+                <h3 style="font-size:13px;margin-bottom:6px;color:#7f8c8d;">拦截数</h3>
+                <div class="value" id="blocked" style="font-size:22px;">-</div>
+            </div>
+            <div class="stat-card" style="padding:15px; text-align: center;">
+                <h3 style="font-size:13px;margin-bottom:6px;color:#7f8c8d;">当前 QPS</h3>
+                <div class="value" id="qps" style="font-size:22px;">-</div>
+            </div>
+            <div class="stat-card" style="padding:15px; text-align: center;">
+                <h3 style="font-size:13px;margin-bottom:6px;color:#7f8c8d;">CPU 使用率</h3>
+                <div style="font-size:22px;font-weight:300;color:#2c3e50;" id="cpuUsage">-</div>
+            </div>
+            <div class="stat-card" style="padding:15px; text-align: center;">
+                <h3 style="font-size:13px;margin-bottom:6px;color:#7f8c8d;">内存使用</h3>
+                <div style="font-size:22px;font-weight:300;color:#2c3e50;" id="memUsage">-</div>
+                <div style="font-size:11px;color:#95a5a6;margin-top:2px;" id="memPercent">-</div>
+            </div>
+            <div class="stat-card" style="padding:15px; text-align: center;">
+                <h3 style="font-size:13px;margin-bottom:6px;color:#7f8c8d;">磁盘使用</h3>
+                <div style="font-size:22px;font-weight:300;color:#2c3e50;" id="diskUsage">-</div>
+                <div style="font-size:11px;color:#95a5a6;margin-top:2px;" id="diskPercent">-</div>
+            </div>
+            <div class="stat-card" style="padding:15px; text-align: center;">
+                <h3 style="font-size:13px;margin-bottom:6px;color:#7f8c8d;">Goroutines</h3>
+                <div style="font-size:22px;font-weight:300;color:#2c3e50;" id="goroutines">-</div>
+            </div>
+            <div class="stat-card" style="padding:15px; text-align: center;">
+                <h3 style="font-size:13px;margin-bottom:6px;color:#7f8c8d;">运行时长</h3>
+                <div style="font-size:16px;font-weight:300;color:#2c3e50;" id="uptime">-</div>
+            </div>
+        </div>
+        
+        <!-- 趋势图区域 -->
+        <div class="events-panel" style="margin-bottom:20px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h2 style="margin:0;font-size:16px;">📈 数据趋势</h2>
+                <div style="display:flex;gap:8px;">
+                    <button class="time-btn active" data-range="realtime">实时</button>
+                    <button class="time-btn" data-range="1h">最近1小时</button>
+                    <button class="time-btn" data-range="6h">最近6小时</button>
+                    <button class="time-btn" data-range="24h">最近24小时</button>
+                    <button class="time-btn" data-range="7d">最近7天</button>
+                </div>
+            </div>
+            <div style="display:flex;gap:4px;margin-bottom:12px;border-bottom:2px solid #eee;padding-bottom:8px;">
+                <button class="tab-btn active" data-tab="requests">📊 请求量</button>
+                <button class="tab-btn" data-tab="qps">⚡ QPS & 延迟</button>
+                <button class="tab-btn" data-tab="traffic">🌐 网络流量</button>
+            </div>
+            <div id="chartContainer" style="height:280px;position:relative;">
+                <canvas id="trendChart"></canvas>
+            </div>
+        </div>
+        
+        <!-- TOP数据面板 -->
+        <!-- TOP统计和最近拦截事件 -->
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-bottom:20px;">
+            <div class="events-panel" style="padding:15px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #eee;">
+                    <h2 style="margin:0;font-size:15px;font-weight:600;color:#2c3e50;">🚫 TOP 5 被拦截 IP</h2>
+                    <a href="/intercepts?type=ip" style="color:#3498db;text-decoration:none;font-size:12px;padding:4px 8px;background:#ecf0f1;border-radius:4px;">查看更多</a>
+                </div>
+                <ul class="event-list" id="topIPs">
+                    <li class="empty-message">加载中...</li>
+                </ul>
+            </div>
+            <div class="events-panel" style="padding:15px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #eee;">
+                    <h2 style="margin:0;font-size:15px;font-weight:600;color:#2c3e50;">🎯 TOP 5 被攻击路径</h2>
+                    <a href="/intercepts?type=path" style="color:#3498db;text-decoration:none;font-size:12px;padding:4px 8px;background:#ecf0f1;border-radius:4px;">查看更多</a>
+                </div>
+                <ul class="event-list" id="topPaths">
+                    <li class="empty-message">加载中...</li>
+                </ul>
+            </div>
+            <div class="events-panel" style="padding:15px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #eee;">
+                    <h2 style="margin:0;font-size:15px;font-weight:600;color:#2c3e50;">📊 规则命中分布</h2>
+                    <a href="/intercepts?type=rule" style="color:#3498db;text-decoration:none;font-size:12px;padding:4px 8px;background:#ecf0f1;border-radius:4px;">查看更多</a>
+                </div>
+                <ul class="event-list" id="ruleHits">
+                    <li class="empty-message">加载中...</li>
+                </ul>
+            </div>
+        </div>
+        <!-- 最近拦截事件单独一行，更宽 -->
+        <div style="margin-bottom:20px;">
+            <div class="events-panel" style="padding:15px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #eee;">
+                    <h2 style="margin:0;font-size:15px;font-weight:600;color:#2c3e50;">⚡ 最近拦截事件</h2>
+                    <a href="/intercepts" style="color:#3498db;text-decoration:none;font-size:12px;padding:4px 8px;background:#ecf0f1;border-radius:4px;">查看更多</a>
+                </div>
+                <ul class="event-list" id="events">
+                    <li class="empty-message">加载中...</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script>
+        (function() {
+            var requestFailCount = 0;
+            var maxFailCount = 5;
+            var requestStopped = false;
+            var intervals = [];
+            var trendChart = null;
+            var currentRange = 'realtime';
+            var currentTab = 'requests';
+            var autoRefreshInterval = null;
+
+            function fetchWithErrorCount(url, options) {
+                if (requestStopped) return Promise.reject(new Error('请求已停止'));
+                return fetch(url, options)
+                    .then(response => {
+                        if (!response.ok) throw new Error('HTTP error ' + response.status);
+                        requestFailCount = 0;
+                        return response;
+                    })
+                    .catch(error => {
+                        requestFailCount++;
+                        if (requestFailCount >= maxFailCount && !requestStopped) {
+                            requestStopped = true;
+                            console.error('连续失败 ' + maxFailCount + ' 次，已停止自动刷新');
+                            intervals.forEach(id => clearInterval(id));
+                            intervals = [];
+                            showConnectionLostMessage();
+                        }
+                        throw error;
+                    });
+            }
+
+            function showConnectionLostMessage() {
+                var alertDiv = document.createElement('div');
+                alertDiv.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#e74c3c;color:white;padding:12px 24px;border-radius:8px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.15);';
+                alertDiv.innerHTML = '⚠️ 与服务器连接中断，请刷新页面重试';
+                document.body.appendChild(alertDiv);
+            }
+
+            function fetchConfig() {
+                fetchWithErrorCount('/api/proxy/list').then(r => r.json()).then(d => {
+                    if (d && d.length > 0) {
+                        var enabledProxies = d.filter(p => p.enabled);
+                        if (enabledProxies.length > 0) {
+                            document.getElementById('proxyPorts').innerText = enabledProxies.map(p => p.listen_addr + '(' + p.protocol.toUpperCase() + ')').join(', ');
+                        } else {
+                            document.getElementById('proxyPorts').innerText = '未启用';
+                        }
+                    } else {
+                        document.getElementById('proxyPorts').innerText = '未配置';
+                    }
+                }).catch(e => {});
+                
+                fetchWithErrorCount('/api/domain/list').then(r => r.json()).then(d => {
+                    if (d && d.length > 0) {
+                        var enabledDomains = d.filter(dom => dom.enabled);
+                        document.getElementById('domainCount').innerText = enabledDomains.length + ' 个域名';
+                    } else {
+                        document.getElementById('domainCount').innerText = '未配置';
+                    }
+                }).catch(e => {});
+                
+                fetchWithErrorCount('/api/cert/list').then(r => r.json()).then(d => {
+                    if (d && d.length > 0) {
+                        document.getElementById('certCount').innerText = d.length + ' 个证书';
+                    } else {
+                        document.getElementById('certCount').innerText = '未配置';
+                    }
+                }).catch(e => {});
+                
+                fetchWithErrorCount('/api/config').then(r => r.json()).then(d => {
+                    document.getElementById('adminAddr').innerText = d.admin_addr || '未配置';
+                    var rateLimitEl = document.getElementById('rateLimitStatus');
+                    if (d.rate_limit_enabled) {
+                        rateLimitEl.innerHTML = '✅ 已开启';
+                        rateLimitEl.style.color = '#27ae60';
+                    } else {
+                        rateLimitEl.innerHTML = '❌ 已关闭';
+                        rateLimitEl.style.color = '#e74c3c';
+                    }
+                }).catch(e => {});
+                
+                fetchWithErrorCount('/api/backend/list').then(r => r.json()).then(d => {
+                    if (d && d.length > 0) {
+                        var healthyCount = d.filter(b => b.healthy).length;
+                        document.getElementById('backendAddr').innerText = healthyCount + '/' + d.length + ' 健康';
+                    } else {
+                        document.getElementById('backendAddr').innerText = '未配置';
+                    }
+                }).catch(e => {});
+            }
+
+            function fetchStats() {
+                fetchWithErrorCount('/api/stats').then(r => r.json()).then(d => {
+                    document.getElementById('total').innerText = d.total || 0;
+                    document.getElementById('blocked').innerText = d.blocked || 0;
+                    document.getElementById('qps').innerText = d.qps || 0;
+                }).catch(e => {});
+            }
+
+            function fetchEvents() {
+                fetchWithErrorCount('/api/events').then(r => r.json()).then(d => {
+                    var ul = document.getElementById('events');
+                    if (!d || d.length === 0) {
+                        ul.innerHTML = '<li class="empty-message">暂无拦截事件</li>';
+                        return;
+                    }
+                    var showEvents = d.slice(0, 5);
+                    ul.innerHTML = '';
+                    showEvents.forEach(e => {
+                        var li = document.createElement('li');
+                        li.className = 'event-item';
+                        var timeStr = e.time || '';
+                        if (timeStr.length > 19) timeStr = timeStr.substring(0, 19);
+                        li.innerHTML = '<span class="event-time">' + timeStr + '</span>' +
+                            '<span class="event-ip">' + (e.client_ip || '-') + '</span>' +
+                            '<span class="event-path">' + (e.path || '-') + '</span>' +
+                            '<span class="event-rule">' + (e.rule || '-') + '</span>';
+                        ul.appendChild(li);
+                    });
+                }).catch(e => {});
+            }
+
+            function fetchTopIPs() {
+                fetchWithErrorCount('/api/top/ips').then(r => r.json()).then(d => {
+                    var ul = document.getElementById('topIPs');
+                    if (!d || d.length === 0) {
+                        ul.innerHTML = '<li class="empty-message">暂无数据</li>';
+                        return;
+                    }
+                    ul.innerHTML = '';
+                    d.slice(0, 5).forEach((item, idx) => {
+                        var li = document.createElement('li');
+                        li.className = 'event-item';
+                        li.innerHTML = '<span style="color:#95a5a6;width:30px;">#' + (idx + 1) + '</span>' +
+                            '<span class="event-ip">' + item.name + '</span>' +
+                            '<span style="margin-left:auto;color:#e74c3c;font-weight:500;">' + item.count + ' 次</span>';
+                        ul.appendChild(li);
+                    });
+                }).catch(e => {});
+            }
+
+            function fetchTopPaths() {
+                fetchWithErrorCount('/api/top/paths').then(r => r.json()).then(d => {
+                    var ul = document.getElementById('topPaths');
+                    if (!d || d.length === 0) {
+                        ul.innerHTML = '<li class="empty-message">暂无数据</li>';
+                        return;
+                    }
+                    ul.innerHTML = '';
+                    d.slice(0, 5).forEach((item, idx) => {
+                        var li = document.createElement('li');
+                        li.className = 'event-item';
+                        li.innerHTML = '<span style="color:#95a5a6;width:30px;">#' + (idx + 1) + '</span>' +
+                            '<span class="event-path">' + item.name + '</span>' +
+                            '<span style="margin-left:auto;color:#e74c3c;font-weight:500;">' + item.count + ' 次</span>';
+                        ul.appendChild(li);
+                    });
+                }).catch(e => {});
+            }
+
+            function fetchRuleHits() {
+                fetchWithErrorCount('/api/rule-hits').then(r => r.json()).then(d => {
+                    var ul = document.getElementById('ruleHits');
+                    if (!d || d.length === 0) {
+                        ul.innerHTML = '<li class="empty-message">暂无数据</li>';
+                        return;
+                    }
+                    ul.innerHTML = '';
+                    d.forEach(item => {
+                        var li = document.createElement('li');
+                        li.className = 'event-item';
+                        li.innerHTML = '<span class="event-rule" style="min-width:100px;">' + item.name + '</span>' +
+                            '<span style="margin-left:auto;color:#e74c3c;font-weight:500;">' + item.count + ' 次</span>';
+                        ul.appendChild(li);
+                    });
+                }).catch(e => {});
+            }
+
+            // 运行时长相关变量
+            var startTime = null;
+            var uptimeInterval = null;
+
+            function fetchSystem() {
+                fetchWithErrorCount('/api/system').then(r => r.json()).then(d => {
+                    document.getElementById('cpuUsage').innerText = d.cpu_usage.toFixed(1) + '%';
+                    var memMB = (d.mem_used / 1024 / 1024).toFixed(1);
+                    var totalMB = (d.mem_total / 1024 / 1024).toFixed(1);
+                    document.getElementById('memUsage').innerText = memMB + ' MB';
+                    document.getElementById('memPercent').innerText = d.mem_percent.toFixed(1) + '% / ' + totalMB + ' MB';
+                    document.getElementById('goroutines').innerText = d.goroutines;
+                    // 磁盘使用率
+                    var diskGB = (d.disk_used / 1024 / 1024 / 1024).toFixed(1);
+                    var diskTotalGB = (d.disk_total / 1024 / 1024 / 1024).toFixed(1);
+                    document.getElementById('diskUsage').innerText = diskGB + ' GB';
+                    document.getElementById('diskPercent').innerText = d.disk_percent.toFixed(1) + '% / ' + diskTotalGB + ' GB';
+                    
+                    // 记录启动时间，用于每秒更新运行时长
+                    if (!startTime && d.uptime) {
+                        startTime = Date.now() - (d.uptime * 1000);
+                        // 启动每秒更新运行时长的定时器
+                        if (uptimeInterval) clearInterval(uptimeInterval);
+                        uptimeInterval = setInterval(updateUptime, 1000);
+                    }
+                    updateUptime();
+                }).catch(e => {});
+            }
+
+            // 更新运行时长显示
+            function updateUptime() {
+                if (!startTime) return;
+                var elapsed = Math.floor((Date.now() - startTime) / 1000);
+                var hours = Math.floor(elapsed / 3600);
+                var mins = Math.floor((elapsed % 3600) / 60);
+                var secs = elapsed % 60;
+                var uptimeEl = document.getElementById('uptime');
+                if (uptimeEl) {
+                    uptimeEl.innerText = hours + 'h ' + mins + 'm ' + secs + 's';
+                }
+            }
+
+            function fetchDetectorStatus() {
+                fetchWithErrorCount('/api/detector/list').then(r => r.json()).then(data => {
+                    if (!data || data.length === 0) return;
+                    data.forEach(detector => {
+                        var statusEl = null;
+                        var statusText = detector.enabled ? '✅ 已启用' : '❌ 已禁用';
+                        var statusColor = detector.enabled ? '#27ae60' : '#e74c3c';
+                        switch(detector.detector_type) {
+                            case 'sql_injection': statusEl = document.getElementById('sqlInjectionStatus'); break;
+                            case 'xss': statusEl = document.getElementById('xssStatus'); break;
+                            case 'command_injection': statusEl = document.getElementById('cmdInjectionStatus'); break;
+                        }
+                        if (statusEl) {
+                            statusEl.innerHTML = statusText;
+                            statusEl.style.color = statusColor;
+                        }
+                    });
+                }).catch(e => {});
+            }
+
+            function initCharts() {
+                var ctx = document.getElementById('trendChart').getContext('2d');
+                trendChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [
+                            { label: '总请求', data: [], borderColor: '#3498db', backgroundColor: 'rgba(52, 152, 219, 0.1)', fill: true, tension: 0.4, pointRadius: 2 },
+                            { label: '拦截', data: [], borderColor: '#e74c3c', backgroundColor: 'rgba(231, 76, 60, 0.1)', fill: true, tension: 0.4, pointRadius: 2 }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { position: 'top' } },
+                        scales: { x: { grid: { display: false } }, y: { beginAtZero: true } }
+                    }
+                });
+            }
+
+            function updateChartConfig(tab) {
+                if (!trendChart) return;
+                switch(tab) {
+                    case 'requests':
+                        trendChart.data.datasets[0].label = '总请求'; trendChart.data.datasets[0].borderColor = '#3498db';
+                        trendChart.data.datasets[1].label = '拦截'; trendChart.data.datasets[1].borderColor = '#e74c3c';
+                        break;
+                    case 'qps':
+                        trendChart.data.datasets[0].label = 'QPS'; trendChart.data.datasets[0].borderColor = '#27ae60';
+                        trendChart.data.datasets[1].label = '延迟(ms)'; trendChart.data.datasets[1].borderColor = '#f39c12';
+                        break;
+                    case 'traffic':
+                        trendChart.data.datasets[0].label = '入站(KB)'; trendChart.data.datasets[0].borderColor = '#9b59b6';
+                        trendChart.data.datasets[1].label = '出站(KB)'; trendChart.data.datasets[1].borderColor = '#1abc9c';
+                        break;
+                }
+                trendChart.update('none');
+            }
+
+            function loadTrendData(range) {
+                var now = new Date();
+                var startTime = new Date();
+                var useMinuteData = (range === 'realtime' || range === '1h' || range === '6h');
+                switch(range) {
+                    case 'realtime': startTime.setMinutes(startTime.getMinutes() - 15); break;
+                    case '1h': startTime.setHours(startTime.getHours() - 1); break;
+                    case '6h': startTime.setHours(startTime.getHours() - 6); break;
+                    case '24h': startTime.setHours(startTime.getHours() - 24); break;
+                    case '7d': startTime.setDate(startTime.getDate() - 7); break;
+                }
+                var params = new URLSearchParams({ start: startTime.toISOString(), end: now.toISOString() });
+                var apiEndpoint = useMinuteData ? '/api/metrics/minute?' : '/api/metrics/hourly?';
+                fetchWithErrorCount(apiEndpoint + params)
+                    .then(r => r.json())
+                    .then(data => {
+                        if (!data || data.length === 0) {
+                            trendChart.data.labels = [];
+                            trendChart.data.datasets.forEach(ds => ds.data = []);
+                            trendChart.update('none');
+                            return;
+                        }
+                        var timeField = useMinuteData ? 'time_minute' : 'time_hour';
+                        var filledData = fillMissingTimePoints(data, startTime, now, range, timeField);
+                        var maxPoints = (range === '6h') ? 120 : 180;
+                        filledData = downsampleData(filledData, maxPoints);
+                        var labels = filledData.map(d => {
+                            var t = new Date(d.time);
+                            if (range === 'realtime' || range === '1h' || range === '6h')
+                                return t.getHours() + ':' + String(t.getMinutes()).padStart(2, '0');
+                            else
+                                return (t.getMonth()+1) + '/' + t.getDate() + ' ' + t.getHours() + ':00';
+                        });
+                        trendChart.data.labels = labels;
+                        switch(currentTab) {
+                            case 'requests':
+                                trendChart.data.datasets[0].data = filledData.map(d => d.total_requests);
+                                trendChart.data.datasets[1].data = filledData.map(d => d.blocked_requests);
+                                break;
+                            case 'qps':
+                                trendChart.data.datasets[0].data = filledData.map(d => d.avg_qps.toFixed(2));
+                                trendChart.data.datasets[1].data = filledData.map(d => d.avg_latency_ms.toFixed(2));
+                                break;
+                            case 'traffic':
+                                trendChart.data.datasets[0].data = filledData.map(d => (d.inbound_bytes / 1024).toFixed(2));
+                                trendChart.data.datasets[1].data = filledData.map(d => (d.outbound_bytes / 1024).toFixed(2));
+                                break;
+                        }
+                        trendChart.update('none');
+                    })
+                    .catch(e => {});
+            }
+
+            function fillMissingTimePoints(data, startTime, endTime, range, timeField) {
+                if (!data || data.length === 0) return [];
+                var useMinuteData = (range === 'realtime' || range === '1h' || range === '6h');
+                var interval = useMinuteData ? 60000 : 3600000;
+                var dataMap = {};
+                data.forEach(d => { dataMap[new Date(d[timeField]).getTime()] = d; });
+                var result = [];
+                var start = new Date(startTime).getTime();
+                var end = new Date(endTime).getTime();
+                start = Math.floor(start / interval) * interval;
+                for (var t = start; t <= end; t += interval) {
+                    if (dataMap[t]) {
+                        var d = dataMap[t];
+                        result.push({ time: new Date(t), total_requests: d.total_requests, blocked_requests: d.blocked_requests, avg_qps: d.avg_qps, avg_latency_ms: d.avg_latency_ms, inbound_bytes: d.inbound_bytes || 0, outbound_bytes: d.outbound_bytes || 0 });
+                    } else {
+                        result.push({ time: new Date(t), total_requests: 0, blocked_requests: 0, avg_qps: 0, avg_latency_ms: 0, inbound_bytes: 0, outbound_bytes: 0 });
+                    }
+                }
+                return result;
+            }
+
+            function downsampleData(data, maxPoints) {
+                if (!data || data.length <= maxPoints) return data;
+                var interval = Math.ceil(data.length / maxPoints);
+                var result = [];
+                for (var i = 0; i < data.length; i += interval) {
+                    result.push(data[Math.min(i + interval, data.length) - 1]);
+                }
+                if (result[result.length - 1].time !== data[data.length - 1].time)
+                    result.push(data[data.length - 1]);
+                return result;
+            }
+
+            function setupTimeButtons() {
+                document.querySelectorAll('.time-btn').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        currentRange = btn.dataset.range;
+                        loadTrendData(currentRange);
+                        startAutoRefresh();
+                    });
+                });
+            }
+
+            function setupTabButtons() {
+                document.querySelectorAll('.tab-btn').forEach(tab => {
+                    tab.addEventListener('click', function() {
+                        document.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('active'));
+                        tab.classList.add('active');
+                        currentTab = tab.dataset.tab;
+                        updateChartConfig(currentTab);
+                        loadTrendData(currentRange);
+                    });
+                });
+            }
+
+            function startAutoRefresh() {
+                if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+                var interval = currentRange === 'realtime' ? 5000 : 10000;
+                autoRefreshInterval = setInterval(() => loadTrendData(currentRange), interval);
+            }
+
+            // WebSocket 连接（优先使用 WebSocket，避免 429）
+            var dashboardWS = null;
+            var useWebSocket = true;
+            var wsReconnectTimer = null;
+
+            function connectDashboardWS() {
+                var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                var wsUrl = protocol + '//' + window.location.host + '/ws/dashboard';
+                
+                try {
+                    dashboardWS = new WebSocket(wsUrl);
+                    
+                    dashboardWS.onopen = function() {
+                        console.log('仪表盘 WebSocket 连接成功');
+                        useWebSocket = true;
+                        // 清除 HTTP 轮询定时器
+                        intervals.forEach(function(id) { clearInterval(id); });
+                        intervals = [];
+                    };
+                    
+                    dashboardWS.onmessage = function(event) {
+                        try {
+                            var data = JSON.parse(event.data);
+                            if (data.type === 'dashboard_update') {
+                                // 更新统计数据
+                                if (data.stats) {
+                                    var totalEl = document.getElementById('totalRequests');
+                                    var blockedEl = document.getElementById('blockedRequests');
+                                    var qpsEl = document.getElementById('qps');
+                                    if (totalEl) totalEl.innerText = data.stats.total;
+                                    if (blockedEl) blockedEl.innerText = data.stats.blocked;
+                                    if (qpsEl) qpsEl.innerText = data.stats.qps.toFixed(2);
+                                }
+                                
+                                // 更新系统指标
+                                if (data.system) {
+                                    var d = data.system;
+                                    var cpuEl = document.getElementById('cpuUsage');
+                                    if (cpuEl) cpuEl.innerText = d.cpu_usage.toFixed(1) + '%';
+                                    
+                                    var memEl = document.getElementById('memUsage');
+                                    var memPercentEl = document.getElementById('memPercent');
+                                    if (memEl && memPercentEl) {
+                                        var memMB = (d.mem_used / 1024 / 1024).toFixed(1);
+                                        var totalMB = (d.mem_total / 1024 / 1024).toFixed(1);
+                                        memEl.innerText = memMB + ' MB';
+                                        memPercentEl.innerText = d.mem_percent.toFixed(1) + '% / ' + totalMB + ' MB';
+                                    }
+                                    
+                                    var goroutinesEl = document.getElementById('goroutines');
+                                    if (goroutinesEl) goroutinesEl.innerText = d.goroutines;
+                                    
+                                    var diskEl = document.getElementById('diskUsage');
+                                    var diskPercentEl = document.getElementById('diskPercent');
+                                    if (diskEl && diskPercentEl) {
+                                        var diskGB = (d.disk_used / 1024 / 1024 / 1024).toFixed(1);
+                                        var diskTotalGB = (d.disk_total / 1024 / 1024 / 1024).toFixed(1);
+                                        diskEl.innerText = diskGB + ' GB';
+                                        diskPercentEl.innerText = d.disk_percent.toFixed(1) + '% / ' + diskTotalGB + ' GB';
+                                    }
+                                    
+                                    // 记录启动时间，用于每秒更新运行时长
+                                    if (!startTime && d.uptime) {
+                                        startTime = Date.now() - (d.uptime * 1000);
+                                        // 启动每秒更新运行时长的定时器
+                                        if (uptimeInterval) clearInterval(uptimeInterval);
+                                        uptimeInterval = setInterval(updateUptime, 1000);
+                                    }
+                                    updateUptime();
+                                }
+                                
+                                // 更新拦截事件
+                                if (data.events && data.events.length > 0) {
+                                    var eventList = document.getElementById('recentEvents');
+                                    if (eventList) {
+                                        eventList.innerHTML = '';
+                                        data.events.slice(0, 10).forEach(function(e) {
+                                            var li = document.createElement('li');
+                                            li.innerHTML = '<span class="event-time">' + new Date(e.time).toLocaleTimeString() + '</span>' +
+                                                '<span class="event-ip">' + e.client_ip + '</span>' +
+                                                '<span class="event-path" title="' + e.path + '">' + (e.path.length > 30 ? e.path.substring(0, 30) + '...' : e.path) + '</span>' +
+                                                '<span class="event-rule">' + e.rule + '</span>';
+                                            eventList.appendChild(li);
+                                        });
+                                    }
+                                }
+                                
+                                // 更新 TOP IP
+                                if (data.top_ips && data.top_ips.length > 0) {
+                                    var topIPList = document.getElementById('topIPs');
+                                    if (topIPList) {
+                                        topIPList.innerHTML = '';
+                                        data.top_ips.forEach(function(item) {
+                                            var li = document.createElement('li');
+                                            li.innerHTML = '<span class="event-ip">' + item.name + '</span><span class="event-count">' + item.count + '</span>';
+                                            topIPList.appendChild(li);
+                                        });
+                                    }
+                                }
+                                
+                                // 更新 TOP 路径
+                                if (data.top_paths && data.top_paths.length > 0) {
+                                    var topPathList = document.getElementById('topPaths');
+                                    if (topPathList) {
+                                        topPathList.innerHTML = '';
+                                        data.top_paths.forEach(function(item) {
+                                            var li = document.createElement('li');
+                                            li.innerHTML = '<span class="event-path" title="' + item.name + '">' + (item.name.length > 40 ? item.name.substring(0, 40) + '...' : item.name) + '</span><span class="event-count">' + item.count + '</span>';
+                                            topPathList.appendChild(li);
+                                        });
+                                    }
+                                }
+                                
+                                // 更新规则命中
+                                if (data.rule_hits && data.rule_hits.length > 0) {
+                                    var ruleHitList = document.getElementById('ruleHits');
+                                    if (ruleHitList) {
+                                        ruleHitList.innerHTML = '';
+                                        data.rule_hits.forEach(function(item) {
+                                            var li = document.createElement('li');
+                                            li.innerHTML = '<span class="event-rule">' + item.name + '</span><span class="event-count">' + item.count + '</span>';
+                                            ruleHitList.appendChild(li);
+                                        });
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            console.error('WebSocket 数据解析失败:', e);
+                        }
+                    };
+                    
+                    dashboardWS.onerror = function(error) {
+                        console.error('仪表盘 WebSocket 错误:', error);
+                        useWebSocket = false;
+                        // 降级到 HTTP 轮询
+                        startHTTPPolling();
+                    };
+                    
+                    dashboardWS.onclose = function() {
+                        console.log('仪表盘 WebSocket 连接关闭');
+                        // 尝试重连
+                        if (useWebSocket && !wsReconnectTimer) {
+                            wsReconnectTimer = setTimeout(function() {
+                                wsReconnectTimer = null;
+                                connectDashboardWS();
+                            }, 3000);
+                        }
+                    };
+                } catch (e) {
+                    console.error('WebSocket 连接失败:', e);
+                    useWebSocket = false;
+                    startHTTPPolling();
+                }
+            }
+
+            function startHTTPPolling() {
+                // 降级到 HTTP 轮询
+                intervals.push(setInterval(fetchStats, 2000));
+                intervals.push(setInterval(fetchEvents, 3000));
+                intervals.push(setInterval(fetchTopIPs, 5000));
+                intervals.push(setInterval(fetchTopPaths, 5000));
+                intervals.push(setInterval(fetchRuleHits, 5000));
+                intervals.push(setInterval(fetchSystem, 3000));
+                intervals.push(setInterval(fetchDetectorStatus, 10000));
+            }
+
+            // 初始化 - 延迟加载避免 429
+            setTimeout(function() {
+                fetchConfig();
+                fetchStats();
+                fetchEvents();
+                fetchTopIPs();
+                fetchTopPaths();
+                fetchRuleHits();
+                fetchSystem();
+                fetchDetectorStatus();
+                initCharts();
+                updateChartConfig('requests');
+                setupTimeButtons();
+                setupTabButtons();
+                loadTrendData('realtime');
+                startAutoRefresh();
+
+                // 优先尝试 WebSocket 连接
+                connectDashboardWS();
+                
+                // 趋势图仍然使用 HTTP（数据量大，不适合 WebSocket）
+                intervals.push(setInterval(function() {
+                    loadTrendData(currentRange);
+                }, 10000));
+                
+                // 检测器状态使用 HTTP（很少变化）
+                intervals.push(setInterval(fetchDetectorStatus, 10000));
+            }, 100); // 延迟 100ms 避免页面加载时瞬间并发
+            
+            // 页面可见性优化：用户切换标签页时暂停刷新
+            document.addEventListener('visibilitychange', function() {
+                if (document.hidden) {
+                    // 页面不可见时，清除所有定时器
+                    intervals.forEach(function(id) { clearInterval(id); });
+                    intervals = [];
+                    if (uptimeInterval) {
+                        clearInterval(uptimeInterval);
+                        uptimeInterval = null;
+                    }
+                    if (dashboardWS) {
+                        dashboardWS.close();
+                        dashboardWS = null;
+                    }
+                } else {
+                    // 页面重新可见时，恢复刷新
+                    fetchStats();
+                    fetchEvents();
+                    fetchTopIPs();
+                    fetchTopPaths();
+                    fetchRuleHits();
+                    fetchSystem();
+                    fetchDetectorStatus();
+                    
+                    // 重新连接 WebSocket
+                    connectDashboardWS();
+                    
+                    // 恢复运行时长定时器
+                    if (startTime && !uptimeInterval) {
+                        uptimeInterval = setInterval(updateUptime, 1000);
+                    }
+                    
+                    intervals.push(setInterval(function() {
+                        loadTrendData(currentRange);
+                    }, 10000));
+                    intervals.push(setInterval(fetchDetectorStatus, 10000));
+                }
+            });
+        })();
+    </script>
+</body>
+</html>
+{{end}}

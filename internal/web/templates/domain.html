@@ -1,0 +1,506 @@
+{{define "domain"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>域名管理 - GoWAF</title>
+    
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <style>
+        /* 页面特定样式可以在这里添加 */
+        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .btn-primary { background: #3498db; color: white; }
+        .btn-danger { background: #e74c3c; color: white; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; margin-bottom: 8px; color: #555; font-weight: 500; }
+        .form-group input, .form-group select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
+        .modal.show { display: flex; }
+        .modal-content { background: white; border-radius: 12px; padding: 24px; width: 500px; max-height: 80vh; overflow-y: auto; }
+        .modal-title { font-size: 18px; font-weight: 600; margin-bottom: 20px; }
+        .modal-actions { display: flex; gap: 12px; margin-top: 24px; }
+        .status-badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+        .status-enabled { background: #d4edda; color: #155724; }
+        .status-disabled { background: #f8d7da; color: #721c24; }
+        .tip { font-size: 12px; color: #7f8c8d; margin-top: 4px; }
+        .backend-checkbox { margin: 4px 0; }
+        .backend-checkbox label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+        .backend-checkbox input { width: auto; }
+    </style>
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main">
+        <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+                <h3>域名路由配置</h3>
+                <button class="btn btn-primary" onclick="showAddModal()">+ 添加域名</button>
+            </div>
+            <div style="background:#fff3cd;border:1px solid #ffc107;padding:12px;border-radius:6px;margin-bottom:16px;">
+                <strong>💡 IP访问说明：</strong>
+                <ul style="margin:8px 0 0 20px;padding:0;">
+                    <li>如果通过IP直接访问（如 http://192.168.1.100:80），系统会使用<strong>"default"</strong>域名配置</li>
+                    <li>请添加域名为 <strong>"default"</strong> 的配置，用于处理IP直接访问的请求</li>
+                    <li>如果没有"default"配置，IP访问将使用后端服务列表中的第一个可用后端</li>
+                </ul>
+            </div>
+            <table>
+                <thead><tr><th>域名</th><th>代理端口</th><th>后端服务</th><th>证书</th><th>强制HTTPS</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody id="domainList"></tbody>
+            </table>
+            <div class="pagination" id="pagination" style="display:none;">
+                <div class="pagination-info">
+                    <span id="pageInfo">第1 页 / 第1 页</span>
+                    <select class="page-size-select" id="pageSize" onchange="changePageSize()">
+                        <option value="5">5 条</option>
+                        <option value="10" selected>10 条</option>
+                        <option value="20">20 条</option>
+                        <option value="50">50 条</option>
+                    </select>
+                </div>
+                <div class="pagination-btns">
+                    <button class="pagination-btn" id="prevBtn" onclick="prevPage()">上一页</button>
+                    <button class="pagination-btn" id="nextBtn" onclick="nextPage()">下一页</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal" id="addModal">
+        <div class="modal-content">
+            <h3 class="modal-title" id="modalTitle">添加域名</h3>
+            <div class="form-group">
+                <label>域名</label>
+                <input type="text" id="domain" placeholder="api.example.com" oninput="validateDomain()">
+                <small id="domainError" style="color:#e74c3c;display:none;">请输入有效的域名</small>
+            </div>
+            <div class="form-group">
+                <label>代理端口（可多选）</label>
+                <div id="proxyCheckboxes" style="max-height: 150px; overflow-y: auto; border: 1px solid #ddd; border-radius: 6px; padding: 10px;"></div>
+                <p class="tip">选择一个或多个代理端口，如同时选择HTTP(80)和HTTPS(443)</p>
+            </div>
+            <div class="form-group">
+                <label>后端服务（可多选）</label>
+                <div id="backendCheckboxes" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; border-radius: 6px; padding: 10px;"></div>
+                <p class="tip">选择一个或多个后端服务，请求将轮询转发到选中的服务器</p>
+            </div>
+            <div class="form-group">
+                <label>证书（HTTPS用）</label>
+                <select id="certId"><option value=""></option></select>
+            </div>
+            <div class="form-group">
+                <label style="display:inline-flex;align-items:center;gap:8px;">
+                    强制HTTPS
+                    <input type="checkbox" id="forceHttps" style="width:auto;margin:0;">
+                </label>
+                <p class="tip">域名级别：启用后，仅该域名的HTTP请求会跳转到HTTPS，不影响其他域名</p>
+            </div>
+            <div class="form-group">
+                <label style="display:inline-flex;align-items:center;gap:8px;">
+                    启用
+                    <input type="checkbox" id="enabled" checked style="width:auto;margin:0;">
+                </label>
+            </div>
+            <div class="modal-actions">
+                <button class="btn" style="background:#ecf0f1;" onclick="closeModal()">取消</button>
+                <button class="btn btn-primary" onclick="saveDomain()" id="saveBtn">保存</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        (function() {
+            var editingId = null;
+            var backends = [];
+            var certs = [];
+            var proxies = [];
+            var allData = [];
+            var currentPage = 1;
+            var pageSize = 10;
+            var dataLoaded = false; // 标记基础数据是否已加载
+
+            // XSS防护函数
+            function escapeHtml(text) {
+                if (text == null) return '';
+                var div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+
+            // 域名验证函数
+            function validateDomain() {
+                var domain = document.getElementById('domain').value.trim();
+                var errorEl = document.getElementById('domainError');
+                var saveBtn = document.getElementById('saveBtn');
+                
+                if (!domain) {
+                    errorEl.style.display = 'none';
+                    saveBtn.disabled = false;
+                    return true;
+                }
+
+                // 允许"default"作为特殊域名（用于IP访问）
+                if (domain === 'default') {
+                    errorEl.style.display = 'none';
+                    saveBtn.disabled = false;
+                    return true;
+                }
+
+                // 域名格式验证
+                var domainRegex = /^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
+                if (!domainRegex.test(domain)) {
+                    errorEl.textContent = '请输入有效的域名，如：example.com 或 api.example.com，或使用 default 处理IP访问';
+                    errorEl.style.display = 'block';
+                    saveBtn.disabled = true;
+                    return false;
+                }
+
+                // 长度限制
+                if (domain.length > 253) {
+                    errorEl.textContent = '域名长度不能超过253个字符';
+                    errorEl.style.display = 'block';
+                    saveBtn.disabled = true;
+                    return false;
+                }
+
+                errorEl.style.display = 'none';
+                saveBtn.disabled = false;
+                return true;
+            }
+
+            function renderProxyCheckboxes(selectedIds) {
+                var container = document.getElementById('proxyCheckboxes');
+                if (!container) return;
+                if (proxies.length === 0) {
+                    container.innerHTML = '<p style="color:#95a5a6;">暂无代理配置，请先添加</p>';
+                    return;
+                }
+                container.innerHTML = '';
+                proxies.forEach(p => {
+                    if (p.enabled) {
+                        var div = document.createElement('div');
+                        div.className = 'backend-checkbox';
+                        var checked = selectedIds.includes(p.id) ? 'checked' : '';
+                        var proxyName = p.listen_addr + ' (' + p.protocol.toUpperCase() + ')';
+                        div.innerHTML = '<label>' +
+                            '<input type="checkbox" value="' + escapeHtml(p.id) + '" ' + checked + '>' +
+                            '<span><code>' + escapeHtml(proxyName) + '</code></span>' +
+                            '</label>';
+                        container.appendChild(div);
+                    }
+                });
+            }
+
+            function getSelectedProxyIds() {
+                var checkboxes = document.querySelectorAll('#proxyCheckboxes input[type="checkbox"]:checked');
+                return Array.from(checkboxes).map(cb => cb.value);
+            }
+
+            function renderBackendCheckboxes(selectedIds) {
+                var container = document.getElementById('backendCheckboxes');
+                if (!container) return;
+                if (backends.length === 0) {
+                    container.innerHTML = '<p style="color:#95a5a6;">暂无后端服务，请先添加</p>';
+                    return;
+                }
+                container.innerHTML = '';
+                backends.forEach(b => {
+                    var div = document.createElement('div');
+                    div.className = 'backend-checkbox';
+                    var checked = selectedIds.includes(b.id) ? 'checked' : '';
+                    var statusColor = b.healthy ? '#27ae60' : '#e74c3c';
+                    var statusText = b.healthy ? '健康' : '不健康';
+                    div.innerHTML = '<label>' +
+                        '<input type="checkbox" value="' + escapeHtml(b.id) + '" ' + checked + '>' +
+                        '<span><code>' + escapeHtml(b.address) + '</code> <small style="color:' + statusColor + '">(' + statusText + ')</small></span>' +
+                        '</label>';
+                    container.appendChild(div);
+                });
+            }
+            
+            function getSelectedBackendIds() {
+                var checkboxes = document.querySelectorAll('#backendCheckboxes input[type="checkbox"]:checked');
+                return Array.from(checkboxes).map(cb => cb.value);
+            }
+            
+            function loadCerts() {
+                return fetch('/api/cert/list').then(r => r.json()).then(data => {
+                    certs = data || [];
+                    var sel = document.getElementById('certId');
+                    if (sel) {
+                        sel.innerHTML = '<option value=""></option>';
+                        certs.forEach(c => {
+                            var certName = c.name || '证书 #' + c.id.substring(0,8);
+                            sel.innerHTML += '<option value="' + escapeHtml(c.id) + '">' + escapeHtml(certName) + '</option>';
+                        });
+                    }
+                });
+            }
+            
+            function renderData() {
+                var tbody = document.getElementById('domainList');
+                var pagination = document.getElementById('pagination');
+                
+                if (!allData || allData.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#95a5a6;">暂无配置</td></tr>';
+                    pagination.style.display = 'none';
+                    return;
+                }
+                
+                // 计算分页
+                var totalPages = Math.ceil(allData.length / pageSize);
+                if (totalPages === 0) {
+                    currentPage = 1;
+                } else {
+                    if (currentPage > totalPages) currentPage = totalPages;
+                    if (currentPage < 1) currentPage = 1;
+                }
+                
+                var start = (currentPage - 1) * pageSize;
+                var end = Math.min(start + pageSize, allData.length);
+                var pageData = allData.slice(start, end);
+                
+                tbody.innerHTML = '';
+                pageData.forEach(item => {
+                    var proxyNames = item.proxy_ids && item.proxy_ids.length > 0
+                        ? item.proxy_ids.map(id => {
+                            var p = proxies.find(px => px.id === id);
+                            return p ? (p.listen_addr + '(' + p.protocol.toUpperCase() + ')') : null;
+                        }).filter(Boolean).join(', ')
+                        : '-';
+                    var backendNames = item.backend_ids && item.backend_ids.length > 0
+                        ? item.backend_ids.map(id => backends.find(b => b.id === id)?.address).filter(Boolean).join(', ')
+                        : '-';
+                    var certName = '-';
+                    if (item.cert_id) {
+                        var cert = certs.find(c => c.id === item.cert_id);
+                        if (cert) {
+                            certName = cert.name || '证书 #' + cert.id.substring(0,8);
+                        }
+                    }
+                    var tr = document.createElement('tr');
+                    // 使用安全的方式传递数据，避免内联事件中的XSS
+                    var safeItemJson = JSON.stringify(item).replace(/"/g, '&quot;');
+                    tr.innerHTML = '<td>' + escapeHtml(item.domain) + '</td>' +
+                        '<td>' + escapeHtml(proxyNames) + '</td>' +
+                        '<td>' + escapeHtml(backendNames) + '</td>' +
+                        '<td>' + (item.cert_id ? escapeHtml(certName) : '-') + '</td>' +
+                        '<td>' + (item.force_https ? '是' : '否') + '</td>' +
+                        '<td><span class="status-badge ' + (item.enabled ? 'status-enabled' : 'status-disabled') + '">' + (item.enabled ? '已启用' : '已禁用') + '</span></td>' +
+                        '<td>' +
+                        '<button class="btn btn-primary edit-btn" style="margin-right:8px;" data-item="' + safeItemJson + '">编辑</button>' +
+                        '<button class="btn btn-danger delete-btn" data-id="' + escapeHtml(item.id) + '">删除</button>' +
+                        '</td>';
+                    tbody.appendChild(tr);
+                });
+                
+                // 更新分页信息
+                document.getElementById('pageInfo').textContent = '第' + currentPage + ' 页 / 第' + totalPages + ' 页（共' + allData.length + ' 条）';
+                document.getElementById('prevBtn').disabled = currentPage <= 1;
+                document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+                pagination.style.display = 'flex';
+            }
+            
+            // 事件委托处理编辑和删除
+            document.addEventListener('click', function(e) {
+                var target = e.target;
+                // 编辑按钮
+                if (target.classList.contains('edit-btn')) {
+                    var itemStr = target.getAttribute('data-item');
+                    if (itemStr) {
+                        try {
+                            var item = JSON.parse(itemStr);
+                            editDomain(item);
+                        } catch (ex) {
+                            console.error('解析数据失败', ex);
+                        }
+                    }
+                }
+                // 删除按钮
+                if (target.classList.contains('delete-btn')) {
+                    var id = target.getAttribute('data-id');
+                    if (id) {
+                        deleteDomain(id);
+                    }
+                }
+            });
+            
+            function prevPage() {
+                if (currentPage > 1) {
+                    currentPage--;
+                    renderData();
+                }
+            }
+            
+            function nextPage() {
+                var totalPages = Math.ceil(allData.length / pageSize);
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    renderData();
+                }
+            }
+            
+            function changePageSize() {
+                pageSize = parseInt(document.getElementById('pageSize').value);
+                currentPage = 1;
+                renderData();
+            }
+
+            function showAddModal() {
+                if (!dataLoaded) {
+                    alert('数据正在加载中，请稍后...');
+                    return;
+                }
+                editingId = null;
+                document.getElementById('modalTitle').textContent = '添加域名';
+                document.getElementById('domain').value = '';
+                document.getElementById('domainError').style.display = 'none';
+                document.getElementById('saveBtn').disabled = false;
+                renderProxyCheckboxes([]);
+                renderBackendCheckboxes([]);
+                document.getElementById('certId').value = '';
+                document.getElementById('forceHttps').checked = false;
+                document.getElementById('enabled').checked = true;
+                document.getElementById('addModal').classList.add('show');
+            }
+
+            function closeModal() { 
+                document.getElementById('addModal').classList.remove('show'); 
+            }
+
+            function editDomain(item) {
+                if (!dataLoaded) {
+                    alert('数据正在加载中，请稍后...');
+                    return;
+                }
+                editingId = item.id;
+                document.getElementById('modalTitle').textContent = '编辑域名';
+                document.getElementById('domain').value = item.domain;
+                document.getElementById('domainError').style.display = 'none';
+                document.getElementById('saveBtn').disabled = false;
+                renderProxyCheckboxes(item.proxy_ids || []);
+                renderBackendCheckboxes(item.backend_ids || []);
+                document.getElementById('certId').value = item.cert_id || '';
+                document.getElementById('forceHttps').checked = item.force_https;
+                document.getElementById('enabled').checked = item.enabled;
+                document.getElementById('addModal').classList.add('show');
+            }
+
+            function saveDomain() {
+                if (!validateDomain()) {
+                    alert('请检查域名格式');
+                    return;
+                }
+
+                var data = {
+                    domain: document.getElementById('domain').value.trim(),
+                    proxy_ids: getSelectedProxyIds(),
+                    backend_ids: getSelectedBackendIds(),
+                    cert_id: document.getElementById('certId').value,
+                    force_https: document.getElementById('forceHttps').checked,
+                    enabled: document.getElementById('enabled').checked
+                };
+
+                if (data.proxy_ids.length === 0) {
+                    alert('请至少选择一个代理端口');
+                    return;
+                }
+
+                if (data.backend_ids.length === 0) {
+                    alert('请至少选择一个后端服务');
+                    return;
+                }
+
+                var url = '/api/domain/add';
+                if (editingId) {
+                    data.id = editingId;
+                    url = '/api/domain/update';
+                }
+
+                fetch(url, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                }).then(r => r.json()).then(res => {
+                    if (res.success) { 
+                        closeModal(); 
+                        // 重新加载列表数据
+                        fetch('/api/domain/list').then(r => r.json()).then(d => {
+                            allData = d || [];
+                            renderData();
+                        });
+                    } else {
+                        alert('保存失败: ' + (res.error || '未知错误'));
+                    }
+                }).catch(err => {
+                    console.error('保存失败:', err);
+                    alert('保存失败: ' + err.message);
+                });
+            }
+            
+            function deleteDomain(id) {
+                if (!id) {
+                    alert('无效的域名ID');
+                    return;
+                }
+                if (!confirm('确定删除？')) return;
+                fetch('/api/domain/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({id: id})
+                }).then(r => r.json()).then(res => { 
+                    if (res.success) {
+                        // 重新加载列表
+                        fetch('/api/domain/list').then(r => r.json()).then(d => {
+                            allData = d || [];
+                            renderData();
+                        });
+                    } else {
+                        alert('删除失败: ' + (res.error || '未知错误'));
+                    }
+                }).catch(err => {
+                    console.error('删除失败:', err);
+                    alert('删除失败: ' + err.message);
+                });
+            }
+
+            // 初始化加载所有数据
+            Promise.all([
+                fetch('/api/proxy/list').then(r => r.json()),
+                fetch('/api/backend/list').then(r => r.json()),
+                fetch('/api/cert/list').then(r => r.json()),
+                fetch('/api/domain/list').then(r => r.json())
+            ]).then(([pData, bData, cData, dData]) => {
+                proxies = pData || [];
+                backends = bData || [];
+                certs = cData || [];
+                allData = dData || [];
+                dataLoaded = true;
+                // 渲染证书下拉框
+                var sel = document.getElementById('certId');
+                if (sel) {
+                    sel.innerHTML = '<option value=""></option>';
+                    certs.forEach(c => {
+                        var certName = c.name || '证书 #' + c.id.substring(0,8);
+                        sel.innerHTML += '<option value="' + escapeHtml(c.id) + '">' + escapeHtml(certName) + '</option>';
+                    });
+                }
+                renderData();
+            }).catch(err => {
+                console.error('初始化数据加载失败:', err);
+                alert('加载配置失败，请刷新页面重试');
+            });
+
+            // 暴露必要的函数给全局（供内联onclick使用，但部分已用事件委托替代）
+            window.showAddModal = showAddModal;
+            window.closeModal = closeModal;
+            window.saveDomain = saveDomain;
+            window.prevPage = prevPage;
+            window.nextPage = nextPage;
+            window.changePageSize = changePageSize;
+            window.validateDomain = validateDomain;
+        })();
+    </script>
+</body>
+</html>
+{{end}}
