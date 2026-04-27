@@ -818,10 +818,12 @@
                                     var memEl = document.getElementById('memUsage');
                                     var memPercentEl = document.getElementById('memPercent');
                                     if (memEl && memPercentEl) {
-                                        var memMB = (d.mem_used / 1024 / 1024).toFixed(1);
-                                        var totalMB = (d.mem_total / 1024 / 1024).toFixed(1);
-                                        memEl.innerText = memMB + ' MB';
-                                        memPercentEl.innerText = d.mem_percent.toFixed(1) + '% / ' + totalMB + ' MB';
+                                        var fmtMem = function(bytes) {
+                                            if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(1) + ' GB';
+                                            return (bytes / 1048576).toFixed(1) + ' MB';
+                                        };
+                                        memEl.innerText = fmtMem(d.mem_used);
+                                        memPercentEl.innerText = d.mem_percent.toFixed(1) + '% / ' + fmtMem(d.mem_total);
                                     }
                                     
                                     var goroutinesEl = document.getElementById('goroutines');

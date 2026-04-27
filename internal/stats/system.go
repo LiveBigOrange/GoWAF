@@ -7,6 +7,7 @@ import (
 
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
+	"github.com/shirou/gopsutil/v3/mem"
 )
 
 var (
@@ -59,11 +60,8 @@ func GetSystemStats() SystemStats {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
-	// 计算内存使用率
-	memPercent := 0.0
-	if m.Sys > 0 {
-		memPercent = float64(m.Alloc) / float64(m.Sys) * 100
-	}
+	// 计算内存使用率（系统级）
+	memUsed, memTotal, memPercent := getMemUsage()
 
 	// 获取 CPU 使用率（使用缓存，避免阻塞）
 	cpuUsage := getCachedCPUUsage()
@@ -80,8 +78,8 @@ func GetSystemStats() SystemStats {
 	return SystemStats{
 		// 基础系统指标
 		CPUUsage:    cpuUsage,
-		MemUsed:     m.Alloc,
-		MemTotal:    m.Sys,
+		MemUsed:     memUsed,
+		MemTotal:    memTotal,
 		MemPercent:  memPercent,
 		Goroutines:  runtime.NumGoroutine(),
 		GoVersion:   runtime.Version(),
@@ -104,6 +102,15 @@ func GetSystemStats() SystemStats {
 		NumThread: runtime.GOMAXPROCS(0), // 当前使用的线程数
 		NumFD:     0,                      // 文件描述符需要平台特定实现
 	}
+}
+
+// getMemUsage 获取系统级内存使用情况
+func getMemUsage() (uint64, uint64, float64) {
+	v, err := mem.VirtualMemory()
+	if err != nil {
+		return 0, 0, 0
+	}
+	return v.Used, v.Total, v.UsedPercent
 }
 
 // getDiskUsage 获取磁盘使用率
