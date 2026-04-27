@@ -205,10 +205,6 @@ func (m *ProxyServerManager) getHTTPSPort() string {
 
 // startServerLocked 启动单个服务器（需要持有锁）
 func (m *ProxyServerManager) startServerLocked(cfg *proxyconfig.ProxyConfig, httpsPorts map[string]string) error {
-	if cfg.Protocol == "https" && !m.certManager.HasValidCertificate() {
-		return fmt.Errorf("无法启动HTTPS代理 %s: 未找到有效的域名证书配置，请先在域名管理中关联证书", cfg.ListenAddr)
-	}
-
 	if _, exists := m.servers[cfg.ID]; exists {
 		return fmt.Errorf("代理服务器 %s 已存在", cfg.ID)
 	}
