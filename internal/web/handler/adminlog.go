@@ -60,7 +60,7 @@ func APIAdminLogList(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Printf("无法打开管理日志文件: %v", err)
-		http.Error(w, "无法打开日志文件: "+err.Error(), http.StatusInternalServerError)
+		jsonError(w, "无法打开日志文件: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer file.Close()
@@ -69,7 +69,7 @@ func APIAdminLogList(w http.ResponseWriter, r *http.Request) {
 	stat, err := file.Stat()
 	if err != nil {
 		log.Printf("获取文件信息失败: %v", err)
-		http.Error(w, "获取文件信息失败: "+err.Error(), http.StatusInternalServerError)
+		jsonError(w, "获取文件信息失败: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	fileSize := stat.Size()
@@ -85,7 +85,7 @@ func APIAdminLogList(w http.ResponseWriter, r *http.Request) {
 	logs, err := readRecentAdminLogsFromFile(file, fileSize, limit)
 	if err != nil {
 		log.Printf("读取日志文件失败: %v", err)
-		http.Error(w, "读取日志文件失败: "+err.Error(), http.StatusInternalServerError)
+		jsonError(w, "读取日志文件失败: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 

@@ -314,7 +314,7 @@ func (h *DashboardHub) collectDashboardData() map[string]interface{} {
 func DashboardWebSocket(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("session")
 	if err != nil || !middleware.IsValidSession(cookie.Value) {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		jsonError(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 

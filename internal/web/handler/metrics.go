@@ -18,7 +18,7 @@ type MetricsHistoryRequest struct {
 // GetMetricsEvents 获取拦截事件历史
 func GetMetricsEvents(w http.ResponseWriter, r *http.Request) {
 	if MetricsManager == nil {
-		http.Error(w, "metrics not initialized", http.StatusInternalServerError)
+		jsonError(w, "metrics not initialized", http.StatusInternalServerError)
 		return
 	}
 
@@ -60,13 +60,13 @@ func GetMetricsEvents(w http.ResponseWriter, r *http.Request) {
 
 	events, err := MetricsManager.GetEvents(start, end, (page-1)*pageSize, pageSize)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	total, err := MetricsManager.GetEventCount(start, end)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -82,7 +82,7 @@ func GetMetricsEvents(w http.ResponseWriter, r *http.Request) {
 // GetMetricsMinuteStats 获取分钟统计（实时数据）
 func GetMetricsMinuteStats(w http.ResponseWriter, r *http.Request) {
 	if MetricsManager == nil {
-		http.Error(w, "metrics not initialized", http.StatusInternalServerError)
+		jsonError(w, "metrics not initialized", http.StatusInternalServerError)
 		return
 	}
 
@@ -132,7 +132,7 @@ func GetMetricsMinuteStats(w http.ResponseWriter, r *http.Request) {
 
 	stats, err := MetricsManager.GetMinuteStats(start, end)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -143,7 +143,7 @@ func GetMetricsMinuteStats(w http.ResponseWriter, r *http.Request) {
 // GetMetricsHourlyStats 获取小时统计
 func GetMetricsHourlyStats(w http.ResponseWriter, r *http.Request) {
 	if MetricsManager == nil {
-		http.Error(w, "metrics not initialized", http.StatusInternalServerError)
+		jsonError(w, "metrics not initialized", http.StatusInternalServerError)
 		return
 	}
 
@@ -193,7 +193,7 @@ func GetMetricsHourlyStats(w http.ResponseWriter, r *http.Request) {
 
 	stats, err := MetricsManager.GetHourlyStats(start, end)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -204,7 +204,7 @@ func GetMetricsHourlyStats(w http.ResponseWriter, r *http.Request) {
 // GetMetricsTopStats 获取TOP统计
 func GetMetricsTopStats(w http.ResponseWriter, r *http.Request) {
 	if MetricsManager == nil {
-		http.Error(w, "metrics not initialized", http.StatusInternalServerError)
+		jsonError(w, "metrics not initialized", http.StatusInternalServerError)
 		return
 	}
 
@@ -234,7 +234,7 @@ func GetMetricsTopStats(w http.ResponseWriter, r *http.Request) {
 
 	stats, err := MetricsManager.GetTopStats(statType, start, end, limit)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -245,7 +245,7 @@ func GetMetricsTopStats(w http.ResponseWriter, r *http.Request) {
 // GetMetricsRuleHitStats 获取规则命中统计
 func GetMetricsRuleHitStats(w http.ResponseWriter, r *http.Request) {
 	if MetricsManager == nil {
-		http.Error(w, "metrics not initialized", http.StatusInternalServerError)
+		jsonError(w, "metrics not initialized", http.StatusInternalServerError)
 		return
 	}
 
@@ -270,7 +270,7 @@ func GetMetricsRuleHitStats(w http.ResponseWriter, r *http.Request) {
 
 	stats, err := MetricsManager.GetRuleHitStats(start, end)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 

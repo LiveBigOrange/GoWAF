@@ -23,7 +23,7 @@ func GetLogDB() *logdb.LogDB {
 // GetLogsAggregate 聚合查询API
 func GetLogsAggregate(w http.ResponseWriter, r *http.Request) {
 	if logDBInstance == nil {
-		http.Error(w, "Log database not initialized", http.StatusInternalServerError)
+		jsonError(w, "Log database not initialized", http.StatusInternalServerError)
 		return
 	}
 
@@ -42,7 +42,7 @@ func GetLogsAggregate(w http.ResponseWriter, r *http.Request) {
 
 	results, err := logDBInstance.AggregateByField(field, limit)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -53,7 +53,7 @@ func GetLogsAggregate(w http.ResponseWriter, r *http.Request) {
 // GetLogsTimeSeries 时间序列查询API
 func GetLogsTimeSeries(w http.ResponseWriter, r *http.Request) {
 	if logDBInstance == nil {
-		http.Error(w, "Log database not initialized", http.StatusInternalServerError)
+		jsonError(w, "Log database not initialized", http.StatusInternalServerError)
 		return
 	}
 
@@ -72,7 +72,7 @@ func GetLogsTimeSeries(w http.ResponseWriter, r *http.Request) {
 
 	results, err := logDBInstance.GetTimeSeries(interval, hours)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -83,7 +83,7 @@ func GetLogsTimeSeries(w http.ResponseWriter, r *http.Request) {
 // GetLogsCacheStats 缓存状态API
 func GetLogsCacheStats(w http.ResponseWriter, r *http.Request) {
 	if logDBInstance == nil {
-		http.Error(w, "Log database not initialized", http.StatusInternalServerError)
+		jsonError(w, "Log database not initialized", http.StatusInternalServerError)
 		return
 	}
 
@@ -101,13 +101,13 @@ func GetLogsCacheStats(w http.ResponseWriter, r *http.Request) {
 // GetLogsOptimizedStats 优化的统计API
 func GetLogsOptimizedStats(w http.ResponseWriter, r *http.Request) {
 	if logDBInstance == nil {
-		http.Error(w, "Log database not initialized", http.StatusInternalServerError)
+		jsonError(w, "Log database not initialized", http.StatusInternalServerError)
 		return
 	}
 
 	stats, err := logDBInstance.GetStats()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 

@@ -16,7 +16,7 @@ import (
 func APIProxyList(w http.ResponseWriter, r *http.Request) {
 	proxies, err := ProxyConfigManager.ListProxies()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -31,16 +31,16 @@ func APIProxyAdd(w http.ResponseWriter, r *http.Request) {
 		Enabled    bool   `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if req.ListenAddr == "" {
-		http.Error(w, "listen_addr不能为空", http.StatusBadRequest)
+		jsonError(w, "listen_addr不能为空", http.StatusBadRequest)
 		return
 	}
 	if req.Protocol != "http" && req.Protocol != "https" {
-		http.Error(w, "protocol必须为http或https", http.StatusBadRequest)
+		jsonError(w, "protocol必须为http或https", http.StatusBadRequest)
 		return
 	}
 
@@ -52,14 +52,14 @@ func APIProxyAdd(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := ProxyConfigManager.AddProxy(cfg); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	if ProxyServerManager != nil {
 		if err := ProxyServerManager.AddProxy(cfg); err != nil {
 			ProxyConfigManager.DeleteProxy(cfg.ID)
-			http.Error(w, "启动代理服务器失败: "+err.Error(), http.StatusInternalServerError)
+			jsonError(w, "启动代理服务器失败: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 	} else {
@@ -79,20 +79,20 @@ func APIProxyUpdate(w http.ResponseWriter, r *http.Request) {
 		Enabled    bool   `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if req.ID == "" {
-		http.Error(w, "id不能为空", http.StatusBadRequest)
+		jsonError(w, "id不能为空", http.StatusBadRequest)
 		return
 	}
 	if req.ListenAddr == "" {
-		http.Error(w, "listen_addr不能为空", http.StatusBadRequest)
+		jsonError(w, "listen_addr不能为空", http.StatusBadRequest)
 		return
 	}
 	if req.Protocol != "http" && req.Protocol != "https" {
-		http.Error(w, "protocol必须为http或https", http.StatusBadRequest)
+		jsonError(w, "protocol必须为http或https", http.StatusBadRequest)
 		return
 	}
 
@@ -111,7 +111,7 @@ func APIProxyUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := ProxyConfigManager.UpdateProxy(cfg); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -125,7 +125,7 @@ func APIProxyUpdate(w http.ResponseWriter, r *http.Request) {
 					log.Printf("已回滚数据库配置至更新前状态 [%s]", req.ID)
 				}
 			}
-			http.Error(w, "更新代理服务器失败: "+err.Error(), http.StatusInternalServerError)
+			jsonError(w, "更新代理服务器失败: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 	} else {
@@ -142,12 +142,12 @@ func APIProxyDelete(w http.ResponseWriter, r *http.Request) {
 		ID string `json:"id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if err := ProxyConfigManager.DeleteProxy(req.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -169,7 +169,7 @@ func APIProxyDelete(w http.ResponseWriter, r *http.Request) {
 func APIDomainList(w http.ResponseWriter, r *http.Request) {
 	domains, err := ProxyConfigManager.ListDomains()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -187,7 +187,7 @@ func APIDomainAdd(w http.ResponseWriter, r *http.Request) {
 		ForceHTTPS bool     `json:"force_https"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -202,7 +202,7 @@ func APIDomainAdd(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := ProxyConfigManager.AddDomain(cfg); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -222,7 +222,7 @@ func APIDomainUpdate(w http.ResponseWriter, r *http.Request) {
 		ForceHTTPS bool     `json:"force_https"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -237,7 +237,7 @@ func APIDomainUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := ProxyConfigManager.UpdateDomain(cfg); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -251,12 +251,12 @@ func APIDomainDelete(w http.ResponseWriter, r *http.Request) {
 		ID string `json:"id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if err := ProxyConfigManager.DeleteDomain(req.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -270,7 +270,7 @@ func APIDomainDelete(w http.ResponseWriter, r *http.Request) {
 func APICertList(w http.ResponseWriter, r *http.Request) {
 	certs, err := ProxyConfigManager.ListCerts()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -303,20 +303,20 @@ func APICertUpload(w http.ResponseWriter, r *http.Request) {
 		KeyPEM  string `json:"key_pem"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	// 验证证书
 	if err := proxyconfig.ValidateCert(req.CertPEM, req.KeyPEM); err != nil {
-		http.Error(w, "证书验证失败: "+err.Error(), http.StatusBadRequest)
+		jsonError(w, "证书验证失败: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	// 解析证书
 	cert, err := proxyconfig.ParseCertificate(req.CertPEM, req.KeyPEM)
 	if err != nil {
-		http.Error(w, "证书解析失败: "+err.Error(), http.StatusBadRequest)
+		jsonError(w, "证书解析失败: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -327,7 +327,7 @@ func APICertUpload(w http.ResponseWriter, r *http.Request) {
 
 	// 保存证书
 	if err := ProxyConfigManager.AddCert(cert); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -349,7 +349,7 @@ func APICertUpdate(w http.ResponseWriter, r *http.Request) {
 		KeyPEM  string `json:"key_pem"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -360,14 +360,14 @@ func APICertUpdate(w http.ResponseWriter, r *http.Request) {
 	if req.CertPEM != "" && req.KeyPEM != "" {
 		// 验证证书
 		if err := proxyconfig.ValidateCert(req.CertPEM, req.KeyPEM); err != nil {
-			http.Error(w, "证书验证失败: "+err.Error(), http.StatusBadRequest)
+			jsonError(w, "证书验证失败: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 
 		// 解析证书
 		cert, err = proxyconfig.ParseCertificate(req.CertPEM, req.KeyPEM)
 		if err != nil {
-			http.Error(w, "证书解析失败: "+err.Error(), http.StatusBadRequest)
+			jsonError(w, "证书解析失败: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 		cert.ID = req.ID
@@ -375,7 +375,7 @@ func APICertUpdate(w http.ResponseWriter, r *http.Request) {
 		// 仅更新名称，获取现有证书
 		cert, err = ProxyConfigManager.GetCert(req.ID)
 		if err != nil {
-			http.Error(w, "获取证书失败: "+err.Error(), http.StatusInternalServerError)
+			jsonError(w, "获取证书失败: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 	}
@@ -387,7 +387,7 @@ func APICertUpdate(w http.ResponseWriter, r *http.Request) {
 
 	// 更新证书
 	if err := ProxyConfigManager.UpdateCert(cert); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -405,12 +405,12 @@ func APICertDelete(w http.ResponseWriter, r *http.Request) {
 		ID string `json:"id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if err := ProxyConfigManager.DeleteCert(req.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -422,13 +422,13 @@ func APICertDelete(w http.ResponseWriter, r *http.Request) {
 func APICertGet(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	if id == "" {
-		http.Error(w, "missing id parameter", http.StatusBadRequest)
+		jsonError(w, "missing id parameter", http.StatusBadRequest)
 		return
 	}
 
 	cert, err := ProxyConfigManager.GetCert(id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -452,7 +452,7 @@ func APICertGet(w http.ResponseWriter, r *http.Request) {
 func APICertCheck(w http.ResponseWriter, r *http.Request) {
 	certs, err := ProxyConfigManager.CheckCertExpiry()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
