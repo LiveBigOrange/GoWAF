@@ -29,6 +29,16 @@
         .toggle-btn.disabled { background: #fde2e2; color: #f56c6c; }
         .edit-btn { padding: 4px 10px; background: #e6a23c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
         .edit-btn:hover { background: #ebb563; }
+        table { table-layout: fixed; }
+        th:nth-child(1), td:nth-child(1) { width: 70px; }
+        th:nth-child(2), td:nth-child(2) { width: 70px; }
+        th:nth-child(3), td:nth-child(3) { width: auto; }
+        th:nth-child(4), td:nth-child(4) { width: 140px; }
+        th:nth-child(5), td:nth-child(5) { width: 60px; }
+        th:nth-child(6), td:nth-child(6) { width: 100px; }
+        td code { word-break: break-all; font-size: 12px; }
+        td { overflow: hidden; text-overflow: ellipsis; }
+        td:nth-child(3), td:nth-child(4) { overflow: visible; text-overflow: clip; }
         .modal-content { background-color: #fff; padding: 0; border-radius: 8px; width: 500px; max-width: 90%; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
         .modal-header { padding: 20px; border-bottom: 1px solid #e8e9ed; display: flex; justify-content: space-between; align-items: center; }
         .modal-header h3 { margin: 0; font-size: 18px; color: #2c3e50; }
