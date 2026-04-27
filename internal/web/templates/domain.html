@@ -11,14 +11,14 @@
     <style>
         /* 页面特定样式可以在这里添加 */
         .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
-        .btn-primary { background: #3498db; color: white; }
-        .btn-danger { background: #e74c3c; color: white; }
+        .btn-primary { background: #409eff; color: white; }
+        .btn-danger { background: #f56c6c; color: white; }
         .form-group { margin-bottom: 16px; }
         .form-group label { display: block; margin-bottom: 8px; color: #555; font-weight: 500; }
         .form-group input, .form-group select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; }
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
         .modal.show { display: flex; }
-        .modal-content { background: white; border-radius: 12px; padding: 24px; width: 500px; max-height: 80vh; overflow-y: auto; }
+        .modal-content { background: white; border-radius: 12px; padding: 24px; width: 500px; max-width: 90%; max-height: 80vh; overflow-y: auto; }
         .modal-title { font-size: 18px; font-weight: 600; margin-bottom: 20px; }
         .modal-actions { display: flex; gap: 12px; margin-top: 24px; }
         .status-badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; }
@@ -34,7 +34,7 @@
     {{template "sidebar" .}}
     <div class="main">
         <div class="card">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:8px;">
                 <h3>域名路由配置</h3>
                 <button class="btn btn-primary" onclick="showAddModal()">+ 添加域名</button>
             </div>
@@ -228,13 +228,14 @@
                     certs = data || [];
                     var sel = document.getElementById('certId');
                     if (sel) {
-                        sel.innerHTML = '<option value=""></option>';
+                        var opts = ['<option value=""></option>'];
                         certs.forEach(c => {
-                            var certName = c.name || '证书 #' + c.id.substring(0,8);
-                            sel.innerHTML += '<option value="' + escapeHtml(c.id) + '">' + escapeHtml(certName) + '</option>';
+                            var certName = c.name || '证书 #' + (c.id || '').substring(0,8);
+                            opts.push('<option value="' + escapeHtml(c.id) + '">' + escapeHtml(certName) + '</option>');
                         });
+                        sel.innerHTML = opts.join('');
                     }
-                });
+                }).catch(function(e) { console.error('加载证书列表失败', e); });
             }
             
             function renderData() {
@@ -262,12 +263,32 @@
                 
                 tbody.innerHTML = '';
                 pageData.forEach(item => {
-                    var proxyNames = item.proxy_ids && item.proxy_ids.length > 0
-                        ? item.proxy_ids.map(id => {
-                            var p = proxies.find(px => px.id === id);
-                            return p ? (p.listen_addr + '(' + p.protocol.toUpperCase() + ')') : null;
-                        }).filter(Boolean).join(', ')
-                        : '-';
+                    // 调试信息
+                    console.log('Domain item:', item.domain, 'proxy_ids:', item.proxy_ids);
+                    console.log('Available proxies:', proxies);
+                    
+                    var proxyNames = '-';
+                    if (item.proxy_ids && item.proxy_ids.length > 0) {
+                        var names = [];
+                        for (var i = 0; i < item.proxy_ids.length; i++) {
+                            var id = item.proxy_ids[i];
+                            var p = null;
+                            for (var j = 0; j < proxies.length; j++) {
+                                if (proxies[j].id === id) {
+                                    p = proxies[j];
+                                    break;
+                                }
+                            }
+                            if (p) {
+                                names.push(p.listen_addr + '(' + p.protocol.toUpperCase() + ')');
+                            } else {
+                                console.log('Proxy not found for id:', id);
+                            }
+                        }
+                        if (names.length > 0) {
+                            proxyNames = names.join(', ');
+                        }
+                    }
                     var backendNames = item.backend_ids && item.backend_ids.length > 0
                         ? item.backend_ids.map(id => backends.find(b => b.id === id)?.address).filter(Boolean).join(', ')
                         : '-';
@@ -275,7 +296,7 @@
                     if (item.cert_id) {
                         var cert = certs.find(c => c.id === item.cert_id);
                         if (cert) {
-                            certName = cert.name || '证书 #' + cert.id.substring(0,8);
+                            certName = cert.name || '证书 #' + (cert.id || '').substring(0,8);
                         }
                     }
                     var tr = document.createElement('tr');
@@ -411,6 +432,7 @@
                     return;
                 }
 
+                var btn = document.getElementById('saveBtn'); btn.disabled = true;
                 var url = '/api/domain/add';
                 if (editingId) {
                     data.id = editingId;
@@ -424,18 +446,17 @@
                 }).then(r => r.json()).then(res => {
                     if (res.success) { 
                         closeModal(); 
-                        // 重新加载列表数据
                         fetch('/api/domain/list').then(r => r.json()).then(d => {
                             allData = d || [];
                             renderData();
-                        });
+                        }).catch(function(e) { console.error('重新加载失败', e); });
                     } else {
                         alert('保存失败: ' + (res.error || '未知错误'));
                     }
                 }).catch(err => {
                     console.error('保存失败:', err);
                     alert('保存失败: ' + err.message);
-                });
+                }).finally(function() { btn.disabled = false; });
             }
             
             function deleteDomain(id) {
@@ -450,11 +471,10 @@
                     body: JSON.stringify({id: id})
                 }).then(r => r.json()).then(res => { 
                     if (res.success) {
-                        // 重新加载列表
                         fetch('/api/domain/list').then(r => r.json()).then(d => {
                             allData = d || [];
                             renderData();
-                        });
+                        }).catch(function(e) { console.error('重新加载失败', e); });
                     } else {
                         alert('删除失败: ' + (res.error || '未知错误'));
                     }
@@ -465,25 +485,26 @@
             }
 
             // 初始化加载所有数据
-            Promise.all([
+            Promise.allSettled([
                 fetch('/api/proxy/list').then(r => r.json()),
                 fetch('/api/backend/list').then(r => r.json()),
                 fetch('/api/cert/list').then(r => r.json()),
                 fetch('/api/domain/list').then(r => r.json())
-            ]).then(([pData, bData, cData, dData]) => {
-                proxies = pData || [];
-                backends = bData || [];
-                certs = cData || [];
-                allData = dData || [];
+            ]).then(([pRes, bRes, cRes, dRes]) => {
+                proxies = (pRes.status === 'fulfilled' ? pRes.value : null) || [];
+                backends = (bRes.status === 'fulfilled' ? bRes.value : null) || [];
+                certs = (cRes.status === 'fulfilled' ? cRes.value : null) || [];
+                allData = (dRes.status === 'fulfilled' ? dRes.value : null) || [];
                 dataLoaded = true;
                 // 渲染证书下拉框
                 var sel = document.getElementById('certId');
                 if (sel) {
-                    sel.innerHTML = '<option value=""></option>';
+                    var opts = ['<option value=""></option>'];
                     certs.forEach(c => {
-                        var certName = c.name || '证书 #' + c.id.substring(0,8);
-                        sel.innerHTML += '<option value="' + escapeHtml(c.id) + '">' + escapeHtml(certName) + '</option>';
+                        var certName = c.name || '证书 #' + (c.id || '').substring(0,8);
+                        opts.push('<option value="' + escapeHtml(c.id) + '">' + escapeHtml(certName) + '</option>');
                     });
+                    sel.innerHTML = opts.join('');
                 }
                 renderData();
             }).catch(err => {

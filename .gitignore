@@ -1,37 +1,38 @@
-# Binaries for programs and plugins
+# Binaries
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
-
-# Test binary, built with `go test -c`
-*.test
-
-# Output of the go coverage tool
-*.out
-
-# Go workspace file
-go.work
-
-# Build artifacts
 waf
 waf-*
 build/
 
+# Test
+*.test
+*.out
+
+# Go workspace
+go.work
+
 # Database files
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 
 # Log files
 *.log
 
-# Configuration files with sensitive data
+# GeoIP database (需单独下载)
+*.mmdb
+
+# Sensitive config
 config.local.yaml
 .env
 .env.local
 
-# IDE and editor files
+# IDE
 .idea/
 .vscode/
 *.swp
@@ -39,19 +40,19 @@ config.local.yaml
 *~
 .DS_Store
 
-# Temporary files
+# Temp
 tmp/
 temp/
 *.tmp
 
-# Dependency directories
+# Vendor
 vendor/
 
 # CodeArts
 .arts/
 .codeartsdoer/
 
-# Deployment files (keep templates)
+# Deployment
 deploy/*.sh
 !deploy/deploy.sh
 !deploy/install.sh

@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="GoWAF 系统配置页面 · 管理核心参数">
+    <title>系统配置 · GoWAF</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <style>
+        /* ===== 主容器布局 ===== */
+        .main-content {
+            flex: 1;
+            padding: 24px 40px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            height: 100vh;
+            box-sizing: border-box;
+            min-width: 0;
+        }
+        
+        @media (max-width: 1200px) {
+            .main-content {
+                padding: 24px 20px;
+            }
+        }
+        
+        /* ===== 布局与卡片 ===== */
+        .config-section {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .config-section h2 {
+            margin: 0 0 20px 0;
+            font-size: 18px;
+            font-weight: 600;
+            color: #2c3e50;
+            border-bottom: 2px solid #409eff;
+            padding-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .config-section h2 .icon {
+            font-size: 20px;
+        }
+
+        /* ===== 子分组标题 ===== */
+        .config-subsection {
+            margin: 20px 0 15px 0;
+            padding: 10px 16px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 3px solid #409eff;
+        }
+
+        .config-subsection h3 {
+            font-size: 15px;
+            margin: 0;
+            color: #495057;
+            font-weight: 600;
+        }
+
+        /* ===== 输入网格 ===== */
+        .config-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+            margin-top: 16px;
+        }
+        
+        /* 大屏幕优化 - 3列 */
+        @media (min-width: 1200px) {
+            .config-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+        
+        /* 超大屏幕 - 4列 */
+        @media (min-width: 1600px) {
+            .config-grid {
+                grid-template-columns: repeat(4, 1fr);
+            }
+        }
+        
+        /* 超超大屏幕 - 5列 */
+        @media (min-width: 2000px) {
+            .config-grid {
+                grid-template-columns: repeat(5, 1fr);
+            }
+        }
+
+        .config-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .config-item label {
+            font-weight: 500;
+            color: #555;
+            margin-bottom: 8px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .config-item label small {
+            color: #999;
+            font-weight: normal;
+            font-size: 12px;
+        }
+
+        .config-item input,
+        .config-item select {
+            padding: 10px 14px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            background: #fff;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .config-item input:focus,
+        .config-item select:focus {
+            outline: none;
+            border-color: #409eff;
+            box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.15);
+        }
+
+        .config-item input[type="number"] {
+            width: 100%;
+            -moz-appearance: textfield;
+        }
+        .config-item input[type="number"]::-webkit-inner-spin-button,
+        .config-item input[type="number"]::-webkit-outer-spin-button {
+            opacity: 1;
+        }
+
+        /* ===== 辅助文字 ===== */
+        .help-text {
+            font-size: 12px;
+            color: #999;
+            margin-top: 6px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .help-text::before {
+            content: "💡";
+            font-size: 11px;
+            flex-shrink: 0;
+        }
+
+        /* ===== 按钮区域 ===== */
+        .btn-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 24px;
+            justify-content: flex-end;
+            padding: 20px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            position: sticky;
+            bottom: 0;
+            z-index: 10;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: #409eff;
+            color: white;
+        }
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(64, 158, 255, 0.4);
+        }
+        .btn-primary:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #f5f5f5;
+            color: #555;
+        }
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .btn-danger {
+            background: #fff;
+            color: #dc3545;
+            border: 1px solid #dc3545;
+        }
+        .btn-danger:hover {
+            background: #dc3545;
+            color: white;
+        }
+
+        /* ===== 提示消息 ===== */
+        .alert {
+            padding: 16px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+            align-items: center;
+            gap: 12px;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            display: flex;
+        }
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            display: flex;
+        }
+        .alert-warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeeba;
+            display: flex;
+        }
+
+        /* ===== 修改高亮 ===== */
+        .config-changed {
+            border-color: #409eff !important;
+            background: #f0f4ff !important;
+        }
+
+        .change-indicator {
+            display: none;
+            color: #409eff;
+            font-size: 12px;
+            margin-left: 8px;
+        }
+
+        .change-indicator.show {
+            display: inline;
+        }
+    </style>
+</head>
+<body>
+    {{template "sidebar" .}}
+
+    <main class="main-content">
+        <header class="header">
+            <h1>系统配置</h1>
+            <p class="subtitle">管理系统核心参数配置</p>
+        </header>
+
+        <div id="alert" class="alert" role="alert" aria-live="polite"></div>
+
+        <!-- 安全配置 -->
+        <section class="config-section" aria-labelledby="security-heading">
+            <h2 id="security-heading"><span aria-hidden="true">🔐</span> 安全配置</h2>
+
+            <div class="config-subsection">
+                <h3>登录安全</h3>
+            </div>
+            <div class="config-grid">
+                <div class="config-item">
+                    <label for="login_max_attempts">登录失败次数限制 <small>(次)</small></label>
+                    <input type="number" id="login_max_attempts" min="1" max="20" autocomplete="off">
+                    <div class="help-text">超过此次数后锁定账户</div>
+                </div>
+                <div class="config-item">
+                    <label for="login_block_duration">账户锁定时长 <small>(分钟)</small></label>
+                    <input type="number" id="login_block_duration" min="1" max="1440" autocomplete="off">
+                    <div class="help-text">账户被锁定的时间</div>
+                </div>
+            </div>
+
+            <div class="config-subsection">
+                <h3>Session 配置</h3>
+            </div>
+            <div class="config-grid">
+                <div class="config-item">
+                    <label for="session_ttl">Session 有效期 <small>(小时)</small></label>
+                    <input type="number" id="session_ttl" min="1" max="168" autocomplete="off">
+                    <div class="help-text">登录保持时间，建议 8-24 小时</div>
+                </div>
+                <div class="config-item">
+                    <label for="session_cleanup_interval">Session 清理间隔 <small>(分钟)</small></label>
+                    <input type="number" id="session_cleanup_interval" min="1" max="60" autocomplete="off">
+                    <div class="help-text">定期清理过期 Session</div>
+                </div>
+            </div>
+
+            <div class="config-subsection">
+                <h3>验证码配置</h3>
+            </div>
+            <div class="config-grid">
+                <div class="config-item">
+                    <label for="captcha_ttl">验证码有效期 <small>(分钟)</small></label>
+                    <input type="number" id="captcha_ttl" min="1" max="30" autocomplete="off">
+                    <div class="help-text">验证码过期时间</div>
+                </div>
+            </div>
+
+            <div class="config-subsection">
+                <h3>API 限流</h3>
+            </div>
+            <div class="config-grid">
+                <div class="config-item">
+                    <label for="api_limit">API 限流阈值 <small>(次/分钟)</small></label>
+                    <input type="number" id="api_limit" min="10" max="10000" autocomplete="off">
+                    <div class="help-text">每分钟最大 API 请求次数</div>
+                </div>
+                <div class="config-item">
+                    <label for="api_window">限流窗口 <small>(分钟)</small></label>
+                    <input type="number" id="api_window" min="1" max="60" autocomplete="off">
+                    <div class="help-text">限流统计时间窗口</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 性能配置 -->
+        <section class="config-section" aria-labelledby="perf-heading">
+            <h2 id="perf-heading"><span aria-hidden="true">⚡</span> 性能配置</h2>
+            <div class="config-grid">
+                <div class="config-item">
+                    <label for="log_channel_size">日志通道大小 <small>(条)</small></label>
+                    <input type="number" id="log_channel_size" min="1000" max="100000" autocomplete="off">
+                    <div class="help-text">日志缓冲队列大小</div>
+                </div>
+                <div class="config-item">
+                    <label for="cache_size">查询缓存大小 <small>(条)</small></label>
+                    <input type="number" id="cache_size" min="100" max="10000" autocomplete="off">
+                    <div class="help-text">数据库查询缓存数量</div>
+                </div>
+                <div class="config-item">
+                    <label for="cache_ttl">缓存 TTL <small>(分钟)</small></label>
+                    <input type="number" id="cache_ttl" min="1" max="60" autocomplete="off">
+                    <div class="help-text">缓存数据过期时间</div>
+                </div>
+                <div class="config-item">
+                    <label for="max_request_body">请求体最大值 <small>(MB)</small></label>
+                    <input type="number" id="max_request_body" min="1" max="100" autocomplete="off">
+                    <div class="help-text">允许的最大请求体大小</div>
+                </div>
+                <div class="config-item">
+                    <label for="scan_buffer">扫描缓冲区 <small>(KB)</small></label>
+                    <input type="number" id="scan_buffer" min="256" max="10240" autocomplete="off">
+                    <div class="help-text">日志扫描缓冲区大小</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 定时任务配置 -->
+        <section class="config-section" aria-labelledby="scheduler-heading">
+            <h2 id="scheduler-heading"><span aria-hidden="true">⏰</span> 定时任务配置</h2>
+            <div class="config-grid">
+                <div class="config-item">
+                    <label for="health_check">健康检查间隔 <small>(秒)</small></label>
+                    <input type="number" id="health_check" min="1" max="300" autocomplete="off">
+                    <div class="help-text">后端健康检查频率</div>
+                </div>
+                <div class="config-item">
+                    <label for="log_flush">日志刷新间隔 <small>(秒)</small></label>
+                    <input type="number" id="log_flush" min="1" max="60" autocomplete="off">
+                    <div class="help-text">日志写入磁盘频率</div>
+                </div>
+                <div class="config-item">
+                    <label for="log_cleanup">日志清理检查 <small>(小时)</small></label>
+                    <input type="number" id="log_cleanup" min="1" max="168" autocomplete="off">
+                    <div class="help-text">定期清理旧日志</div>
+                </div>
+                <div class="config-item">
+                    <label for="metrics_cleanup">指标清理间隔 <small>(小时)</small></label>
+                    <input type="number" id="metrics_cleanup" min="1" max="72" autocomplete="off">
+                    <div class="help-text">监控数据清理频率</div>
+                </div>
+                <div class="config-item">
+                    <label for="rule_reload">规则重载间隔 <small>(秒)</small></label>
+                    <input type="number" id="rule_reload" min="1" max="300" autocomplete="off">
+                    <div class="help-text">规则自动重载频率</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- WebSocket 配置 -->
+        <section class="config-section" aria-labelledby="ws-heading">
+            <h2 id="ws-heading"><span aria-hidden="true">🔌</span> WebSocket 配置</h2>
+            <div class="config-grid">
+                <div class="config-item">
+                    <label for="dashboard_push">仪表盘推送间隔 <small>(秒)</small></label>
+                    <input type="number" id="dashboard_push" min="1" max="60" autocomplete="off">
+                    <div class="help-text">实时数据推送频率</div>
+                </div>
+                <div class="config-item">
+                    <label for="log_heartbeat">日志心跳间隔 <small>(秒)</small></label>
+                    <input type="number" id="log_heartbeat" min="10" max="120" autocomplete="off">
+                    <div class="help-text">WebSocket 心跳检测间隔</div>
+                </div>
+                <div class="config-item">
+                    <label for="buffer_size">缓冲区大小 <small>(字节)</small></label>
+                    <input type="number" id="buffer_size" min="512" max="8192" autocomplete="off">
+                    <div class="help-text">WebSocket 缓冲区大小</div>
+                </div>
+                <div class="config-item">
+                    <label for="broadcast_channel">广播通道大小 <small>(条)</small></label>
+                    <input type="number" id="broadcast_channel" min="100" max="10000" autocomplete="off">
+                    <div class="help-text">消息广播队列大小</div>
+                </div>
+            </div>
+        </section>
+
+        <div class="btn-group">
+            <button type="button" class="btn btn-danger" onclick="resetConfig()">
+                <span aria-hidden="true">🔄</span> 恢复默认
+            </button>
+            <button type="button" class="btn btn-secondary" onclick="location.reload()">
+                <span aria-hidden="true">↻</span> 刷新页面
+            </button>
+            <button type="button" class="btn btn-primary" id="saveBtn" onclick="saveConfig()">
+                <span aria-hidden="true">💾</span> 保存配置
+            </button>
+        </div>
+    </main>
+
+    <script>
+        let originalConfig = {};
+        let hasChanges = false;
+
+        function loadConfig() {
+            fetch('/api/config')
+                .then(r => {
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                    return r.json();
+                })
+                .then(data => {
+                    if (data.error) {
+                        showAlert('error', '❌ ' + data.error);
+                        return;
+                    }
+
+                    originalConfig = JSON.parse(JSON.stringify(data));
+
+                    // 安全配置
+                    document.getElementById('login_max_attempts').value    = data.security.login.max_attempts;
+                    document.getElementById('login_block_duration').value  = data.security.login.block_duration;
+                    document.getElementById('session_ttl').value           = data.security.session.ttl;
+                    document.getElementById('session_cleanup_interval').value = data.security.session.cleanup_interval;
+                    document.getElementById('captcha_ttl').value           = data.security.captcha.ttl;
+                    document.getElementById('api_limit').value             = data.security.rate_limit.api_limit;
+                    document.getElementById('api_window').value            = data.security.rate_limit.api_window;
+
+                    // 性能配置
+                    document.getElementById('log_channel_size').value  = data.performance.log_channel_size;
+                    document.getElementById('cache_size').value        = data.performance.cache_size;
+                    document.getElementById('cache_ttl').value         = data.performance.cache_ttl;
+                    document.getElementById('max_request_body').value  = data.performance.max_request_body;
+                    document.getElementById('scan_buffer').value       = data.performance.scan_buffer;
+
+                    // 定时任务
+                    document.getElementById('health_check').value     = data.scheduler.health_check;
+                    document.getElementById('log_flush').value        = data.scheduler.log_flush;
+                    document.getElementById('log_cleanup').value      = data.scheduler.log_cleanup;
+                    document.getElementById('metrics_cleanup').value  = data.scheduler.metrics_cleanup;
+                    document.getElementById('rule_reload').value      = data.scheduler.rule_reload;
+
+                    // WebSocket
+                    document.getElementById('dashboard_push').value    = data.websocket.dashboard_push;
+                    document.getElementById('log_heartbeat').value     = data.websocket.log_heartbeat;
+                    document.getElementById('buffer_size').value       = data.websocket.buffer_size;
+                    document.getElementById('broadcast_channel').value = data.websocket.broadcast_channel;
+                })
+                .catch(err => {
+                    showAlert('error', '❌ 加载配置失败: ' + err.message);
+                });
+        }
+
+        function saveConfig() {
+            const btn = document.getElementById('saveBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span aria-hidden="true">⏳</span> 保存中...';
+
+            const config = {
+                security: {
+                    login: {
+                        max_attempts: parseInt(document.getElementById('login_max_attempts').value, 10),
+                        block_duration: parseInt(document.getElementById('login_block_duration').value, 10)
+                    },
+                    session: {
+                        ttl: parseInt(document.getElementById('session_ttl').value, 10),
+                        cleanup_interval: parseInt(document.getElementById('session_cleanup_interval').value, 10)
+                    },
+                    captcha: {
+                        ttl: parseInt(document.getElementById('captcha_ttl').value, 10)
+                    },
+                    rate_limit: {
+                        api_limit: parseInt(document.getElementById('api_limit').value, 10),
+                        api_window: parseInt(document.getElementById('api_window').value, 10)
+                    }
+                },
+                performance: {
+                    log_channel_size: parseInt(document.getElementById('log_channel_size').value, 10),
+                    cache_size: parseInt(document.getElementById('cache_size').value, 10),
+                    cache_ttl: parseInt(document.getElementById('cache_ttl').value, 10),
+                    max_request_body: parseInt(document.getElementById('max_request_body').value, 10),
+                    scan_buffer: parseInt(document.getElementById('scan_buffer').value, 10)
+                },
+                scheduler: {
+                    health_check: parseInt(document.getElementById('health_check').value, 10),
+                    log_flush: parseInt(document.getElementById('log_flush').value, 10),
+                    log_cleanup: parseInt(document.getElementById('log_cleanup').value, 10),
+                    metrics_cleanup: parseInt(document.getElementById('metrics_cleanup').value, 10),
+                    rule_reload: parseInt(document.getElementById('rule_reload').value, 10)
+                },
+                websocket: {
+                    dashboard_push: parseInt(document.getElementById('dashboard_push').value, 10),
+                    log_heartbeat: parseInt(document.getElementById('log_heartbeat').value, 10),
+                    buffer_size: parseInt(document.getElementById('buffer_size').value, 10),
+                    broadcast_channel: parseInt(document.getElementById('broadcast_channel').value, 10)
+                }
+            };
+
+            fetch('/api/config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': getCSRFToken()
+                },
+                body: JSON.stringify(config)
+            })
+            .then(r => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
+            })
+            .then(data => {
+                if (data.error) {
+                    showAlert('error', '❌ ' + data.error);
+                } else {
+                    showAlert('success', '✅ 配置保存成功！部分配置需要重启服务生效。');
+                    hasChanges = false;
+                    originalConfig = JSON.parse(JSON.stringify(config));
+                    // 移除所有修改高亮
+                    document.querySelectorAll('.config-changed').forEach(el => el.classList.remove('config-changed'));
+                }
+            })
+            .catch(err => {
+                showAlert('error', '❌ 保存配置失败: ' + err.message);
+            })
+            .finally(() => {
+                btn.disabled = false;
+                btn.innerHTML = '<span aria-hidden="true">💾</span> 保存配置';
+            });
+        }
+
+        function resetConfig() {
+            if (!confirm('⚠️ 确定要恢复默认配置吗？这将覆盖当前所有配置。')) return;
+
+            fetch('/api/config/reset', {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-Token': getCSRFToken()
+                }
+            })
+            .then(r => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
+            })
+            .then(data => {
+                if (data.error) {
+                    showAlert('error', '❌ ' + data.error);
+                } else {
+                    showAlert('success', '✅ 已恢复默认配置');
+                    setTimeout(loadConfig, 500);
+                }
+            })
+            .catch(err => {
+                showAlert('error', '❌ 恢复默认配置失败: ' + err.message);
+            });
+        }
+
+        function showAlert(type, message) {
+            const alertEl = document.getElementById('alert');
+            alertEl.className = `alert alert-${type}`;
+            alertEl.textContent = message;
+            alertEl.style.display = 'flex';
+            setTimeout(() => {
+                alertEl.style.display = 'none';
+            }, 5000);
+        }
+
+        function getCSRFToken() {
+            const csrfCookie = document.cookie.split('; ')
+                .find(row => row.startsWith('csrf_token='));
+            return csrfCookie ? csrfCookie.split('=')[1] : '';
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            loadConfig();
+
+            const inputs = document.querySelectorAll('input, select');
+            inputs.forEach(input => {
+                input.addEventListener('change', function() {
+                    hasChanges = true;
+                    this.classList.add('config-changed');
+                });
+            });
+        });
+
+        window.addEventListener('beforeunload', function(e) {
+            if (hasChanges) {
+                e.preventDefault();
+                e.returnValue = '您有未保存的配置更改，确定要离开吗？';
+            }
+        });
+    </script>
+</body>
+</html>

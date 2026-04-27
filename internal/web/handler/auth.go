@@ -2,16 +2,23 @@ package handler
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
 	"image/png"
+	"log"
 	"math/big"
 	"net"
 	"net/http"
 	"sync"
+	"html/template"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 
 	"gowaf-demo/internal/backend"
 	"gowaf-demo/internal/config"
@@ -20,6 +27,7 @@ import (
 	"gowaf-demo/internal/rules"
 	"gowaf-demo/internal/web"
 	"gowaf-demo/internal/web/middleware"
+	"gowaf-demo/internal/web/templates"
 )
 
 var cfg *config.Config
@@ -42,6 +50,8 @@ var ProxyServerManager interface {
 	ReloadAll() error
 }
 
+var cfgMu sync.RWMutex // 保护配置修改的并发安全
+
 // --- 登录暴力破解防护 ---
 
 var (
@@ -50,10 +60,11 @@ var (
 	loginMu       sync.RWMutex
 )
 
-const (
-	maxLoginAttempts   = 5
-	loginBlockDuration = 15 * time.Minute
-)
+// 移除硬编码常量,改用配置
+// const (
+// 	maxLoginAttempts   = 5
+// 	loginBlockDuration = 15 * time.Minute
+// )
 
 func isLoginBlocked(ip string) bool {
 	loginMu.RLock()
@@ -65,12 +76,39 @@ func isLoginBlocked(ip string) bool {
 	return time.Now().Before(blockedUntil)
 }
 
+// getSecurityConfig 获取当前的安全配置（优先从数据库）
+func getSecurityConfig() config.SecurityConfig {
+	if configDB == nil {
+		return config.GetDefaultRuntimeConfig().Security
+	}
+	var jsonStr string
+	// 使用统一的接口调用，避免复杂的类型断言
+	type Querier interface {
+		QueryRow(string, ...interface{}) *sql.Row
+	}
+	q, ok := configDB.(Querier)
+	if !ok {
+		return config.GetDefaultRuntimeConfig().Security
+	}
+
+	err := q.QueryRow("SELECT value FROM system_config WHERE key='runtime_config'").Scan(&jsonStr)
+	if err != nil || jsonStr == "" {
+		return config.GetDefaultRuntimeConfig().Security
+	}
+	var rc config.RuntimeConfig
+	if err := json.Unmarshal([]byte(jsonStr), &rc); err != nil {
+		return config.GetDefaultRuntimeConfig().Security
+	}
+	return rc.Security
+}
+
 func recordLoginFailure(ip string) {
 	loginMu.Lock()
 	defer loginMu.Unlock()
+	secCfg := getSecurityConfig()
 	loginAttempts[ip]++
-	if loginAttempts[ip] >= maxLoginAttempts {
-		loginBlocked[ip] = time.Now().Add(loginBlockDuration)
+	if loginAttempts[ip] >= secCfg.Login.MaxAttempts {
+		loginBlocked[ip] = time.Now().Add(time.Duration(secCfg.Login.BlockDuration) * time.Minute)
 		delete(loginAttempts, ip)
 	}
 }
@@ -100,11 +138,47 @@ type captchaEntry struct {
 var (
 	captchaStore = make(map[string]captchaEntry) // captchaID -> answer
 	captchaMu    sync.RWMutex
-	captchaTTL   = 5 * time.Minute
+	// captchaTTL   = 5 * time.Minute // 移除硬编码,改用配置
 )
 
 // captchaChars 验证码字符集（排除易混淆字符：0/O, 1/l/I）
 const captchaChars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+
+// captchaFont 验证码字体点阵（定义为包级变量，避免重复创建）
+var captchaFont = map[rune][]string{
+	'2': {"01100", "10010", "10010", "00100", "01000", "10000", "11110"},
+	'3': {"01110", "10001", "00001", "00110", "00001", "10001", "01110"},
+	'4': {"00100", "01100", "10100", "10100", "11111", "00100", "00100"},
+	'5': {"11111", "10000", "11110", "00001", "00001", "10001", "01110"},
+	'6': {"00110", "01000", "10000", "11110", "10001", "10001", "01110"},
+	'7': {"11111", "00001", "00010", "00100", "01000", "01000", "01000"},
+	'8': {"01110", "10001", "10001", "01110", "10001", "10001", "01110"},
+	'9': {"01110", "10001", "10001", "01111", "00001", "00010", "01100"},
+	'A': {"01110", "10001", "10001", "11111", "10001", "10001", "10001"},
+	'B': {"11110", "10001", "10001", "11110", "10001", "10001", "11110"},
+	'C': {"01110", "10001", "10000", "10000", "10000", "10001", "01110"},
+	'D': {"11100", "10010", "10001", "10001", "10001", "10010", "11100"},
+	'E': {"11111", "10000", "10000", "11110", "10000", "10000", "11111"},
+	'F': {"11111", "10000", "10000", "11110", "10000", "10000", "10000"},
+	'G': {"01110", "10001", "10000", "10111", "10001", "10001", "01110"},
+	'H': {"10001", "10001", "10001", "11111", "10001", "10001", "10001"},
+	'J': {"00111", "00010", "00010", "00010", "00010", "10010", "01100"},
+	'K': {"10001", "10010", "10100", "11000", "10100", "10010", "10001"},
+	'L': {"10000", "10000", "10000", "10000", "10000", "10000", "11111"},
+	'M': {"10001", "11011", "10101", "10101", "10001", "10001", "10001"},
+	'N': {"10001", "11001", "10101", "10011", "10001", "10001", "10001"},
+	'P': {"11110", "10001", "10001", "11110", "10000", "10000", "10000"},
+	'Q': {"01110", "10001", "10001", "10001", "10101", "10010", "01101"},
+	'R': {"11110", "10001", "10001", "11110", "10100", "10010", "10001"},
+	'S': {"01110", "10001", "10000", "01110", "00001", "10001", "01110"},
+	'T': {"11111", "00100", "00100", "00100", "00100", "00100", "00100"},
+	'U': {"10001", "10001", "10001", "10001", "10001", "10001", "01110"},
+	'V': {"10001", "10001", "10001", "10001", "01010", "01010", "00100"},
+	'W': {"10001", "10001", "10001", "10101", "10101", "11011", "10001"},
+	'X': {"10001", "10001", "01010", "00100", "01010", "10001", "10001"},
+	'Y': {"10001", "10001", "01010", "00100", "00100", "00100", "00100"},
+	'Z': {"11111", "00001", "00010", "00100", "01000", "10000", "11111"},
+}
 
 // generateCaptcha 生成验证码：返回 (captchaID, answer)
 func generateCaptcha() (string, string) {
@@ -147,7 +221,8 @@ func validateCaptcha(captchaID, userInput string) bool {
 	delete(captchaStore, captchaID)
 
 	// 检查过期
-	if time.Since(entry.createdAt) > captchaTTL {
+	secCfg := getSecurityConfig()
+	if time.Since(entry.createdAt) > time.Duration(secCfg.Captcha.TTL)*time.Minute {
 		return false
 	}
 
@@ -181,6 +256,8 @@ func cleanExpiredCaptchas() {
 	captchaMu.Lock()
 	defer captchaMu.Unlock()
 	now := time.Now()
+	secCfg := getSecurityConfig()
+	captchaTTL := time.Duration(secCfg.Captcha.TTL) * time.Minute
 	for id, entry := range captchaStore {
 		if now.Sub(entry.createdAt) > captchaTTL {
 			delete(captchaStore, id)
@@ -262,43 +339,7 @@ func drawLine(img *image.RGBA, x1, y1, x2, y2 int, c color.Color) {
 
 // drawChar 用简单点阵绘制字符
 func drawChar(img *image.RGBA, x, y int, ch rune, c color.Color) {
-	// 简单的5x7点阵字体定义（大写字母和数字）
-	font := map[rune][]string{
-		'2': {"01100", "10010", "10010", "00100", "01000", "10000", "11110"},
-		'3': {"01110", "10001", "00001", "00110", "00001", "10001", "01110"},
-		'4': {"00100", "01100", "10100", "10100", "11111", "00100", "00100"},
-		'5': {"11111", "10000", "11110", "00001", "00001", "10001", "01110"},
-		'6': {"00110", "01000", "10000", "11110", "10001", "10001", "01110"},
-		'7': {"11111", "00001", "00010", "00100", "01000", "01000", "01000"},
-		'8': {"01110", "10001", "10001", "01110", "10001", "10001", "01110"},
-		'9': {"01110", "10001", "10001", "01111", "00001", "00010", "01100"},
-		'A': {"01110", "10001", "10001", "11111", "10001", "10001", "10001"},
-		'B': {"11110", "10001", "10001", "11110", "10001", "10001", "11110"},
-		'C': {"01110", "10001", "10000", "10000", "10000", "10001", "01110"},
-		'D': {"11100", "10010", "10001", "10001", "10001", "10010", "11100"},
-		'E': {"11111", "10000", "10000", "11110", "10000", "10000", "11111"},
-		'F': {"11111", "10000", "10000", "11110", "10000", "10000", "10000"},
-		'G': {"01110", "10001", "10000", "10111", "10001", "10001", "01110"},
-		'H': {"10001", "10001", "10001", "11111", "10001", "10001", "10001"},
-		'J': {"00111", "00010", "00010", "00010", "00010", "10010", "01100"},
-		'K': {"10001", "10010", "10100", "11000", "10100", "10010", "10001"},
-		'L': {"10000", "10000", "10000", "10000", "10000", "10000", "11111"},
-		'M': {"10001", "11011", "10101", "10101", "10001", "10001", "10001"},
-		'N': {"10001", "11001", "10101", "10011", "10001", "10001", "10001"},
-		'P': {"11110", "10001", "10001", "11110", "10000", "10000", "10000"},
-		'Q': {"01110", "10001", "10001", "10001", "10101", "10010", "01101"},
-		'R': {"11110", "10001", "10001", "11110", "10100", "10010", "10001"},
-		'S': {"01110", "10001", "10000", "01110", "00001", "10001", "01110"},
-		'T': {"11111", "00100", "00100", "00100", "00100", "00100", "00100"},
-		'U': {"10001", "10001", "10001", "10001", "10001", "10001", "01110"},
-		'V': {"10001", "10001", "10001", "10001", "01010", "01010", "00100"},
-		'W': {"10001", "10001", "10001", "10101", "10101", "11011", "10001"},
-		'X': {"10001", "10001", "01010", "00100", "01010", "10001", "10001"},
-		'Y': {"10001", "10001", "01010", "00100", "00100", "00100", "00100"},
-		'Z': {"11111", "00001", "00010", "00100", "01000", "10000", "11111"},
-	}
-
-	rows, ok := font[ch]
+	rows, ok := captchaFont[ch]
 	if !ok {
 		return
 	}
@@ -354,6 +395,7 @@ func CaptchaHandler(w http.ResponseWriter, r *http.Request) {
 		Value:    captchaID,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   r.TLS != nil,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   300,
 	})
@@ -393,6 +435,8 @@ func LoginPage(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
 		clientIP := getClientIP(r)
 		blocked := isLoginBlocked(clientIP)
+		secCfg := getSecurityConfig()
+		blockMins := secCfg.Login.BlockDuration
 
 		html := `<!DOCTYPE html>
 <html>
@@ -444,7 +488,7 @@ func LoginPage(w http.ResponseWriter, r *http.Request) {
         <h1>GoWAF</h1>
         <div class="subtitle">Web 应用防火墙</div>`
 		if blocked {
-			html += `<div class="blocked">登录尝试过多，请15分钟后再试</div>
+			html += `<div class="blocked">` + fmt.Sprintf("登录尝试过多，请%d分钟后再试", blockMins) + `</div>
         <form method="POST" onsubmit="return false;">
             <div class="input-group">
                 <label>用户名</label>
@@ -495,7 +539,8 @@ func LoginPage(w http.ResponseWriter, r *http.Request) {
 	clientIP := getClientIP(r)
 
 	if isLoginBlocked(clientIP) {
-		renderLoginError(w, "登录尝试过多，请15分钟后再试")
+		secCfg := getSecurityConfig()
+		renderLoginError(w, fmt.Sprintf("登录尝试过多，请%d分钟后再试", secCfg.Login.BlockDuration))
 		return
 	}
 
@@ -516,10 +561,25 @@ func LoginPage(w http.ResponseWriter, r *http.Request) {
 
 	user := r.FormValue("username")
 	pass := r.FormValue("password")
-	if user == cfg.Auth.Username && pass == cfg.Auth.Password {
+	
+	// 优先使用哈希密码验证，兼容旧版明文密码
+	isValid := false
+	cfgMu.RLock()
+	if cfg.Admin.PasswordHash != "" {
+		if user == cfg.Admin.Username && checkPassword(pass, cfg.Admin.PasswordHash) {
+			isValid = true
+		}
+	} else if user == cfg.Auth.Username && pass == cfg.Auth.Password {
+		// 兼容旧的明文配置
+		isValid = true
+	}
+	cfgMu.RUnlock()
+
+	if isValid {
 		clearLoginAttempts(clientIP)
 		token := middleware.GenerateSessionToken()
 		middleware.AddSession(token)
+		secCfg := getSecurityConfig()
 		http.SetCookie(w, &http.Cookie{
 			Name:     "session",
 			Value:    token,
@@ -527,7 +587,7 @@ func LoginPage(w http.ResponseWriter, r *http.Request) {
 			HttpOnly: true,
 			Secure:   r.TLS != nil,
 			SameSite: http.SameSiteStrictMode,
-			MaxAge:   3600,
+			MaxAge:   secCfg.Session.TTL * 3600, // 使用配置中的Session TTL(小时转秒)
 		})
 		csrfToken := middleware.GenerateSessionToken()
 		http.SetCookie(w, &http.Cookie{
@@ -537,7 +597,7 @@ func LoginPage(w http.ResponseWriter, r *http.Request) {
 			HttpOnly: false,
 			Secure:   r.TLS != nil,
 			SameSite: http.SameSiteStrictMode,
-			MaxAge:   3600,
+			MaxAge:   secCfg.Session.TTL * 3600, // 使用配置中的Session TTL(小时转秒)
 		})
 		// 清除captcha_id cookie
 		http.SetCookie(w, &http.Cookie{Name: "captcha_id", MaxAge: -1, Path: "/"})
@@ -559,7 +619,8 @@ func Logout(w http.ResponseWriter, r *http.Request) {
 // StartSessionCleaner 启动 session 和 captcha 清理器
 func StartSessionCleaner() {
 	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
+		secCfg := getSecurityConfig()
+		ticker := time.NewTicker(time.Duration(secCfg.Session.CleanupInterval) * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
 			middleware.CleanExpiredSessions()
@@ -570,6 +631,7 @@ func StartSessionCleaner() {
 
 // renderLoginError 渲染带错误提示的登录页面
 func renderLoginError(w http.ResponseWriter, errorMsg string) {
+	safeMsg := template.HTMLEscapeString(errorMsg)
 	html := `<!DOCTYPE html>
 <html>
 <head>
@@ -632,7 +694,7 @@ func renderLoginError(w http.ResponseWriter, errorMsg string) {
     <div class="login-card">
         <h1>GoWAF</h1>
         <div class="subtitle">Web 应用防火墙</div>
-        <div class="error-msg" id="errorMsg">` + errorMsg + `</div>
+        <div class="error-msg" id="errorMsg">` + safeMsg + `</div>
         <form method="POST">
             <div class="input-group">
                 <label>用户名</label>
@@ -670,4 +732,74 @@ func renderLoginError(w http.ResponseWriter, errorMsg string) {
 </html>`
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(html))
+}
+
+// ChangePasswordPage 修改密码页面
+func ChangePasswordPage(w http.ResponseWriter, r *http.Request) {
+	// 直接使用 templates 包下的变量
+	data := map[string]interface{}{
+		"Active": "change_password",
+	}
+	templates.ChangePasswordTmpl.ExecuteTemplate(w, "change_password", data)
+}
+
+// APIChangePassword 修改密码接口
+func APIChangePassword(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"error": "无效的请求格式"})
+		return
+	}
+
+	cfgMu.RLock()
+	currentHash := cfg.Admin.PasswordHash
+	cfgMu.RUnlock()
+
+	if !checkPassword(req.OldPassword, currentHash) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"error": "原密码错误"})
+		return
+	}
+
+	newHash, err := hashPassword(req.NewPassword)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"error": "密码加密失败"})
+		return
+	}
+
+	// 更新配置
+	cfgMu.Lock()
+	cfg.Admin.PasswordHash = newHash
+	// 同步更新 Auth 字段以确保兼容性，但实际验证将优先使用 Hash
+	cfg.Auth.Password = "" // 清空明文，强制使用哈希验证
+	cfgMu.Unlock()
+
+	// 持久化到数据库
+	if configDB != nil {
+		_, err := configDB.Exec("UPDATE system_config SET value=? WHERE key='admin_password_hash'", newHash)
+		if err != nil {
+			log.Printf("Failed to save new password to DB: %v", err)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "密码修改成功，请重新登录"})
+}
+
+// checkPassword 检查密码是否匹配哈希
+func checkPassword(password, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	return err == nil
+}
+
+// hashPassword 对密码进行哈希处理
+func hashPassword(password string) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	return string(bytes), err
 }

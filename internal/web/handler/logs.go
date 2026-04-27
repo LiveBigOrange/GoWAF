@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"gowaf-demo/internal/logger"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,26 +15,8 @@ import (
 	"time"
 )
 
-// LogEntry 日志条目结构（与logger.AccessLog保持一致）
-type LogEntry struct {
-	Timestamp    string  `json:"timestamp"`
-	ClientIP     string  `json:"client_ip"`
-	Method       string  `json:"method"`
-	Path         string  `json:"path"`
-	Status       int     `json:"status"`
-	Action       string  `json:"action"`
-	RequestID    string  `json:"request_id"`
-	Host         string  `json:"host,omitempty"`
-	Query        string  `json:"query,omitempty"`
-	UserAgent    string  `json:"user_agent,omitempty"`
-	Referer      string  `json:"referer,omitempty"`
-	ContentType  string  `json:"content_type,omitempty"`
-	RuleID       string  `json:"rule_id,omitempty"`
-	UpstreamAddr string  `json:"upstream_addr,omitempty"`
-	LatencyMs    float64 `json:"latency_ms"`
-	LatencyUs    int64   `json:"latency_us,omitempty"`
-	BodySize     int64   `json:"body_size,omitempty"`
-}
+// LogEntry 日志条目结构 - 使用统一的AccessLog结构
+type LogEntry = logger.AccessLog
 
 // LogQueryRequest 日志查询请求
 type LogQueryRequest struct {
@@ -128,6 +111,15 @@ func GetLogsList(w http.ResponseWriter, r *http.Request) {
 			"size":  query.PageSize,
 		})
 		return
+	}
+
+	// 为每条日志填充地理位置
+	if MetricsManager != nil {
+		for i := range entries {
+			geo := MetricsManager.GetGeoLocation(entries[i].ClientIP)
+			entries[i].GeoCountry = geo.Country
+			entries[i].GeoFlag = geo.Flag
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -253,8 +245,27 @@ func GetLogFileInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 清理路径，移除多余的斜杠和反斜杠
-	logFile = filepath.Clean(logFile)
+	// 清理路径并获取绝对路径
+	absPath, err := filepath.Abs(filepath.Clean(logFile))
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": "invalid file path: " + err.Error(),
+		})
+		return
+	}
+
+	// 获取当前工作目录，确保文件在项目根目录或日志目录下
+	wd, _ := os.Getwd()
+	// 简单校验：确保路径不以 .. 开头且是绝对路径
+	if !strings.HasPrefix(absPath, wd) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": "invalid file path: access denied",
+		})
+		return
+	}
+	logFile = absPath
 
 	info, err := os.Stat(logFile)
 	if err != nil {
@@ -292,8 +303,8 @@ func GetLogFileInfo(w http.ResponseWriter, r *http.Request) {
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 
-	// 使用多格式解析器
-	parser := NewMultiFormatParser()
+	// 使用JSON解析器
+	parser := NewJSONLogParser()
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -500,8 +511,8 @@ func readRecentLogsFromFile(filePath string, limit int) ([]LogEntry, error) {
 		}
 	}
 
-	// 使用多格式解析器
-	parser := NewMultiFormatParser()
+	// 使用JSON解析器
+	parser := NewJSONLogParser()
 	var entries []LogEntry
 	for _, line := range lines {
 		entry, err := parser.Parse(line)
@@ -559,8 +570,8 @@ func readAndFilterLogs(filename string, query *LogQueryRequest) ([]LogEntry, int
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 
-	// 使用多格式解析器
-	parser := NewMultiFormatParser()
+	// 使用JSON解析器
+	parser := NewJSONLogParser()
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -691,8 +702,8 @@ func findLogByRequestID(filename, requestID string) (*LogEntry, error) {
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 
-	// 使用多格式解析器
-	parser := NewMultiFormatParser()
+	// 使用JSON解析器
+	parser := NewJSONLogParser()
 
 	for scanner.Scan() {
 		line := scanner.Text()

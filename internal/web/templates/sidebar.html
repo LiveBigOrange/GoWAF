@@ -2,7 +2,7 @@
 <div class="sidebar">
     <div class="sidebar-header">
         <h2>🛡️ GoWAF</h2>
-        <small>v1.0.0</small>
+        <small>v1.1.0</small>
     </div>
     <div class="nav">
         <!-- 仪表盘 - 一级菜单 -->
@@ -25,7 +25,7 @@
         </div>
         
         <!-- 安全防护 - 一级菜单（可展开） -->
-        <div class="nav-group{{if or (eq .Active "detector") (eq .Active "rules") (eq .Active "ua") (eq .Active "path") (eq .Active "ratelimit")}} expanded{{end}}" data-group="security">
+        <div class="nav-group{{if or (or (or (or (or (or (or (eq .Active "detector") (eq .Active "rules")) (eq .Active "ua")) (eq .Active "path")) (eq .Active "ratelimit")) (eq .Active "geoblock")) (eq .Active "httpmethods")) (eq .Active "pathratelimit")}} expanded{{end}}" data-group="security">
             <div class="nav-group-header">
                 <span>🛡️ 安全防护</span>
                 <span class="nav-arrow">▼</span>
@@ -35,7 +35,10 @@
                 <a href="/rules" class="nav-item sub-item{{if eq .Active "rules"}} active{{end}}">IP规则</a>
                 <a href="/ua" class="nav-item sub-item{{if eq .Active "ua"}} active{{end}}">UA规则</a>
                 <a href="/path" class="nav-item sub-item{{if eq .Active "path"}} active{{end}}">路径规则</a>
-                <a href="/ratelimit" class="nav-item sub-item{{if eq .Active "ratelimit"}} active{{end}}">限流配置</a>
+                <a href="/geoblock" class="nav-item sub-item{{if eq .Active "geoblock"}} active{{end}}">GeoIP阻断</a>
+                <a href="/httpmethods" class="nav-item sub-item{{if eq .Active "httpmethods"}} active{{end}}">方法限制</a>
+                <a href="/pathratelimit" class="nav-item sub-item{{if eq .Active "pathratelimit"}} active{{end}}">路径限流</a>
+                <a href="/ratelimit" class="nav-item sub-item{{if eq .Active "ratelimit"}} active{{end}}">全局限流</a>
             </div>
         </div>
         
@@ -49,6 +52,21 @@
                 <a href="/intercepts" class="nav-item sub-item{{if eq .Active "intercepts"}} active{{end}}">拦截数据</a>
                 <a href="/logs" class="nav-item sub-item{{if eq .Active "logs"}} active{{end}}">访问日志</a>
                 <a href="/adminlog" class="nav-item sub-item{{if eq .Active "adminlog"}} active{{end}}">管理日志</a>
+            </div>
+        </div>
+        
+        <!-- 系统配置 - 一级菜单（可展开） -->
+        <div class="nav-group{{if or (eq .Active "config-security") (eq .Active "config-performance") (eq .Active "config-scheduler") (eq .Active "config-websocket") (eq .Active "change_password")}} expanded{{end}}" data-group="config">
+            <div class="nav-group-header">
+                <span>⚙️ 系统配置</span>
+                <span class="nav-arrow">▼</span>
+            </div>
+            <div class="nav-group-items">
+                <a href="/config-security" class="nav-item sub-item{{if eq .Active "config-security"}} active{{end}}">安全配置</a>
+                <a href="/config-performance" class="nav-item sub-item{{if eq .Active "config-performance"}} active{{end}}">性能配置</a>
+                <a href="/config-scheduler" class="nav-item sub-item{{if eq .Active "config-scheduler"}} active{{end}}">定时任务</a>
+                <a href="/config-websocket" class="nav-item sub-item{{if eq .Active "config-websocket"}} active{{end}}">WebSocket</a>
+                <a href="/change-password" class="nav-item sub-item{{if eq .Active "change_password"}} active{{end}}">修改密码</a>
             </div>
         </div>
     </div>
@@ -139,5 +157,48 @@
         }
     }
 })();
+
+// Global showToast
+window.showToast = function(type, message, duration) {
+    duration = duration || 3000;
+    var existing = document.querySelectorAll('.toast.show');
+    if (existing.length >= 3) {
+        existing[0].remove();
+    }
+    var offset = 20;
+    document.querySelectorAll('.toast.show').forEach(function(t) {
+        t.style.top = offset + 'px';
+        offset += t.offsetHeight + 8;
+    });
+    var toast = document.createElement('div');
+    toast.className = 'toast ' + type;
+    toast.textContent = message;
+    toast.style.top = offset + 'px';
+    toast.style.pointerEvents = 'auto';
+    document.body.appendChild(toast);
+    requestAnimationFrame(function() {
+        toast.classList.add('show');
+    });
+    setTimeout(function() {
+        toast.classList.remove('show');
+        setTimeout(function() { toast.remove(); }, 300);
+    }, duration);
+};
+
+// Escape key to close modals
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        var openModal = document.querySelector('.modal.show') || document.querySelector('.modal[style*="display: block"]');
+        if (openModal) {
+            var closeBtn = openModal.querySelector('.close');
+            if (closeBtn) {
+                closeBtn.click();
+            } else {
+                openModal.classList.remove('show');
+                openModal.style.display = 'none';
+            }
+        }
+    }
+});
 </script>
 {{end}}

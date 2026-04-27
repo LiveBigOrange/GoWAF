@@ -14,6 +14,7 @@
             gap: 15px;
             margin-bottom: 20px;
             align-items: center;
+            flex-wrap: wrap;
         }
         .filter-bar select {
             padding: 8px 30px 8px 12px;
@@ -46,7 +47,7 @@
             position: relative;
             flex: 1;
             max-width: 400px;
-            min-width: 250px;
+            min-width: 0;
         }
         .search-container input {
             width: 100%;
@@ -119,23 +120,18 @@
         .add-btn:hover {
             background: #66b1ff;
         }
+        .toggle-btn { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 12px; cursor: pointer; user-select: none; }
+        .toggle-btn.enabled { background: #e1f3d8; color: #67c23a; }
+        .toggle-btn.disabled { background: #fde2e2; color: #f56c6c; }
+        .edit-btn { padding: 4px 10px; background: #e6a23c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
+        .edit-btn:hover { background: #ebb563; }
         /* 模态框样式 */
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.5);
-        }
         .modal-content {
             background-color: #fff;
-            margin: 10% auto;
             padding: 0;
             border-radius: 8px;
             width: 500px;
+            max-width: 90%;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         }
         .modal-header {
@@ -292,7 +288,7 @@
             <!-- 规则列表 -->
             <table>
                 <thead>
-                    <tr><th>类型</th><th>匹配方式</th><th>模式</th><th>操作</th></tr>
+                    <tr><th>类型</th><th>匹配方式</th><th>模式</th><th>说明</th><th>状态</th><th>操作</th></tr>
                 </thead>
                 <tbody id="tableBody">
                 </tbody>
@@ -348,11 +344,64 @@
                         <input type="text" name="pattern" id="patternInput" placeholder="例如: /admin, .php, .env" required>
                         <small id="patternHint">请输入路径模式</small>
                     </div>
+                    <div class="form-group">
+                        <label>说明</label>
+                        <input type="text" name="description" id="descriptionInput" placeholder="例如: 防止敏感文件泄露">
+                        <small>描述此规则的用途，便于后续维护</small>
+                    </div>
                 </form>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn-cancel" onclick="closeModal()">取消</button>
                 <button type="button" class="btn-submit" onclick="submitForm()">添加</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 编辑规则弹窗 -->
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>编辑路径规则</h3>
+                <span class="close" onclick="closeEditModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>规则类型</label>
+                    <select id="editRuleType">
+                        <option value="whitelist">白名单</option>
+                        <option value="blacklist">黑名单</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>匹配方式</label>
+                    <select id="editMatchType">
+                        <option value="prefix">前缀匹配</option>
+                        <option value="suffix">后缀匹配</option>
+                        <option value="exact">精确匹配</option>
+                        <option value="contains">包含匹配</option>
+                        <option value="regex">正则表达式</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>路径模式</label>
+                    <input type="text" id="editPattern" required>
+                </div>
+                <div class="form-group">
+                    <label>说明</label>
+                    <input type="text" id="editDescription">
+                </div>
+                <div class="form-group">
+                    <label>状态</label>
+                    <select id="editEnabled">
+                        <option value="1">启用</option>
+                        <option value="0">禁用</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-cancel" onclick="closeEditModal()">取消</button>
+                <button type="button" class="btn-submit" onclick="submitEdit()">保存</button>
             </div>
         </div>
     </div>
@@ -372,13 +421,13 @@
             }
 
             window.openModal = function() {
-                document.getElementById('addModal').style.display = 'block';
+                document.getElementById('addModal').classList.add('show');
                 document.getElementById('addForm').reset();
                 updatePatternHint();
             };
 
             window.closeModal = function() {
-                document.getElementById('addModal').style.display = 'none';
+                document.getElementById('addModal').classList.remove('show');
             };
 
             function updatePatternHint() {
@@ -402,16 +451,17 @@
                 var ruleType = document.getElementById('ruleType').value;
                 
                 if (!pattern) {
-                    alert('请输入路径模式');
+                    showToast('error', '请输入路径模式');
                     return false;
                 }
                 
                 // 验证正则表达式
                 if (matchType === 'regex') {
+                    var jsPattern = pattern.replace(/^\(\?[iI]\)/, '');
                     try {
-                        new RegExp(pattern);
+                        new RegExp(jsPattern);
                     } catch (e) {
-                        alert('正则表达式格式不正确: ' + e.message);
+                        showToast('error', '正则表达式格式不正确: ' + e.message);
                         return false;
                     }
                 }
@@ -419,14 +469,14 @@
                 // 路径格式验证
                 if (matchType === 'prefix' || matchType === 'exact') {
                     if (!pattern.startsWith('/')) {
-                        alert('前缀匹配和精确匹配的路径应以 / 开头');
+                        showToast('error', '前缀匹配和精确匹配的路径应以 / 开头');
                         return false;
                     }
                 }
                 
                 // 长度限制
-                if (pattern.length > 500) {
-                    alert('路径模式长度不能超过500字符');
+                if (pattern.length > 2000) {
+                    showToast('error', '路径模式长度不能超过2000字符');
                     return false;
                 }
                 
@@ -435,8 +485,10 @@
                 formData.append('rule_type', ruleType);
                 formData.append('match_type', matchType);
                 formData.append('pattern', pattern);
+                formData.append('description', document.getElementById('descriptionInput').value.trim());
                 formData.append('action', 'add');
                 
+                var btn = document.querySelector('#addModal .btn-submit'); btn.disabled = true;
                 fetch('/path', {
                     method: 'POST',
                     body: formData
@@ -444,15 +496,17 @@
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (data.success) {
+                        showToast('success', '添加成功');
                         closeModal();
                         loadData();
                     } else {
-                        alert('添加失败: ' + (data.error || '未知错误'));
+                        showToast('error', '添加失败: ' + (data.error || '未知错误'));
                     }
                 })
                 .catch(function(e) {
-                    alert('添加失败: ' + e.message);
-                });
+                    showToast('error', '添加失败: ' + e.message);
+                })
+                .finally(function() { btn.disabled = false; });
                 
                 return false;
             };
@@ -480,7 +534,7 @@
                 searchInput.focus();
             };
 
-            function filterData() {
+            window.filterData = function() {
                 var filterType = document.getElementById('filterType').value;
                 var filterMatch = document.getElementById('filterMatch').value;
                 var searchText = document.getElementById('searchPattern').value.toLowerCase().trim();
@@ -506,9 +560,9 @@
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
                         if (data.success) loadData();
-                        else alert('删除失败: ' + (data.error || '未知错误'));
+                        else showToast('error', '删除失败: ' + (data.error || '未知错误'));
                     })
-                    .catch(function(e) { alert('删除失败: ' + e.message); });
+                    .catch(function(e) { showToast('error', '删除失败: ' + e.message); });
             };
 
             function loadData() {
@@ -531,7 +585,7 @@
                 var pagination = document.getElementById('pagination');
                 
                 if (!filteredData || filteredData.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#95a5a6; padding:20px;">暂无规则，请添加</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#95a5a6; padding:20px;">暂无规则，请添加</td></tr>';
                     pagination.style.display = 'none';
                     return;
                 }
@@ -552,7 +606,9 @@
                     tr.innerHTML = '<td><span class="badge ' + item.rule_type + '">' + ruleTypeText + '</span></td>' +
                         '<td><span class="match-type">' + getMatchTypeText(item.match_type) + '</span></td>' +
                         '<td><code>' + escapedPattern + '</code></td>' +
-                        '<td><button class="delete-btn" data-ruletype="' + escapeHtml(item.rule_type) + '" data-path="' + escapeHtml(item.path) + '">删除</button></td>';
+                        '<td style="color:#909399;font-size:13px;">' + escapeHtml(item.description || '') + '</td>' +
+                        '<td><span class="toggle-btn ' + (item.enabled ? 'enabled' : 'disabled') + '" onclick="toggleRule(' + item.id + ')">' + (item.enabled ? '启用' : '禁用') + '</span></td>' +
+                        '<td><button class="edit-btn" onclick="openEditModal(' + item.id + ')">编辑</button> <button class="delete-btn" data-ruletype="' + escapeHtml(item.rule_type) + '" data-path="' + escapeHtml(item.pattern) + '">删除</button></td>';
                     tbody.appendChild(tr);
                 });
 
@@ -576,12 +632,51 @@
             window.nextPage = function() { var totalPages = Math.ceil(filteredData.length / pageSize); if (currentPage < totalPages) { currentPage++; renderData(); } };
             window.changePageSize = function() { pageSize = parseInt(document.getElementById('pageSize').value); currentPage = 1; renderData(); };
 
-            window.onclick = function(event) {
-                var modal = document.getElementById('addModal');
-                if (event.target == modal) closeModal();
-            };
+            window.addEventListener('click', function(event) {
+                if (event.target == document.getElementById('addModal')) closeModal();
+                if (event.target == document.getElementById('editModal')) closeEditModal();
+            });
 
             loadData();
+
+            window.openEditModal = function(id) {
+                var item = allData.find(function(r) { return r.id === id; });
+                if (!item) return;
+                document.getElementById('editRuleType').value = item.rule_type;
+                document.getElementById('editMatchType').value = item.match_type;
+                document.getElementById('editPattern').value = item.pattern;
+                document.getElementById('editDescription').value = item.description || '';
+                document.getElementById('editEnabled').value = item.enabled ? '1' : '0';
+                document.getElementById('editModal').classList.add('show');
+                window._editRuleId = id;
+            };
+            window.closeEditModal = function() {
+                document.getElementById('editModal').classList.remove('show');
+                window._editRuleId = 0;
+            };
+            window.submitEdit = function() {
+                var data = {
+                    id: window._editRuleId,
+                    rule_type: document.getElementById('editRuleType').value,
+                    match_type: document.getElementById('editMatchType').value,
+                    pattern: document.getElementById('editPattern').value.trim(),
+                    description: document.getElementById('editDescription').value.trim(),
+                    enabled: document.getElementById('editEnabled').value === '1'
+                };
+                if (!data.pattern) { showToast('error', '路径模式不能为空'); return; }
+                fetch('/api/path/update', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) })
+                    .then(r => r.json()).then(d => {
+                        if (d.success) { showToast('success', '更新成功'); closeEditModal(); loadData(); }
+                        else showToast('error', '更新失败');
+                    }).catch(e => showToast('error', '更新失败: ' + e.message));
+            };
+            window.toggleRule = function(id) {
+                fetch('/api/path/toggle?id=' + id, { method: 'POST' })
+                    .then(r => r.json()).then(d => {
+                        if (d.success) loadData();
+                        else showToast('error', '切换失败');
+                    }).catch(e => showToast('error', '切换失败'));
+            };
         })();
     </script>
 </body>

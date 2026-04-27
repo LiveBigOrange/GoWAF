@@ -186,7 +186,9 @@ body {
 .main {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 30px 40px;
+    min-width: 0;
 }
 
 .page-title {
@@ -255,6 +257,10 @@ th {
     color: #555;
 }
 
+tbody tr:hover {
+    background: #f5f7fa;
+}
+
 /* 徽章样式 */
 .badge {
     padding: 4px 8px;
@@ -269,36 +275,48 @@ th {
 /* 按钮样式 */
 .btn-primary {
     padding: 10px 20px;
-    background: #27ae60;
+    background: #409eff;
     color: white;
     border: none;
     border-radius: 6px;
     cursor: pointer;
     font-size: 14px;
+    transition: background 0.2s;
 }
 
-.btn-primary:hover { background: #229954; }
+.btn-primary:hover { background: #66b1ff; }
+.btn-primary:focus-visible { outline: 2px solid #409eff; outline-offset: 2px; }
 
 .btn-edit {
     padding: 6px 12px;
-    background: #3498db;
+    background: #409eff;
     color: white;
     border: none;
     border-radius: 4px;
     cursor: pointer;
     font-size: 13px;
     margin-right: 4px;
+    min-height: 32px;
+    transition: background 0.2s;
 }
+
+.btn-edit:hover { background: #66b1ff; }
+.btn-edit:focus-visible { outline: 2px solid #409eff; outline-offset: 2px; }
 
 .btn-delete {
     padding: 6px 12px;
-    background: #e74c3c;
+    background: #f56c6c;
     color: white;
     border: none;
     border-radius: 4px;
     cursor: pointer;
     font-size: 13px;
+    min-height: 32px;
+    transition: background 0.2s;
 }
+
+.btn-delete:hover { background: #f78989; }
+.btn-delete:focus-visible { outline: 2px solid #f56c6c; outline-offset: 2px; }
 
 .btn-cancel, .btn-save {
     padding: 8px 16px;
@@ -314,11 +332,11 @@ th {
 }
 
 .btn-save {
-    background: #3498db;
+    background: #409eff;
     color: white;
 }
 
-.btn-save:hover { background: #2980b9; }
+.btn-save:hover { background: #66b1ff; }
 
 /* 分页样式 */
 .pagination {
@@ -328,6 +346,8 @@ th {
     margin-top: 20px;
     padding-top: 16px;
     border-top: 1px solid #eee;
+    flex-wrap: wrap;
+    gap: 8px;
 }
 
 .pagination-info {
@@ -377,7 +397,12 @@ th {
     z-index: 1000;
 }
 
-.modal.show { display: flex; align-items: center; justify-content: center; }
+.modal.show { display: flex; align-items: center; justify-content: center; animation: modalFadeIn 0.2s ease; }
+
+@keyframes modalFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
 
 .modal-content {
     background: white;
@@ -387,6 +412,12 @@ th {
     max-width: 90%;
     max-height: 80vh;
     overflow-y: auto;
+    animation: modalSlideIn 0.25s ease;
+}
+
+@keyframes modalSlideIn {
+    from { transform: translateY(-20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
 }
 
 .modal-title {
@@ -410,9 +441,16 @@ th {
 .form-group input, .form-group select {
     width: 100%;
     padding: 10px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
+    border: 1px solid #dcdfe6;
+    border-radius: 6px;
     font-size: 14px;
+    transition: border-color 0.2s;
+}
+
+.form-group input:focus, .form-group select:focus {
+    outline: none;
+    border-color: #409eff;
+    box-shadow: 0 0 0 2px rgba(64,158,255,0.15);
 }
 
 .form-section {
@@ -437,20 +475,25 @@ th {
 /* Toast提示 */
 .toast {
     position: fixed;
-    bottom: 20px;
-    right: 20px;
-    padding: 12px 20px;
-    border-radius: 4px;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 12px 24px;
+    border-radius: 8px;
     color: white;
     font-size: 14px;
     opacity: 0;
     transition: opacity 0.3s;
-    z-index: 2000;
+    z-index: 9999;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    pointer-events: none;
+    white-space: nowrap;
 }
 
 .toast.show { opacity: 1; }
-.toast.success { background: #27ae60; }
-.toast.error { background: #e74c3c; }
+.toast.success { background: #67c23a; }
+.toast.error { background: #f56c6c; }
+.toast.warning { background: #e6a23c; }
 
 /* 状态徽章 */
 .status-badge {
@@ -479,8 +522,91 @@ th {
 }
 
 /* 删除链接 */
-.delete-btn { color: #e74c3c; text-decoration: none; background: transparent; border: none; cursor: pointer; font-size: 13px; padding: 4px 8px; border-radius: 4px; }
-.delete-btn:hover { background: #fee; text-decoration: underline; }
+.delete-btn { color: #e74c3c; text-decoration: none; background: transparent; border: none; cursor: pointer; font-size: 13px; padding: 4px 8px; border-radius: 4px; transition: all 0.3s; }
+.delete-btn:hover { background-color: #e74c3c; color: white; }
+
+/* 添加按钮 */
+.add-btn {
+    padding: 8px 20px;
+    background: #409eff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.3s;
+}
+.add-btn:hover { background: #66b1ff; }
+
+/* 模态框内关闭按钮 */
+.close {
+    color: #aaa;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+    line-height: 1;
+}
+.close:hover { color: #000; }
+
+/* 模态框头部/底部 */
+.modal-header {
+    padding: 20px;
+    border-bottom: 1px solid #e8e9ed;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.modal-header h3 {
+    margin: 0;
+    font-size: 18px;
+    color: #2c3e50;
+}
+.modal-body { padding: 20px; }
+.modal-footer {
+    padding: 15px 20px;
+    border-top: 1px solid #e8e9ed;
+    text-align: right;
+}
+
+/* 模态框内表单补充 */
+.form-group small {
+    display: block;
+    margin-top: 5px;
+    color: #909399;
+    font-size: 12px;
+}
+
+/* 模态框内按钮 */
+.btn-cancel {
+    padding: 8px 20px;
+    background: #f5f5f5;
+    color: #606266;
+    border: 1px solid #dcdfe6;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-right: 10px;
+}
+.btn-cancel:hover { background: #e8e8e8; }
+
+.btn-submit {
+    padding: 8px 20px;
+    background: #409eff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+}
+.btn-submit:hover { background: #66b1ff; }
+
+/* 空数据提示 */
+.empty-message {
+    text-align: center;
+    padding: 40px;
+    color: #95a5a6;
+    font-size: 14px;
+}
 
 /* 卡片头部 */
 .card-header {
@@ -518,7 +644,7 @@ th {
 
 .filter-bar button {
     padding: 8px 16px;
-    background: #3498db;
+    background: #409eff;
     color: white;
     border: none;
     border-radius: 4px;
@@ -526,7 +652,7 @@ th {
 }
 
 .filter-bar button:hover {
-    background: #2980b9;
+    background: #66b1ff;
 }
 
 /* 标签栏 */
@@ -548,12 +674,12 @@ th {
 }
 
 .tab-btn:hover {
-    color: #3498db;
+    color: #409eff;
 }
 
 .tab-btn.active {
-    color: #3498db;
-    border-bottom-color: #3498db;
+    color: #409eff;
+    border-bottom-color: #409eff;
 }
 
 /* 响应式设计 - 小屏幕适配 */
@@ -675,6 +801,7 @@ th {
     .nav-group {
         width: auto;
         min-width: 140px;
+        position: relative;
     }
     
     .nav-group-header {
@@ -709,9 +836,14 @@ th {
     .card {
         overflow-x: auto;
     }
-    
+
     table {
         min-width: 600px;
+    }
+
+    .log-table {
+        display: block;
+        overflow-x: auto;
     }
 }
 

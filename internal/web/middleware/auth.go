@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -59,12 +60,29 @@ func isIPAllowed(ipStr string) bool {
 var (
 	apiRequests   = make(map[string][]time.Time)
 	apiRateMu     sync.Mutex
-	apiRateLimit  = 300 // 提高到300次/分钟，适应仪表盘刷新需求（WebSocket连接后仅需要趋势图和检测器状态）
-	apiRateWindow = 1 * time.Minute
+	// 移除硬编码,改用配置
+	// apiRateLimit  = 300 // 提高到300次/分钟，适应仪表盘刷新需求（WebSocket连接后仅需要趋势图和检测器状态）
+	// apiRateWindow = 1 * time.Minute
 )
+
+// 配置变量,由外部设置
+var (
+	apiRateLimit  int
+	apiRateWindow time.Duration
+)
+
+// InitRateLimitConfig 初始化限流配置
+func InitRateLimitConfig(limit int, windowMinutes int) {
+	apiRateLimit = limit
+	apiRateWindow = time.Duration(windowMinutes) * time.Minute
+}
 
 // checkAPIRateLimit 检查API请求频率
 func checkAPIRateLimit(ip string) bool {
+	if apiRateLimit <= 0 || apiRateWindow <= 0 {
+		return true
+	}
+
 	apiRateMu.Lock()
 	defer apiRateMu.Unlock()
 
@@ -79,8 +97,16 @@ func checkAPIRateLimit(ip string) bool {
 		}
 	}
 
-	// 使用令牌桶算法，允许突发流量
-	// 如果在最近1秒内请求少于10次，允许通过（支持页面加载时的突发请求）
+	apiRequests[ip] = validRequests
+
+	if len(apiRequests) > 10000 {
+		for k, v := range apiRequests {
+			if len(v) == 0 {
+				delete(apiRequests, k)
+			}
+		}
+	}
+
 	recentCount := 0
 	oneSecondAgo := now.Add(-1 * time.Second)
 	for _, t := range validRequests {
@@ -88,15 +114,12 @@ func checkAPIRateLimit(ip string) bool {
 			recentCount++
 		}
 	}
-	
-	// 允许每秒最多10次突发请求，但总限制仍为 apiRateLimit
+
 	if recentCount >= 10 {
-		apiRequests[ip] = validRequests
 		return false
 	}
 
 	if len(validRequests) >= apiRateLimit {
-		apiRequests[ip] = validRequests
 		return false
 	}
 
@@ -105,7 +128,7 @@ func checkAPIRateLimit(ip string) bool {
 	return true
 }
 
-// SetAPIRateLimit 设置API限流参数
+// SetAPIRateLimit 设置API限流参数 (已废弃,使用InitRateLimitConfig)
 func SetAPIRateLimit(limit int, window time.Duration) {
 	if limit > 0 {
 		apiRateLimit = limit
@@ -179,6 +202,35 @@ func Auth(next http.Handler) http.Handler {
 			return
 		}
 
+		// Session 自动续期 - 用户活跃时延长Session有效期
+		RenewSession(cookie.Value)
+
+		// CSRF Token 自动续期 - 确保与session同步不过期
+		if csrfCookie, csrfErr := r.Cookie("csrf_token"); csrfErr == nil && csrfCookie.Value != "" {
+			// 刷新csrf_token cookie的MaxAge，防止比session先过期
+			http.SetCookie(w, &http.Cookie{
+				Name:     "csrf_token",
+				Value:    csrfCookie.Value,
+				Path:     "/",
+				HttpOnly: false,
+				Secure:   r.TLS != nil,
+				SameSite: http.SameSiteStrictMode,
+				MaxAge:   int(sessionTTL.Seconds()),
+			})
+		} else {
+			// csrf_token丢失，生成新的
+			newCsrfToken := GenerateSessionToken()
+			http.SetCookie(w, &http.Cookie{
+				Name:     "csrf_token",
+				Value:    newCsrfToken,
+				Path:     "/",
+				HttpOnly: false,
+				Secure:   r.TLS != nil,
+				SameSite: http.SameSiteStrictMode,
+				MaxAge:   int(sessionTTL.Seconds()),
+			})
+		}
+
 		// API限流 - 豁免仪表盘关键 API
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			// 豁免列表：这些 API 是仪表盘必需的，不应该被限流
@@ -210,14 +262,11 @@ func Auth(next http.Handler) http.Handler {
 			}
 		}
 
-		// CSRF 验证：对非GET/HEAD/OPTIONS的写操作验证CSRF Token
+		// CSRF 验证：对所有写操作验证CSRF Token
 		if r.Method != "GET" && r.Method != "HEAD" && r.Method != "OPTIONS" {
-			// API请求和表单POST都需要CSRF验证
-			if strings.HasPrefix(r.URL.Path, "/api/") || r.Method == "POST" {
-				if !validateCSRF(r) {
-					http.Error(w, "Invalid CSRF Token", http.StatusForbidden)
-					return
-				}
+			if !validateCSRF(r) {
+				http.Error(w, "Invalid CSRF Token", http.StatusForbidden)
+				return
 			}
 		}
 
@@ -234,4 +283,14 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		next.ServeHTTP(w, r)
 	})
+}
+
+var maxRequestBody int64 = 0
+
+func SetMaxRequestBody(maxBytes int) {
+	atomic.StoreInt64(&maxRequestBody, int64(maxBytes))
+}
+
+func GetMaxRequestBody() int64 {
+	return atomic.LoadInt64(&maxRequestBody)
 }

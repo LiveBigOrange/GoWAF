@@ -4,14 +4,23 @@ import (
 	"database/sql"
 	"net"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/time/rate"
 )
+
+type ipEntry struct {
+	original string
+	cidr     *net.IPNet
+	isCIDR   bool
+}
 
 type Engine struct {
 	db *sql.DB
 
-	blackIPs map[string]bool
+	blackIPs []ipEntry
 	ipMu     sync.RWMutex
 
 	uaWhitelist []uaRule
@@ -22,12 +31,28 @@ type Engine struct {
 	pathBlacklist []pathRule
 	pathMu        sync.RWMutex
 
-	stopChan chan struct{} // 用于停止自动刷新goroutine
+	geoBlockCountries map[string]bool
+	geoMode           string
+	geoMu             sync.RWMutex
+
+	allowedMethods map[string]bool
+	methodMu       sync.RWMutex
+
+	pathRateLimiters map[string]*pathLimiterEntry
+	pathLimitMu     sync.RWMutex
+
+	stopChan chan struct{}
+}
+
+type pathLimiterEntry struct {
+	pattern *regexp.Regexp
+	limiter *rate.Limiter
 }
 
 type uaRule struct {
-	Pattern string
-	Regex   *regexp.Regexp
+	Pattern   string
+	MatchType string
+	Regex     *regexp.Regexp
 }
 
 type pathRule struct {
@@ -38,19 +63,24 @@ type pathRule struct {
 
 // 导出的类型，供 handler 使用
 type UARuleRow struct {
-	RuleType  string `json:"rule_type"`
-	MatchType string `json:"match_type"`
-	Pattern   string `json:"pattern"`
+	ID          int    `json:"id"`
+	RuleType    string `json:"rule_type"`
+	MatchType   string `json:"match_type"`
+	Pattern     string `json:"pattern"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
 }
 
 type PathRuleRow struct {
-	RuleType  string `json:"rule_type"`
-	MatchType string `json:"match_type"`
-	Pattern   string `json:"pattern"`
+	ID          int    `json:"id"`
+	RuleType    string `json:"rule_type"`
+	MatchType   string `json:"match_type"`
+	Pattern     string `json:"pattern"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
 }
 
 func NewEngine(db *sql.DB) (*Engine, error) {
-	// 创建新的IP规则表（支持黑名单和白名单）
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS ip_rules (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		rule_type TEXT NOT NULL DEFAULT 'blacklist',
@@ -76,6 +106,7 @@ func NewEngine(db *sql.DB) (*Engine, error) {
 		rule_type TEXT NOT NULL,
 		match_type TEXT NOT NULL,
 		pattern TEXT NOT NULL,
+		description TEXT DEFAULT '',
 		enabled INTEGER DEFAULT 1,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE(rule_type, pattern)
@@ -89,6 +120,7 @@ func NewEngine(db *sql.DB) (*Engine, error) {
 		rule_type TEXT NOT NULL,
 		match_type TEXT NOT NULL DEFAULT 'prefix',
 		pattern TEXT NOT NULL,
+		description TEXT DEFAULT '',
 		enabled INTEGER DEFAULT 1,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE(rule_type, pattern)
@@ -120,19 +152,62 @@ func NewEngine(db *sql.DB) (*Engine, error) {
 		}
 	}
 
+	migrateColumn(db, "ua_rules", "description", "TEXT DEFAULT ''")
+	migrateColumn(db, "path_rules", "description", "TEXT DEFAULT ''")
+	migrateColumn(db, "ua_rules", "match_type", "TEXT NOT NULL DEFAULT 'contains'")
+
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS geo_rules (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		mode TEXT NOT NULL DEFAULT 'blacklist',
+		country_code TEXT NOT NULL,
+		enabled INTEGER DEFAULT 1,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(mode, country_code)
+	)`)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS path_rate_limits (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		path_pattern TEXT NOT NULL,
+		rate REAL NOT NULL DEFAULT 10,
+		burst INTEGER NOT NULL DEFAULT 20,
+		enabled INTEGER DEFAULT 1,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS allowed_methods (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		method TEXT NOT NULL UNIQUE,
+		enabled INTEGER DEFAULT 1
+	)`)
+	if err != nil {
+		return nil, err
+	}
+
 	e := &Engine{
-		db:            db,
-		blackIPs:      make(map[string]bool),
-		uaWhitelist:   []uaRule{},
-		uaBlacklist:   []uaRule{},
-		pathWhitelist: []pathRule{},
-		pathBlacklist: []pathRule{},
-		stopChan:      make(chan struct{}),
+		db:                db,
+		blackIPs:          []ipEntry{},
+		uaWhitelist:       []uaRule{},
+		uaBlacklist:       []uaRule{},
+		pathWhitelist:     []pathRule{},
+		pathBlacklist:     []pathRule{},
+		geoBlockCountries: make(map[string]bool),
+		geoMode:           "blacklist",
+		allowedMethods:    make(map[string]bool),
+		pathRateLimiters:  make(map[string]*pathLimiterEntry),
+		stopChan:          make(chan struct{}),
 	}
 
 	if err := e.loadAllRules(); err != nil {
 		return nil, err
 	}
+
+	e.initBuiltinRules()
 
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
@@ -155,36 +230,60 @@ func (e *Engine) Stop() {
 	close(e.stopChan)
 }
 
+func (e *Engine) ReloadRules() error {
+	return e.loadAllRules()
+}
+
 func (e *Engine) loadAllRules() error {
-	e.loadIPRules()
-	e.loadUARules()
-	e.loadPathRules()
+	e.ipMu.Lock()
+	defer e.ipMu.Unlock()
+	
+	e.uaMu.Lock()
+	defer e.uaMu.Unlock()
+	
+	e.pathMu.Lock()
+	defer e.pathMu.Unlock()
+
+	e.loadIPRulesLocked()
+	e.loadUARulesLocked()
+	e.loadPathRulesLocked()
+	e.loadGeoRulesLocked()
+	e.loadAllowedMethodsLocked()
+	e.loadPathRateLimitsLocked()
 	return nil
 }
 
 // ----------------- IP 规则 -----------------
-func (e *Engine) loadIPRules() {
-	// 修复: 从正确的表 ip_rules 加载,并区分黑名单和白名单
+func (e *Engine) loadIPRulesLocked() {
 	rows, err := e.db.Query("SELECT rule_type, ip FROM ip_rules WHERE enabled=1")
 	if err != nil {
-		// 记录错误日志,而不是静默忽略
 		return
 	}
 	defer rows.Close()
 
-	newBlackIPs := make(map[string]bool)
+	var entries []ipEntry
 	for rows.Next() {
 		var ruleType, ip string
-		if err := rows.Scan(&ruleType, &ip); err == nil {
-			// 只加载黑名单规则
-			if ruleType == "blacklist" {
-				newBlackIPs[ip] = true
-			}
+		if err := rows.Scan(&ruleType, &ip); err != nil {
+			continue
 		}
+		if ruleType != "blacklist" {
+			continue
+		}
+		entry := ipEntry{original: ip}
+		if _, cidr, err := net.ParseCIDR(ip); err == nil {
+			entry.cidr = cidr
+			entry.isCIDR = true
+		}
+		entries = append(entries, entry)
 	}
+	e.blackIPs = entries
+}
+
+func (e *Engine) loadIPRules() {
 	e.ipMu.Lock()
-	e.blackIPs = newBlackIPs
-	e.ipMu.Unlock()
+	defer e.ipMu.Unlock()
+	e.loadIPRulesLocked()
 }
 
 func (e *Engine) IsIPBlocked(ipStr string) bool {
@@ -194,14 +293,13 @@ func (e *Engine) IsIPBlocked(ipStr string) bool {
 	}
 	e.ipMu.RLock()
 	defer e.ipMu.RUnlock()
-	for entry := range e.blackIPs {
-		_, cidr, err := net.ParseCIDR(entry)
-		if err == nil {
-			if cidr.Contains(ip) {
+	for _, entry := range e.blackIPs {
+		if entry.isCIDR {
+			if entry.cidr.Contains(ip) {
 				return true
 			}
 		} else {
-			if entry == ipStr {
+			if entry.original == ipStr {
 				return true
 			}
 		}
@@ -268,7 +366,7 @@ func (e *Engine) ListIPs() ([]string, error) {
 }
 
 // ----------------- UA 规则 -----------------
-func (e *Engine) loadUARules() {
+func (e *Engine) loadUARulesLocked() {
 	rows, err := e.db.Query("SELECT rule_type, match_type, pattern FROM ua_rules WHERE enabled=1")
 	if err != nil {
 		return
@@ -281,7 +379,7 @@ func (e *Engine) loadUARules() {
 		if err := rows.Scan(&ruleType, &matchType, &pattern); err != nil {
 			continue
 		}
-		rule := uaRule{Pattern: pattern}
+		rule := uaRule{Pattern: pattern, MatchType: matchType}
 		if matchType == "regex" {
 			re, err := regexp.Compile(pattern)
 			if err != nil {
@@ -295,44 +393,50 @@ func (e *Engine) loadUARules() {
 			blacklist = append(blacklist, rule)
 		}
 	}
-	e.uaMu.Lock()
 	e.uaWhitelist = whitelist
 	e.uaBlacklist = blacklist
-	e.uaMu.Unlock()
+}
+
+func (e *Engine) loadUARules() {
+	e.uaMu.Lock()
+	defer e.uaMu.Unlock()
+	e.loadUARulesLocked()
 }
 
 func (e *Engine) CheckUA(userAgent string) bool {
 	e.uaMu.RLock()
 	defer e.uaMu.RUnlock()
 
-	for _, rule := range e.uaWhitelist {
+	matchRule := func(rule uaRule, ua string) bool {
 		if rule.Regex != nil {
-			if rule.Regex.MatchString(userAgent) {
-				return false
-			}
-		} else {
-			if rule.Pattern == userAgent {
-				return false
-			}
+			return rule.Regex.MatchString(ua)
+		}
+		switch rule.MatchType {
+		case "contains":
+			return strings.Contains(ua, rule.Pattern)
+		case "exact":
+			return rule.Pattern == ua
+		default:
+			return rule.Pattern == ua
+		}
+	}
+
+	for _, rule := range e.uaWhitelist {
+		if matchRule(rule, userAgent) {
+			return false
 		}
 	}
 	for _, rule := range e.uaBlacklist {
-		if rule.Regex != nil {
-			if rule.Regex.MatchString(userAgent) {
-				return true
-			}
-		} else {
-			if rule.Pattern == userAgent {
-				return true
-			}
+		if matchRule(rule, userAgent) {
+			return true
 		}
 	}
 	return false
 }
 
-func (e *Engine) AddUARule(ruleType, matchType, pattern string) error {
-	_, err := e.db.Exec("INSERT OR IGNORE INTO ua_rules(rule_type, match_type, pattern) VALUES(?,?,?)",
-		ruleType, matchType, pattern)
+func (e *Engine) AddUARule(ruleType, matchType, pattern, description string) error {
+	_, err := e.db.Exec("INSERT OR IGNORE INTO ua_rules(rule_type, match_type, pattern, description) VALUES(?,?,?,?)",
+		ruleType, matchType, pattern, description)
 	return err
 }
 
@@ -342,7 +446,7 @@ func (e *Engine) RemoveUARule(ruleType, pattern string) error {
 }
 
 func (e *Engine) ListUARules() ([]UARuleRow, error) {
-	rows, err := e.db.Query("SELECT rule_type, match_type, pattern FROM ua_rules ORDER BY created_at DESC")
+	rows, err := e.db.Query("SELECT id, rule_type, match_type, pattern, COALESCE(description,''), enabled FROM ua_rules ORDER BY created_at DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -350,7 +454,7 @@ func (e *Engine) ListUARules() ([]UARuleRow, error) {
 	var rules []UARuleRow
 	for rows.Next() {
 		var r UARuleRow
-		if err := rows.Scan(&r.RuleType, &r.MatchType, &r.Pattern); err == nil {
+		if err := rows.Scan(&r.ID, &r.RuleType, &r.MatchType, &r.Pattern, &r.Description, &r.Enabled); err == nil {
 			rules = append(rules, r)
 		}
 	}
@@ -358,7 +462,7 @@ func (e *Engine) ListUARules() ([]UARuleRow, error) {
 }
 
 // ----------------- 路径规则 -----------------
-func (e *Engine) loadPathRules() {
+func (e *Engine) loadPathRulesLocked() {
 	rows, err := e.db.Query("SELECT rule_type, match_type, pattern FROM path_rules WHERE enabled=1")
 	if err != nil {
 		return
@@ -385,10 +489,14 @@ func (e *Engine) loadPathRules() {
 			blacklist = append(blacklist, rule)
 		}
 	}
-	e.pathMu.Lock()
 	e.pathWhitelist = whitelist
 	e.pathBlacklist = blacklist
-	e.pathMu.Unlock()
+}
+
+func (e *Engine) loadPathRules() {
+	e.pathMu.Lock()
+	defer e.pathMu.Unlock()
+	e.loadPathRulesLocked()
 }
 
 // matchPath 检查路径是否匹配规则
@@ -437,8 +545,74 @@ func (e *Engine) CheckPath(path string) bool {
 	return false
 }
 
-func (e *Engine) AddPathRule(ruleType, matchType, pattern string) error {
-	_, err := e.db.Exec("INSERT OR IGNORE INTO path_rules(rule_type, match_type, pattern) VALUES(?,?,?)", ruleType, matchType, pattern)
+func (e *Engine) loadGeoRulesLocked() {
+	e.geoMu.Lock()
+	defer e.geoMu.Unlock()
+
+	e.geoBlockCountries = make(map[string]bool)
+	rows, err := e.db.Query("SELECT mode, country_code FROM geo_rules WHERE enabled = 1")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	mode := ""
+	for rows.Next() {
+		var m, code string
+		if err := rows.Scan(&m, &code); err != nil {
+			continue
+		}
+		if mode == "" {
+			mode = m
+		}
+		if m != mode {
+			continue
+		}
+		e.geoBlockCountries[strings.ToUpper(code)] = true
+	}
+	if mode == "" {
+		mode = "blacklist"
+	}
+	e.geoMode = mode
+}
+
+func (e *Engine) IsGeoBlocked(countryCode string) bool {
+	e.geoMu.RLock()
+	defer e.geoMu.RUnlock()
+
+	if len(e.geoBlockCountries) == 0 {
+		return false
+	}
+
+	code := strings.ToUpper(countryCode)
+	if e.geoMode == "whitelist" {
+		_, ok := e.geoBlockCountries[code]
+		return !ok
+	}
+	_, ok := e.geoBlockCountries[code]
+	return ok
+}
+
+func (e *Engine) SetAllowedMethods(methods []string) {
+	e.methodMu.Lock()
+	defer e.methodMu.Unlock()
+	e.allowedMethods = make(map[string]bool)
+	for _, m := range methods {
+		e.allowedMethods[strings.ToUpper(m)] = true
+	}
+}
+
+func (e *Engine) IsMethodAllowed(method string) bool {
+	e.methodMu.RLock()
+	defer e.methodMu.RUnlock()
+	if len(e.allowedMethods) == 0 {
+		return true
+	}
+	return e.allowedMethods[strings.ToUpper(method)]
+}
+
+func (e *Engine) AddPathRule(ruleType, matchType, pattern, description string) error {
+	_, err := e.db.Exec("INSERT OR IGNORE INTO path_rules(rule_type, match_type, pattern, description) VALUES(?,?,?,?)", ruleType, matchType, pattern, description)
 	return err
 }
 
@@ -448,7 +622,7 @@ func (e *Engine) RemovePathRule(ruleType, pattern string) error {
 }
 
 func (e *Engine) ListPathRules() ([]PathRuleRow, error) {
-	rows, err := e.db.Query("SELECT rule_type, match_type, pattern FROM path_rules ORDER BY created_at DESC")
+	rows, err := e.db.Query("SELECT id, rule_type, match_type, pattern, COALESCE(description,''), enabled FROM path_rules ORDER BY created_at DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -456,9 +630,292 @@ func (e *Engine) ListPathRules() ([]PathRuleRow, error) {
 	var rules []PathRuleRow
 	for rows.Next() {
 		var r PathRuleRow
-		if err := rows.Scan(&r.RuleType, &r.MatchType, &r.Pattern); err == nil {
+		if err := rows.Scan(&r.ID, &r.RuleType, &r.MatchType, &r.Pattern, &r.Description, &r.Enabled); err == nil {
 			rules = append(rules, r)
 		}
 	}
 	return rules, nil
+}
+
+func (e *Engine) UpdateUARule(id int, ruleType, matchType, pattern, description string, enabled bool) error {
+	_, err := e.db.Exec("UPDATE ua_rules SET rule_type=?, match_type=?, pattern=?, description=?, enabled=? WHERE id=?",
+		ruleType, matchType, pattern, description, enabled, id)
+	return err
+}
+
+func (e *Engine) UpdatePathRule(id int, ruleType, matchType, pattern, description string, enabled bool) error {
+	_, err := e.db.Exec("UPDATE path_rules SET rule_type=?, match_type=?, pattern=?, description=?, enabled=? WHERE id=?",
+		ruleType, matchType, pattern, description, enabled, id)
+	return err
+}
+
+func (e *Engine) ToggleUARule(id int) error {
+	_, err := e.db.Exec("UPDATE ua_rules SET enabled = CASE WHEN enabled=1 THEN 0 ELSE 1 END WHERE id=?", id)
+	return err
+}
+
+func (e *Engine) TogglePathRule(id int) error {
+	_, err := e.db.Exec("UPDATE path_rules SET enabled = CASE WHEN enabled=1 THEN 0 ELSE 1 END WHERE id=?", id)
+	return err
+}
+
+type GeoRuleRow struct {
+	ID          int    `json:"id"`
+	Mode        string `json:"mode"`
+	CountryCode string `json:"country_code"`
+	Enabled     bool   `json:"enabled"`
+}
+
+func (e *Engine) AddGeoRule(mode, countryCode string, enabled bool) error {
+	enc := 0
+	if enabled {
+		enc = 1
+	}
+	_, err := e.db.Exec("INSERT OR IGNORE INTO geo_rules(mode, country_code, enabled) VALUES(?,?,?)", mode, strings.ToUpper(countryCode), enc)
+	return err
+}
+
+func (e *Engine) UpdateGeoRule(id int, mode, countryCode string, enabled bool) error {
+	enc := 0
+	if enabled {
+		enc = 1
+	}
+	_, err := e.db.Exec("UPDATE geo_rules SET mode=?, country_code=?, enabled=? WHERE id=?", mode, strings.ToUpper(countryCode), enc, id)
+	return err
+}
+
+func (e *Engine) RemoveGeoRule(id int) error {
+	_, err := e.db.Exec("DELETE FROM geo_rules WHERE id=?", id)
+	return err
+}
+
+func (e *Engine) ListGeoRules() ([]GeoRuleRow, error) {
+	rows, err := e.db.Query("SELECT id, mode, country_code, enabled FROM geo_rules ORDER BY created_at DESC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var rules []GeoRuleRow
+	for rows.Next() {
+		var r GeoRuleRow
+		var enc int
+		if err := rows.Scan(&r.ID, &r.Mode, &r.CountryCode, &enc); err == nil {
+			r.Enabled = enc == 1
+			rules = append(rules, r)
+		}
+	}
+	return rules, nil
+}
+
+type PathRateLimitRow struct {
+	ID          int     `json:"id"`
+	PathPattern string  `json:"path_pattern"`
+	Rate        float64 `json:"rate"`
+	Burst       int     `json:"burst"`
+	Enabled     bool    `json:"enabled"`
+}
+
+func (e *Engine) AddPathRateLimit(pathPattern string, rate float64, burst int, enabled bool) error {
+	enc := 0
+	if enabled {
+		enc = 1
+	}
+	_, err := e.db.Exec("INSERT INTO path_rate_limits(path_pattern, rate, burst, enabled) VALUES(?,?,?,?)", pathPattern, rate, burst, enc)
+	return err
+}
+
+func (e *Engine) UpdatePathRateLimit(id int, pathPattern string, rate float64, burst int, enabled bool) error {
+	enc := 0
+	if enabled {
+		enc = 1
+	}
+	_, err := e.db.Exec("UPDATE path_rate_limits SET path_pattern=?, rate=?, burst=?, enabled=? WHERE id=?", pathPattern, rate, burst, enc, id)
+	return err
+}
+
+func (e *Engine) RemovePathRateLimit(id int) error {
+	_, err := e.db.Exec("DELETE FROM path_rate_limits WHERE id=?", id)
+	return err
+}
+
+func (e *Engine) ListPathRateLimits() ([]PathRateLimitRow, error) {
+	rows, err := e.db.Query("SELECT id, path_pattern, rate, burst, enabled FROM path_rate_limits ORDER BY created_at DESC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var rules []PathRateLimitRow
+	for rows.Next() {
+		var r PathRateLimitRow
+		var enc int
+		if err := rows.Scan(&r.ID, &r.PathPattern, &r.Rate, &r.Burst, &enc); err == nil {
+			r.Enabled = enc == 1
+			rules = append(rules, r)
+		}
+	}
+	return rules, nil
+}
+
+func (e *Engine) loadAllowedMethodsLocked() {
+	e.methodMu.Lock()
+	defer e.methodMu.Unlock()
+	e.allowedMethods = make(map[string]bool)
+	rows, err := e.db.Query("SELECT method FROM allowed_methods WHERE enabled = 1")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err == nil {
+			e.allowedMethods[strings.ToUpper(m)] = true
+		}
+	}
+}
+
+type AllowedMethodRow struct {
+	ID      int    `json:"id"`
+	Method  string `json:"method"`
+	Enabled bool   `json:"enabled"`
+}
+
+func (e *Engine) ListAllowedMethods() ([]AllowedMethodRow, error) {
+	rows, err := e.db.Query("SELECT id, method, enabled FROM allowed_methods ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var methods []AllowedMethodRow
+	for rows.Next() {
+		var m AllowedMethodRow
+		var enc int
+		if err := rows.Scan(&m.ID, &m.Method, &enc); err == nil {
+			m.Enabled = enc == 1
+			methods = append(methods, m)
+		}
+	}
+	return methods, nil
+}
+
+func (e *Engine) SetAllowedMethodDB(method string, enabled bool) error {
+	enc := 0
+	if enabled {
+		enc = 1
+	}
+	_, err := e.db.Exec("INSERT OR REPLACE INTO allowed_methods(method, enabled) VALUES(?,?)", strings.ToUpper(method), enc)
+	return err
+}
+
+func (e *Engine) RemoveAllowedMethodDB(method string) error {
+	_, err := e.db.Exec("DELETE FROM allowed_methods WHERE method=?", strings.ToUpper(method))
+	return err
+}
+
+func (e *Engine) loadPathRateLimitsLocked() {
+	e.pathLimitMu.Lock()
+	defer e.pathLimitMu.Unlock()
+
+	e.pathRateLimiters = make(map[string]*pathLimiterEntry)
+	rows, err := e.db.Query("SELECT path_pattern, rate, burst FROM path_rate_limits WHERE enabled = 1")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var pattern string
+		var r float64
+		var burst int
+		if err := rows.Scan(&pattern, &r, &burst); err != nil {
+			continue
+		}
+		regex, err := regexp.Compile(pattern)
+		if err != nil {
+			continue
+		}
+		if r <= 0 {
+			r = 10
+		}
+		if burst <= 0 {
+			burst = 20
+		}
+		e.pathRateLimiters[pattern] = &pathLimiterEntry{
+			pattern: regex,
+			limiter: rate.NewLimiter(rate.Limit(r), burst),
+		}
+	}
+}
+
+func (e *Engine) CheckPathRateLimit(path string) bool {
+	e.pathLimitMu.RLock()
+	defer e.pathLimitMu.RUnlock()
+	for _, entry := range e.pathRateLimiters {
+		if entry.pattern.MatchString(path) {
+			return entry.limiter.Allow()
+		}
+	}
+	return true
+}
+
+func migrateColumn(db *sql.DB, table, column, definition string) {
+	rows, err := db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, dfltValue, pk interface{}
+		rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk)
+		if name == column {
+			return
+		}
+	}
+	db.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition)
+}
+
+func (e *Engine) initBuiltinRules() {
+	var uaCount int
+	e.db.QueryRow("SELECT COUNT(*) FROM ua_rules").Scan(&uaCount)
+	if uaCount == 0 {
+		builtinUA := []struct {
+			ruleType, matchType, pattern, description string
+		}{
+			{"blacklist", "regex", "(?i)(sqlmap|nikto|nmap|masscan|dirbuster|gobuster|wfuzz|ffuf|hydra|burpsuite|zap)", "常见攻击扫描工具User-Agent"},
+			{"blacklist", "regex", "(?i)(python-requests|python-urllib|curl|wget|httpclient|okhttp|java/|go-http)", "常见自动化脚本/爬虫User-Agent"},
+			{"blacklist", "regex", "(?i)(\\bruby\\b|\\bperl\\b|\\bphp\\b)\\s*[\\\\/]?", "脚本语言HTTP客户端(Ruby/Perl/PHP)"},
+			{"blacklist", "contains", "Mozilla/4.0", "过时浏览器UA，常用于伪造请求"},
+			{"blacklist", "regex", "(?i)(googlebot|bingbot|baiduspider|yandexbot|duckduckbot|slurp|sogou|360spider|bytespider)", "搜索引擎爬虫标识"},
+		}
+		for _, r := range builtinUA {
+			e.AddUARule(r.ruleType, r.matchType, r.pattern, r.description)
+		}
+	}
+
+	var pathCount int
+	e.db.QueryRow("SELECT COUNT(*) FROM path_rules").Scan(&pathCount)
+	if pathCount == 0 {
+		builtinPath := []struct {
+			ruleType, matchType, pattern, description string
+		}{
+			{"blacklist", "prefix", "/.git", "Git版本控制目录泄露"},
+			{"blacklist", "prefix", "/.svn", "SVN版本控制目录泄露"},
+			{"blacklist", "prefix", "/.env", "环境变量配置文件泄露"},
+			{"blacklist", "exact", "/.htaccess", "Apache配置文件泄露"},
+			{"blacklist", "exact", "/.DS_Store", "macOS目录元数据泄露"},
+			{"blacklist", "prefix", "/wp-admin", "WordPress后台路径探测"},
+			{"blacklist", "prefix", "/wp-login.php", "WordPress登录页面探测"},
+			{"blacklist", "prefix", "/phpmyadmin", "phpMyAdmin数据库管理入口"},
+			{"blacklist", "prefix", "/adminer", "Adminer数据库管理入口"},
+			{"blacklist", "suffix", ".sql", "SQL数据库文件泄露"},
+			{"blacklist", "suffix", ".bak", "备份文件泄露"},
+			{"blacklist", "suffix", ".log", "日志文件泄露"},
+			{"blacklist", "suffix", ".conf", "配置文件泄露"},
+			{"blacklist", "suffix", ".ini", "INI配置文件泄露"},
+			{"blacklist", "regex", "(?i)\\.(php|jsp|asp|aspx)$", "服务端脚本文件直接访问"},
+		}
+		for _, r := range builtinPath {
+			e.AddPathRule(r.ruleType, r.matchType, r.pattern, r.description)
+		}
+	}
 }

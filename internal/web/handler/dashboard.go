@@ -1,4 +1,4 @@
-package handler
+﻿package handler
 
 import (
 	"encoding/json"
@@ -126,40 +126,54 @@ func APIEvents(w http.ResponseWriter, r *http.Request) {
 	cacheMu.RUnlock()
 
 	var events []event.InterceptEvent
-	// 优先从 metrics 数据库获取历史数据
+	// 优先从 metrics 数据库获取历史数据（最近7天，确保重启后数据不丢失）
 	if MetricsManager != nil {
-		startTime := time.Now().Add(-24 * time.Hour)
+		startTime := time.Now().AddDate(0, 0, -7) // 最近7天
 		endTime := time.Now()
 		metricsEvents, err := MetricsManager.GetEvents(startTime, endTime, 0, 200)
 		if err != nil {
 			log.Printf("APIEvents: 从metrics获取失败: %v", err)
-		}
-		// 转换类型
-		if len(metricsEvents) > 0 {
+		} else if len(metricsEvents) > 0 {
+			// 转换类型
 			events = make([]event.InterceptEvent, len(metricsEvents))
 			for i, e := range metricsEvents {
 				events[i] = event.InterceptEvent{
-					ID:          e.ID,
-					Time:        e.Time,
-					ClientIP:    e.ClientIP,
-					Host:        e.Host,
-					Path:        e.Path,
-					Query:       e.Query,
-					Method:      e.Method,
-					UserAgent:   e.UserAgent,
-					Referer:     e.Referer,
-					ContentType: e.ContentType,
-					Rule:        e.Rule,
-					Status:      e.Status,
-					RequestID:   e.RequestID,
-					LatencyMs:   e.LatencyMs,
+					ID:                e.ID,
+					Time:              e.Time,
+					ClientIP:          e.ClientIP,
+					Host:              e.Host,
+					Path:              e.Path,
+					Query:             e.Query,
+					Method:            e.Method,
+					UserAgent:         e.UserAgent,
+					Referer:           e.Referer,
+					ContentType:       e.ContentType,
+					Rule:              e.Rule,
+					Status:            e.Status,
+					RequestID:         e.RequestID,
+					LatencyMs:         e.LatencyMs,
+					GeoCountry:        e.GeoCountry,
+					GeoFlag:           e.GeoFlag,
+					MatchDetail:       e.MatchDetail,
+					MatchLocation:     e.MatchLocation,
+					Action:            e.Action,
+					UpstreamAddr:      e.UpstreamAddr,
+					Protocol:          e.Protocol,
+					Scheme:            e.Scheme,
+					UpstreamLatencyMs: e.UpstreamLatencyMs,
+					RequestSize:       e.RequestSize,
+					ErrorMessage:      e.ErrorMessage,
 				}
 			}
 		}
 	}
+	// 仅当数据库无数据时才降级到内存
 	if len(events) == 0 {
-		// 降级到内存数据
 		events = event.GetEvents()
+	}
+	// 确保非nil，避免JSON序列化为null
+	if events == nil {
+		events = make([]event.InterceptEvent, 0)
 	}
 	
 	// 更新缓存
@@ -338,8 +352,16 @@ func APITopIPs(w http.ResponseWriter, r *http.Request) {
 			top = make([]stats.TopItem, len(metricsTop))
 			for i, item := range metricsTop {
 				top[i] = stats.TopItem{
-					Name:  item.Name,
-					Count: int(item.Count),
+					Name:          item.Name,
+					Count:         int(item.Count),
+					LastSeen:      item.LastSeen,
+					RuleTypes:     item.RuleTypes,
+					SourceIPCount: item.SourceIPCount,
+					Methods:       item.Methods,
+					RiskLevel:     item.RiskLevel,
+					RuleType:      item.RuleType,
+					GeoCountry:    item.GeoCountry,
+					GeoFlag:       item.GeoFlag,
 				}
 			}
 		}
@@ -385,8 +407,16 @@ func APITopPaths(w http.ResponseWriter, r *http.Request) {
 			top = make([]stats.TopItem, len(metricsTop))
 			for i, item := range metricsTop {
 				top[i] = stats.TopItem{
-					Name:  item.Name,
-					Count: int(item.Count),
+					Name:          item.Name,
+					Count:         int(item.Count),
+					LastSeen:      item.LastSeen,
+					RuleTypes:     item.RuleTypes,
+					SourceIPCount: item.SourceIPCount,
+					Methods:       item.Methods,
+					RiskLevel:     item.RiskLevel,
+					RuleType:      item.RuleType,
+					GeoCountry:    item.GeoCountry,
+					GeoFlag:       item.GeoFlag,
 				}
 			}
 		}
@@ -432,8 +462,10 @@ func APIRuleHits(w http.ResponseWriter, r *http.Request) {
 			hits = make([]stats.TopItem, len(metricsHits))
 			for i, item := range metricsHits {
 				hits[i] = stats.TopItem{
-					Name:  item.Name,
-					Count: int(item.Count),
+					Name:        item.Name,
+					Count:       int(item.Count),
+					LastSeen:    item.LastSeen,
+					SourceIPCount: item.AffectedIPs, // 使用AffectedIPs字段
 				}
 			}
 		}
@@ -456,7 +488,8 @@ func APIRuleHits(w http.ResponseWriter, r *http.Request) {
 func APIRules(w http.ResponseWriter, r *http.Request) {
 	rulesList, err := RuleEngine.ListIPRules()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
 		return
 	}
 	// 确保返回数组而不是null
@@ -471,7 +504,8 @@ func APIRules(w http.ResponseWriter, r *http.Request) {
 func APIUA(w http.ResponseWriter, r *http.Request) {
 	rulesList, err := RuleEngine.ListUARules()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
 		return
 	}
 	// 确保返回数组而不是null
@@ -486,7 +520,8 @@ func APIUA(w http.ResponseWriter, r *http.Request) {
 func APIPath(w http.ResponseWriter, r *http.Request) {
 	rulesList, err := RuleEngine.ListPathRules()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
 		return
 	}
 	// 确保返回数组而不是null

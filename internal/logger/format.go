@@ -24,11 +24,24 @@ type AccessLog struct {
 	ContentType  string `json:"content_type,omitempty"`  // 内容类型
 	RuleID       string `json:"rule_id,omitempty"`       // 触发的规则ID
 	UpstreamAddr string `json:"upstream_addr,omitempty"` // 后端服务地址
+	Protocol     string `json:"protocol,omitempty"`      // HTTP协议版本 (HTTP/1.1, HTTP/2.0)
+	Scheme       string `json:"scheme,omitempty"`        // 请求协议 (http, https)
 
 	// ===== 性能指标 =====
-	LatencyMs float64 `json:"latency_ms"`           // 响应延迟(毫秒)
-	LatencyUs int64   `json:"latency_us,omitempty"` // 响应延迟(微秒，可选)
-	BodySize  int64   `json:"body_size,omitempty"`  // 响应体大小(字节)
+	LatencyMs         float64 `json:"latency_ms"`                     // 总响应延迟(毫秒)
+	LatencyUs         int64   `json:"latency_us,omitempty"`           // 总响应延迟(微秒，可选)
+	UpstreamLatencyMs float64 `json:"upstream_latency_ms,omitempty"`  // 后端响应延迟(毫秒)
+	BodySize          int64   `json:"body_size,omitempty"`            // 响应体大小(字节)
+	RequestSize       int64   `json:"request_size,omitempty"`         // 请求体大小(字节)
+
+	// ===== 地理位置信息 =====
+	GeoCountry string `json:"geo_country,omitempty"` // 国家/地区名称
+	GeoFlag    string `json:"geo_flag,omitempty"`    // 国旗emoji
+
+	// ===== 拦截详情（仅拦截日志使用）=====
+	MatchDetail   string `json:"match_detail,omitempty"`   // 匹配模式详情
+	MatchLocation string `json:"match_location,omitempty"` // 检测位置
+	ErrorMessage  string `json:"error_message,omitempty"`  // 错误信息
 }
 
 // LogFieldConfig 日志字段配置
@@ -175,6 +188,24 @@ func (l *AccessLog) SetLatencyUs(us int64) *AccessLog {
 // SetBodySize 设置响应体大小
 func (l *AccessLog) SetBodySize(size int64) *AccessLog {
 	l.BodySize = size
+	return l
+}
+
+// SetRequestSize 设置请求体大小
+func (l *AccessLog) SetRequestSize(size int64) *AccessLog {
+	l.RequestSize = size
+	return l
+}
+
+// SetProtocol 设置HTTP协议版本
+func (l *AccessLog) SetProtocol(protocol string) *AccessLog {
+	l.Protocol = protocol
+	return l
+}
+
+// SetScheme 设置请求协议
+func (l *AccessLog) SetScheme(scheme string) *AccessLog {
+	l.Scheme = scheme
 	return l
 }
 

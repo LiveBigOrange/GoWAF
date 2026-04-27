@@ -1,77 +1,88 @@
-# 管理后台监听配置
+# GoWAF 配置文件
+# 修改配置后需重启服务生效（部分配置支持Web控制台热更新）
+
+# ==================== 管理后台 ====================
 admin:
-  addr: "127.0.0.1:9090"
-  # 管理后台访问日志路径
-  admin_log: "./admin.log"
-  # IP白名单(CIDR格式)，留空或注释则允许所有IP访问
-  # 生产环境建议限制为内网IP或管理员IP
-  # allowed_cidrs:
-  #   - "127.0.0.0/8"
-  #   - "10.0.0.0/8"
-  #   - "172.16.0.0/12"
-  #   - "192.168.0.0/16"
+    addr: 127.0.0.1:9090          # 管理后台监听地址（IP:端口），默认仅本地访问
+    allowed_cidrs: []              # 允许访问管理后台的CIDR列表，空则不限制，如: ["192.168.1.0/24"]
+    admin_log: ./admin.log        # 管理操作日志文件路径
 
-# 数据库配置
+# ==================== GeoIP数据库 ====================
+geoip:
+    db_path: ./GeoLite2-City.mmdb # MaxMind GeoLite2 城市数据库文件路径
+
+# ==================== 数据库 ====================
 database:
-  # 配置数据库路径（存储后端、代理、域名、证书、规则等配置）
-  # 永久保存，数据量小（几KB ~ 几百KB）
-  config_path: "./config.db"
+    config_path: ./config.db      # 系统配置数据库路径（SQLite）
+    metrics_path: ./metrics.db    # 指标监控数据库路径（SQLite）
+    logs_path: ./logs.db          # 拦截日志数据库路径（SQLite）
 
-  # 监控数据库路径（存储拦截事件、统计数据等）
-  # 定期清理，数据量中等（几十MB），保留7天数据
-  metrics_path: "./metrics.db"
-
-  # 日志数据库路径（存储访问日志）
-  # 独立存储，支持高效查询，定期清理
-  logs_path: "./logs.db"
-
-# 默认代理配置（仅用于初始化）
-# 说明：
-#   1. 此配置仅在数据库中没有代理配置时生效，用于首次启动初始化
-#   2. Web页面配置代理后，以Web页面数据为准，此配置将被忽略
-#   3. 如果不需要默认代理，可以注释掉整个 default_proxy 配置块
-#   4. 支持的协议: http, https
+# ==================== 默认代理 ====================
 default_proxy:
-  listen_addr: ":80"      # 监听地址，格式: ":端口" 或 "IP:端口"
-  protocol: "http"        # 协议类型: http 或 https
-  enabled: true           # 是否启用默认代理
+    listen_addr: :80              # 默认代理监听地址，:80 表示监听所有网卡80端口
+    protocol: http                # 代理协议: http 或 https（https需在Web控制台配置证书）
+    enabled: true                 # 是否启用默认代理
 
-# 代理监听配置已移至 Web 管理页面
-# 请访问 http://127.0.0.1:9090/proxyconfig 进行配置
+# ==================== 可信代理 ====================
+trustedproxies: []                # 可信反向代理IP列表，如: ["10.0.0.1","10.0.0.2"]
 
-# 限流配置已移至 Web 管理页面
-# 请访问 http://127.0.0.1:9090/ratelimit 进行配置
-
-# 可信代理IP配置已移至 Web 管理页面
-# 请访问 http://127.0.0.1:9090 进行配置
-
-# 日志配置
+# ==================== 日志配置 ====================
 log:
-  file: "./waf.log"
-  level: "info"
+    file: ./waf.log               # WAF运行日志文件路径
+    level: info                   # 日志级别: debug/info/warn/error
+    rotation:                     # 日志轮转配置
+        maxsize: 100              # 单个日志文件最大大小（MB）
+        maxbackups: 10            # 保留的旧日志文件最大数量
+        maxage: 7                 # 保留旧日志文件的最大天数
+        compress: true            # 是否压缩旧日志文件
+    format:                       # 日志格式配置
+        time_format: 2006-01-02T15:04:05.000Z07:00  # 时间格式（Go时间格式语法）
+        fields:                   # 日志中记录的请求字段
+            host: true            # 记录请求主机名
+            query: true           # 记录查询参数
+            referer: true         # 记录来源页面
+            content_type: true    # 记录内容类型
+            body_size: true       # 记录响应体大小
+            latency_us: false     # 记录微秒级延迟（默认毫秒级）
 
-  # 日志轮转配置
-  rotation:
-    max_size: 100        # 单个日志文件最大大小（MB）
-    max_backups: 10      # 保留的旧日志文件数量
-    max_age: 7           # 保留旧日志文件的最大天数
-    compress: true       # 是否压缩旧日志文件
-
-  # 日志格式配置
-  format:
-    # 时间格式（Go标准格式）
-    time_format: "2006-01-02T15:04:05.000Z07:00"  # ISO8601格式
-
-    # 字段开关配置
-    fields:
-      host: true           # 记录请求Host（多域名场景必需）
-      query: true          # 记录查询参数（攻击检测重要信息）
-      referer: true        # 记录来源页面（追踪请求来源）
-      content_type: true   # 记录内容类型（区分请求类型）
-      body_size: true      # 记录响应体大小（流量统计）
-      latency_us: false    # 记录微秒级延迟（默认只记录毫秒）
-
-# 管理后台登录凭证
+# ==================== 认证配置 ====================
 auth:
-  username: "admin"
-  password: "admin"
+    username: admin               # 管理后台登录用户名
+    password: admin               # 管理后台登录密码（生产环境请务必修改）
+
+# ==================== 安全配置 ====================
+security:
+    login:                        # 登录安全策略
+        max_attempts: 5           # 最大登录尝试次数，超过后锁定IP
+        block_duration: 15        # 登录锁定时长（分钟）
+    session:                      # 会话管理
+        ttl: 8                    # 会话有效期（小时）
+        cleanup_interval: 5       # 过期会话清理间隔（分钟）
+    captcha:                      # 验证码
+        ttl: 5                    # 验证码有效期（分钟）
+    rate_limit:                   # API限流
+        api_limit: 300            # API请求速率限制（次/窗口）
+        api_window: 1             # 限流窗口大小（秒）
+
+# ==================== 性能配置 ====================
+performance:
+    log_channel_size: 10000       # 异步日志通道缓冲区大小
+    cache_size: 1000              # 响应缓存条目数
+    cache_ttl: 5                  # 缓存有效期（分钟）
+    max_request_body: 10          # 最大请求体大小（MB）
+    scan_buffer: 1024             # 请求体扫描缓冲区大小（KB）
+
+# ==================== 定时任务配置 ====================
+scheduler:
+    health_check: 5               # 后端健康检查间隔（秒），0则禁用
+    log_flush: 2                  # 日志刷盘间隔（秒）
+    log_cleanup: 24               # 日志自动清理间隔（小时），0则禁用
+    metrics_cleanup: 1            # 指标数据自动清理间隔（分钟），0则禁用
+    rule_reload: 5                # 规则热重载间隔（秒），0则禁用
+
+# ==================== WebSocket配置 ====================
+websocket:
+    dashboard_push: 2             # 仪表盘数据推送间隔（秒）
+    log_heartbeat: 30             # 日志WebSocket心跳间隔（秒）
+    buffer_size: 1024             # WebSocket消息缓冲区大小（字节）
+    broadcast_channel: 1000       # 广播通道缓冲区大小

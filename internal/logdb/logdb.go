@@ -39,6 +39,11 @@ type AccessLogRecord struct {
 
 // NewLogDB 创建日志数据库管理器
 func NewLogDB(dbPath string) (*LogDB, error) {
+	return NewLogDBWithConfig(dbPath, 1000, 5) // 默认缓存1000条，5分钟过期
+}
+
+// NewLogDBWithConfig 使用配置创建日志数据库管理器
+func NewLogDBWithConfig(dbPath string, cacheSize int, cacheTTLMinutes int) (*LogDB, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, err
@@ -60,10 +65,17 @@ func NewLogDB(dbPath string) (*LogDB, error) {
 		}
 	}
 
+	if cacheSize <= 0 {
+		cacheSize = 1000
+	}
+	if cacheTTLMinutes <= 0 {
+		cacheTTLMinutes = 5
+	}
+
 	logDB := &LogDB{
 		db:    db,
 		path:  dbPath,
-		cache: NewQueryCache(1000, 5*time.Minute), // 默认缓存1000条，5分钟过期
+		cache: NewQueryCache(cacheSize, time.Duration(cacheTTLMinutes)*time.Minute),
 	}
 
 	// 初始化表结构

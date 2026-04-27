@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="/static/common.css">
     <style>
         .add-btn {
-            background: #3498db;
+            background: #409eff;
             color: white;
             border: none;
             padding: 10px 20px;
@@ -20,7 +20,7 @@
             transition: all 0.3s;
         }
         .add-btn:hover {
-            background: #2980b9;
+            background: #66b1ff;
             transform: translateY(-1px);
         }
         .header-bar {
@@ -96,8 +96,8 @@
         }
         .form-group input:focus {
             outline: none;
-            border-color: #3498db;
-            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+            border-color: #409eff;
+            box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.1);
         }
         .form-group .hint {
             font-size: 12px;
@@ -107,6 +107,7 @@
         .form-row {
             display: flex;
             gap: 15px;
+            flex-wrap: wrap;
         }
         .form-row .form-group {
             flex: 1;
@@ -143,11 +144,11 @@
             transition: all 0.3s;
         }
         .btn-primary {
-            background: #3498db;
+            background: #409eff;
             color: white;
         }
         .btn-primary:hover {
-            background: #2980b9;
+            background: #66b1ff;
         }
         .btn-secondary {
             background: #f5f6fa;
@@ -202,7 +203,7 @@
             color: white;
         }
         .edit-btn {
-            color: #3498db;
+            color: #409eff;
             text-decoration: none;
             padding: 4px 12px;
             border-radius: 4px;
@@ -213,7 +214,7 @@
             font-size: 13px;
         }
         .edit-btn:hover {
-            background-color: #3498db;
+            background-color: #409eff;
             color: white;
         }
         .toggle-btn {
@@ -237,7 +238,7 @@
     {{template "sidebar" .}}
     <div class="main">
         <div class="card">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:8px;">
                 <h3>后端服务列表</h3>
                 <button class="btn btn-primary" onclick="openModal()">+ 添加后端服务</button>
             </div>
@@ -370,16 +371,17 @@
                 
                 var submitBtn = document.querySelector('.btn-primary');
                 var editId = submitBtn.getAttribute('data-edit-id');
+                submitBtn.disabled = true;
                 
                 var formData = {
                     name: document.getElementById('backendName').value.trim(),
                     address: document.getElementById('backendAddress').value.trim(),
                     health_check: document.getElementById('healthCheck').checked,
                     check_path: document.getElementById('checkPath').value.trim(),
-                    check_interval: parseInt(document.getElementById('checkInterval').value),
-                    check_timeout: parseInt(document.getElementById('checkTimeout').value),
-                    fail_threshold: parseInt(document.getElementById('failThreshold').value),
-                    recover_threshold: parseInt(document.getElementById('recoverThreshold').value),
+                    check_interval: parseInt(document.getElementById('checkInterval').value) || 30,
+                    check_timeout: parseInt(document.getElementById('checkTimeout').value) || 5,
+                    fail_threshold: parseInt(document.getElementById('failThreshold').value) || 3,
+                    recover_threshold: parseInt(document.getElementById('recoverThreshold').value) || 2,
                     enabled: true
                 };
 
@@ -409,7 +411,8 @@
                 .catch(e => {
                     console.error('操作失败', e);
                     alert('操作失败');
-                });
+                })
+                .finally(function() { submitBtn.disabled = false; });
             });
 
             function loadData() {
@@ -467,14 +470,20 @@
                     tbody.appendChild(tr);
                 });
 
-                tbody.addEventListener('click', function(e) {
+                document.getElementById('pageInfo').textContent = '第' + currentPage + ' 页 / 第' + totalPages + ' 页（共' + allData.length + ' 条）';
+                document.getElementById('prevBtn').disabled = currentPage <= 1;
+                document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+                pagination.style.display = 'flex';
+            }
+
+            document.getElementById('tableBody').addEventListener('click', function(e) {
                     var target = e.target;
                     var id = target.dataset.id;
                     if (!id) return;
                     
                     if (target.classList.contains('delete-btn')) {
                         if (confirm('确认删除该后端服务？')) {
-                            fetch('/api/backend/delete?id=' + encodeURIComponent(id), { method: 'DELETE' })
+                            fetch('/api/backend/delete?id=' + encodeURIComponent(id), { method: 'POST' })
                                 .then(r => r.json())
                                 .then(d => { if (d.success) loadData(); else alert(d.message || '删除失败'); })
                                 .catch(e => { console.error('删除失败', e); alert('删除失败'); });
@@ -498,12 +507,6 @@
                         }
                     }
                 });
-
-                document.getElementById('pageInfo').textContent = '第' + currentPage + ' 页 / 第' + totalPages + ' 页（共' + allData.length + ' 条）';
-                document.getElementById('prevBtn').disabled = currentPage <= 1;
-                document.getElementById('nextBtn').disabled = currentPage >= totalPages;
-                pagination.style.display = 'flex';
-            }
 
             function editBackend(item) {
                 document.getElementById('backendName').value = item.name || '';

@@ -28,51 +28,76 @@ type ProxyServerManager struct {
 // CertManager 证书管理器接口
 type CertManager struct {
 	proxyConfigMgr *proxyconfig.Manager
-	certCache      *tls.Certificate
+	certCache      map[string]*certCacheEntry
 	certCacheMu    sync.RWMutex
-	certCacheTime  time.Time
+}
+
+type certCacheEntry struct {
+	cert      *tls.Certificate
+	cacheTime time.Time
 }
 
 // NewCertManager 创建证书管理器
 func NewCertManager(pcm *proxyconfig.Manager) *CertManager {
 	return &CertManager{
 		proxyConfigMgr: pcm,
+		certCache:      make(map[string]*certCacheEntry),
 	}
 }
 
-// GetCertificate 获取有效证书
-func (cm *CertManager) GetCertificate() (certPEM, keyPEM string, found bool) {
+// GetCertificate 获取有效证书（支持指定域名匹配）
+func (cm *CertManager) GetCertificate(domainName string) (certPEM, keyPEM string, found bool) {
 	if cm.proxyConfigMgr == nil {
 		return "", "", false
 	}
 
 	domains, _ := cm.proxyConfigMgr.ListDomains()
 	for _, domain := range domains {
-		if domain.CertID != "" && domain.Enabled {
-			cert, err := cm.proxyConfigMgr.GetCert(domain.CertID)
-			if err == nil && cert.NotAfter > time.Now().Unix() {
-				return cert.CertPEM, cert.KeyPEM, true
-			}
+		if domain.CertID == "" || !domain.Enabled {
+			continue
+		}
+		if domainName != "" && domain.Domain != domainName && !matchWildcard(domain.Domain, domainName) {
+			continue
+		}
+		cert, err := cm.proxyConfigMgr.GetCert(domain.CertID)
+		if err == nil && cert.NotAfter > time.Now().Unix() {
+			return cert.CertPEM, cert.KeyPEM, true
 		}
 	}
 	return "", "", false
 }
 
-// GetTLSCertificate 获取tls.Certificate对象（支持热加载）
-func (cm *CertManager) GetTLSCertificate() (*tls.Certificate, error) {
-	// 检查缓存是否有效（缓存5分钟）
+// matchWildcard 通配符域名匹配（如 *.example.com 匹配 sub.example.com）
+func matchWildcard(pattern, host string) bool {
+	if !strings.HasPrefix(pattern, "*.") {
+		return false
+	}
+	suffix := pattern[1:]
+	if !strings.HasSuffix(host, suffix) {
+		return false
+	}
+	remaining := host[:len(host)-len(suffix)]
+	return remaining != "" && !strings.Contains(remaining, ".")
+}
+
+// GetTLSCertificate 获取tls.Certificate对象（支持热加载+SNI，按域名缓存）
+func (cm *CertManager) GetTLSCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	serverName := ""
+	if hello != nil {
+		serverName = hello.ServerName
+	}
+
 	cm.certCacheMu.RLock()
-	if cm.certCache != nil && time.Since(cm.certCacheTime) < 5*time.Minute {
-		cert := cm.certCache
+	if entry, ok := cm.certCache[serverName]; ok && entry.cert != nil && time.Since(entry.cacheTime) < 5*time.Minute {
+		cert := entry.cert
 		cm.certCacheMu.RUnlock()
 		return cert, nil
 	}
 	cm.certCacheMu.RUnlock()
 
-	// 重新加载证书
-	certPEM, keyPEM, found := cm.GetCertificate()
+	certPEM, keyPEM, found := cm.GetCertificate(serverName)
 	if !found {
-		return nil, fmt.Errorf("no certificate found")
+		return nil, fmt.Errorf("no certificate found for domain: %s", serverName)
 	}
 
 	cert, err := tls.X509KeyPair([]byte(certPEM), []byte(keyPEM))
@@ -80,13 +105,17 @@ func (cm *CertManager) GetTLSCertificate() (*tls.Certificate, error) {
 		return nil, err
 	}
 
-	// 更新缓存
 	cm.certCacheMu.Lock()
-	cm.certCache = &cert
-	cm.certCacheTime = time.Now()
+	cm.certCache[serverName] = &certCacheEntry{cert: &cert, cacheTime: time.Now()}
 	cm.certCacheMu.Unlock()
 
 	return &cert, nil
+}
+
+// HasValidCertificate 预校验是否存在可用证书
+func (cm *CertManager) HasValidCertificate() bool {
+	_, _, found := cm.GetCertificate("")
+	return found
 }
 
 // NewProxyServerManager 创建代理服务器管理器
@@ -103,24 +132,7 @@ func NewProxyServerManager(pcm *proxyconfig.Manager, wafProxy *WAFProxy) *ProxyS
 func (m *ProxyServerManager) StartAll() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	proxyConfigs, err := m.proxyConfigMgr.ListProxies()
-	if err != nil {
-		return err
-	}
-
-	// 构建HTTPS端口映射
-	httpsPorts := m.buildHTTPSPorts(proxyConfigs)
-
-	for i := range proxyConfigs {
-		cfg := &proxyConfigs[i]
-		if !cfg.Enabled {
-			continue
-		}
-		m.startServerLocked(cfg, httpsPorts)
-	}
-
-	return nil
+	return m.startAllLocked()
 }
 
 // buildHTTPSPorts 构建HTTPS端口映射
@@ -192,12 +204,32 @@ func (m *ProxyServerManager) getHTTPSPort() string {
 }
 
 // startServerLocked 启动单个服务器（需要持有锁）
-func (m *ProxyServerManager) startServerLocked(cfg *proxyconfig.ProxyConfig, httpsPorts map[string]string) {
+func (m *ProxyServerManager) startServerLocked(cfg *proxyconfig.ProxyConfig, httpsPorts map[string]string) error {
+	if cfg.Protocol == "https" && !m.certManager.HasValidCertificate() {
+		return fmt.Errorf("无法启动HTTPS代理 %s: 未找到有效的域名证书配置，请先在域名管理中关联证书", cfg.ListenAddr)
+	}
+
+	if _, exists := m.servers[cfg.ID]; exists {
+		return fmt.Errorf("代理服务器 %s 已存在", cfg.ID)
+	}
+
+	for id, srv := range m.servers {
+		if id != cfg.ID && srv.Addr == cfg.ListenAddr {
+			return fmt.Errorf("监听地址 %s 已被代理 %s 占用", cfg.ListenAddr, id)
+		}
+	}
+
+	if cfg.ListenAddr == "" {
+		return fmt.Errorf("监听地址不能为空")
+	}
+
+	if cfg.Protocol != "http" && cfg.Protocol != "https" {
+		return fmt.Errorf("不支持的协议: %s", cfg.Protocol)
+	}
+
 	var handler http.Handler
 
 	if cfg.Protocol == "http" {
-		// HTTP代理，检查域名级别的强制HTTPS
-		// 注意：这里需要实时查询HTTPS端口，因为端口可能会动态更新
 		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			host := r.Host
 			if strings.Contains(host, ":") {
@@ -205,12 +237,14 @@ func (m *ProxyServerManager) startServerLocked(cfg *proxyconfig.ProxyConfig, htt
 				host = parts[0]
 			}
 
-			// 检查该域名是否配置了强制HTTPS
 			domainCfg, err := m.proxyConfigMgr.GetDomainByName(host)
 			if err == nil && domainCfg != nil && domainCfg.ForceHTTPS {
-				// 实时获取HTTPS端口（支持动态更新）
 				httpsPort := m.getHTTPSPort()
-				httpsURL := "https://" + host + httpsPort + r.URL.Path
+				httpsURL := "https://" + host
+				if httpsPort != ":443" {
+					httpsURL += httpsPort
+				}
+				httpsURL += r.URL.Path
 				if r.URL.RawQuery != "" {
 					httpsURL += "?" + r.URL.RawQuery
 				}
@@ -219,7 +253,6 @@ func (m *ProxyServerManager) startServerLocked(cfg *proxyconfig.ProxyConfig, htt
 				return
 			}
 
-			// 正常代理处理
 			m.wafProxy.ServeHTTP(w, r)
 		})
 	} else {
@@ -234,44 +267,77 @@ func (m *ProxyServerManager) startServerLocked(cfg *proxyconfig.ProxyConfig, htt
 	m.servers[cfg.ID] = srv
 
 	if cfg.Protocol == "https" {
-		// 使用 tls.Config.GetCertificate 实现证书热加载
 		srv.TLSConfig = &tls.Config{
-			GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-				// 每次TLS握手时动态获取最新证书
-				return m.certManager.GetTLSCertificate()
+			GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+				return m.certManager.GetTLSCertificate(hello)
 			},
 		}
 
-		go func(addr string, server *http.Server) {
-			log.Printf("HTTPS代理服务监听: %s (支持证书热加载)", addr)
+		go func(id, addr string, server *http.Server) {
+			log.Printf("HTTPS代理服务监听: %s (支持SNI证书热加载)", addr)
 			if err := server.ListenAndServeTLS("", ""); err != http.ErrServerClosed {
 				log.Printf("HTTPS代理服务错误 [%s]: %v", addr, err)
+				m.mu.Lock()
+				delete(m.servers, id)
+				m.mu.Unlock()
 			}
-		}(cfg.ListenAddr, srv)
+		}(cfg.ID, cfg.ListenAddr, srv)
 	} else {
-		go func(addr string, server *http.Server, protocol string) {
+		go func(id, addr string, server *http.Server, protocol string) {
 			log.Printf("代理服务监听: %s (%s)", addr, protocol)
 			if err := server.ListenAndServe(); err != http.ErrServerClosed {
 				log.Printf("代理服务错误 [%s]: %v", addr, err)
+				m.mu.Lock()
+				delete(m.servers, id)
+				m.mu.Unlock()
 			}
-		}(cfg.ListenAddr, srv, cfg.Protocol)
+		}(cfg.ID, cfg.ListenAddr, srv, cfg.Protocol)
 	}
+
+	return nil
 }
 
 // ReloadAll 重新加载所有代理服务器
 func (m *ProxyServerManager) ReloadAll() error {
-	// 1. 优雅关闭所有现有服务器
-	m.StopAll()
+	m.stopAllLocked()
+	return m.startAllLocked()
+}
 
-	// 2. 重新启动所有服务器
-	return m.StartAll()
+// startAllLocked 启动所有代理服务器（需要持有锁）
+func (m *ProxyServerManager) startAllLocked() error {
+	proxyConfigs, err := m.proxyConfigMgr.ListProxies()
+	if err != nil {
+		return err
+	}
+
+	httpsPorts := m.buildHTTPSPorts(proxyConfigs)
+	var firstErr error
+
+	for i := range proxyConfigs {
+		cfg := &proxyConfigs[i]
+		if !cfg.Enabled {
+			continue
+		}
+		if err := m.startServerLocked(cfg, httpsPorts); err != nil {
+			log.Printf("启动代理服务失败 [%s]: %v", cfg.ListenAddr, err)
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+
+	return firstErr
 }
 
 // StopAll 停止所有代理服务器
 func (m *ProxyServerManager) StopAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.stopAllLocked()
+}
 
+// stopAllLocked 停止所有代理服务器（需要持有锁）
+func (m *ProxyServerManager) stopAllLocked() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -294,7 +360,9 @@ func (m *ProxyServerManager) AddProxy(cfg *proxyconfig.ProxyConfig) error {
 	httpsPorts := m.buildHTTPSPorts(proxyConfigs)
 
 	if cfg.Enabled {
-		m.startServerLocked(cfg, httpsPorts)
+		if err := m.startServerLocked(cfg, httpsPorts); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -305,21 +373,31 @@ func (m *ProxyServerManager) UpdateProxy(cfg *proxyconfig.ProxyConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// 1. 停止旧服务器
-	if oldSrv, exists := m.servers[cfg.ID]; exists {
+	var oldSrv *http.Server
+	var oldExists bool
+
+	if oldSrv, oldExists = m.servers[cfg.ID]; oldExists {
+		delete(m.servers, cfg.ID)
+	}
+
+	if cfg.Enabled {
+		proxyConfigs, _ := m.proxyConfigMgr.ListProxies()
+		httpsPorts := m.buildHTTPSPorts(proxyConfigs)
+		if err := m.startServerLocked(cfg, httpsPorts); err != nil {
+			if oldExists {
+				m.servers[cfg.ID] = oldSrv
+				log.Printf("新代理启动失败，已恢复旧代理服务 [%s]", cfg.ID)
+			}
+			return err
+		}
+	}
+
+	if oldExists {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := oldSrv.Shutdown(ctx); err != nil {
 			log.Printf("旧代理服务关闭错误 [%s]: %v", cfg.ID, err)
 		}
-		delete(m.servers, cfg.ID)
-	}
-
-	// 2. 启动新服务器（如果启用）
-	if cfg.Enabled {
-		proxyConfigs, _ := m.proxyConfigMgr.ListProxies()
-		httpsPorts := m.buildHTTPSPorts(proxyConfigs)
-		m.startServerLocked(cfg, httpsPorts)
 	}
 
 	return nil

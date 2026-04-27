@@ -9,21 +9,26 @@ import (
 
 // HealthChecker 健康检查器
 type HealthChecker struct {
-	manager    *Manager
-	client     *http.Client
-	stopChan   chan struct{}
-	wg         sync.WaitGroup
-	checkWg    sync.WaitGroup // 跟踪正在执行的检查goroutine
+	manager       *Manager
+	client        *http.Client
+	stopChan      chan struct{}
+	wg            sync.WaitGroup
+	checkWg       sync.WaitGroup // 跟踪正在执行的检查goroutine
+	checkInterval int            // 健康检查间隔(秒)
 }
 
 // NewHealthChecker 创建健康检查器
-func NewHealthChecker(manager *Manager) *HealthChecker {
+func NewHealthChecker(manager *Manager, checkInterval int) *HealthChecker {
+	if checkInterval <= 0 {
+		checkInterval = 5 // 默认5秒
+	}
 	return &HealthChecker{
 		manager: manager,
 		client: &http.Client{
 			Timeout: 5 * time.Second,
 		},
-		stopChan: make(chan struct{}),
+		stopChan:      make(chan struct{}),
+		checkInterval: checkInterval,
 	}
 }
 
@@ -44,7 +49,7 @@ func (hc *HealthChecker) Stop() {
 func (hc *HealthChecker) run() {
 	defer hc.wg.Done()
 
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(time.Duration(hc.checkInterval) * time.Second)
 	defer ticker.Stop()
 
 	// 立即执行一次

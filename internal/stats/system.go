@@ -27,6 +27,7 @@ func getStartTime() time.Time {
 
 // SystemStats 系统性能统计
 type SystemStats struct {
+	// ===== 基础系统指标 =====
 	CPUUsage    float64 `json:"cpu_usage"`    // CPU 使用率（百分比）
 	MemUsed     uint64  `json:"mem_used"`     // 已使用内存（字节）
 	MemTotal    uint64  `json:"mem_total"`    // 总内存（字节）
@@ -37,6 +38,20 @@ type SystemStats struct {
 	DiskUsed    uint64  `json:"disk_used"`    // 已使用磁盘（字节）
 	DiskTotal   uint64  `json:"disk_total"`   // 总磁盘（字节）
 	DiskPercent float64 `json:"disk_percent"` // 磁盘使用率（百分比）
+
+	// ===== Go 运行时指标 =====
+	NumGC        uint32  `json:"num_gc"`         // GC 次数
+	GCPauseTotal uint64  `json:"gc_pause_total"` // GC 总暂停时间（纳秒）
+	GCPauseAvg   float64 `json:"gc_pause_avg"`   // GC 平均暂停时间（毫秒）
+	HeapAlloc    uint64  `json:"heap_alloc"`     // 堆分配字节数
+	HeapSys      uint64  `json:"heap_sys"`       // 堆系统内存
+	HeapObjects  uint64  `json:"heap_objects"`   // 堆对象数量
+	StackInuse   uint64  `json:"stack_inuse"`    // 栈使用内存
+	StackSys     uint64  `json:"stack_sys"`      // 栈系统内存
+
+	// ===== 系统资源指标 =====
+	NumThread    int    `json:"num_thread"`     // OS 线程数
+	NumFD        int    `json:"num_fd"`         // 文件描述符数量（仅Unix）
 }
 
 // GetSystemStats 获取系统性能统计
@@ -56,7 +71,14 @@ func GetSystemStats() SystemStats {
 	// 获取磁盘使用率
 	diskUsed, diskTotal, diskPercent := getDiskUsage()
 
+	// 计算 GC 平均暂停时间
+	gcPauseAvg := 0.0
+	if m.NumGC > 0 && m.PauseTotalNs > 0 {
+		gcPauseAvg = float64(m.PauseTotalNs) / float64(m.NumGC) / 1e6 // 转换为毫秒
+	}
+
 	return SystemStats{
+		// 基础系统指标
 		CPUUsage:    cpuUsage,
 		MemUsed:     m.Alloc,
 		MemTotal:    m.Sys,
@@ -67,6 +89,20 @@ func GetSystemStats() SystemStats {
 		DiskUsed:    diskUsed,
 		DiskTotal:   diskTotal,
 		DiskPercent: diskPercent,
+
+		// Go 运行时指标
+		NumGC:        m.NumGC,
+		GCPauseTotal: m.PauseTotalNs,
+		GCPauseAvg:   gcPauseAvg,
+		HeapAlloc:    m.HeapAlloc,
+		HeapSys:      m.HeapSys,
+		HeapObjects:  m.HeapObjects,
+		StackInuse:   m.StackInuse,
+		StackSys:     m.StackSys,
+
+		// 系统资源指标
+		NumThread: runtime.GOMAXPROCS(0), // 当前使用的线程数
+		NumFD:     0,                      // 文件描述符需要平台特定实现
 	}
 }
 

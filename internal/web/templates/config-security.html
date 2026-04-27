@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="GoWAF 安全配置页面 · 管理安全参数">
+    <title>安全配置 · GoWAF</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <style>
+        /* ===== 主容器布局 ===== */
+        .main-content {
+            flex: 1;
+            padding: 24px 40px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            height: 100vh;
+            box-sizing: border-box;
+            min-width: 0;
+        }
+        
+        @media (max-width: 1200px) {
+            .main-content {
+                padding: 24px 20px;
+            }
+        }
+        
+        /* ===== 布局与卡片 ===== */
+        .config-section {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .config-section h2 {
+            margin: 0 0 20px 0;
+            font-size: 18px;
+            font-weight: 600;
+            color: #2c3e50;
+            border-bottom: 2px solid #409eff;
+            padding-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .config-section h2 .icon {
+            font-size: 20px;
+        }
+
+        /* ===== 子分组标题 ===== */
+        .config-subsection {
+            margin: 20px 0 15px 0;
+            padding: 10px 16px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 3px solid #409eff;
+        }
+
+        .config-subsection h3 {
+            font-size: 15px;
+            margin: 0;
+            color: #495057;
+            font-weight: 600;
+        }
+
+        /* ===== 输入网格 ===== */
+        .config-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+            margin-top: 16px;
+        }
+        
+        /* 大屏幕优化 - 3列 */
+        @media (min-width: 1200px) {
+            .config-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+        
+        /* 超大屏幕 - 4列 */
+        @media (min-width: 1600px) {
+            .config-grid {
+                grid-template-columns: repeat(4, 1fr);
+            }
+        }
+
+        .config-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .config-item label {
+            font-weight: 500;
+            color: #555;
+            margin-bottom: 8px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .config-item label small {
+            color: #999;
+            font-weight: normal;
+            font-size: 12px;
+        }
+
+        .config-item input,
+        .config-item select {
+            padding: 10px 14px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            background: #fff;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .config-item input:focus,
+        .config-item select:focus {
+            outline: none;
+            border-color: #409eff;
+            box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.15);
+        }
+
+        .config-item input[type="number"] {
+            width: 100%;
+            -moz-appearance: textfield;
+        }
+        .config-item input[type="number"]::-webkit-inner-spin-button,
+        .config-item input[type="number"]::-webkit-outer-spin-button {
+            opacity: 1;
+        }
+
+        /* ===== 辅助文字 ===== */
+        .help-text {
+            font-size: 12px;
+            color: #999;
+            margin-top: 6px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .help-text::before {
+            content: "💡";
+            font-size: 11px;
+            flex-shrink: 0;
+        }
+
+        /* ===== 按钮区域 ===== */
+        .btn-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 24px;
+            justify-content: flex-end;
+            padding: 20px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            position: sticky;
+            bottom: 0;
+            z-index: 10;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: #409eff;
+            color: white;
+        }
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(64, 158, 255, 0.4);
+        }
+        .btn-primary:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #f5f5f5;
+            color: #555;
+        }
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .btn-danger {
+            background: #fff;
+            color: #dc3545;
+            border: 1px solid #dc3545;
+        }
+        .btn-danger:hover {
+            background: #dc3545;
+            color: white;
+        }
+
+        /* ===== 提示消息 ===== */
+        .alert {
+            padding: 16px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+            align-items: center;
+            gap: 12px;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            display: flex;
+        }
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            display: flex;
+        }
+        .alert-warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeeba;
+            display: flex;
+        }
+
+        /* ===== 修改高亮 ===== */
+        .config-changed {
+            border-color: #409eff !important;
+            background: #f0f4ff !important;
+        }
+
+        .change-indicator {
+            display: none;
+            color: #409eff;
+            font-size: 12px;
+            margin-left: 8px;
+        }
+
+        .change-indicator.show {
+            display: inline;
+        }
+    </style>
+</head>
+<body>
+    {{template "sidebar" .}}
+
+    <main class="main-content">
+        <div id="alert" class="alert" role="alert" aria-live="polite"></div>
+
+        <!-- 基础信息 -->
+        <section class="config-section" aria-labelledby="basic-info-heading">
+            <h2 id="basic-info-heading"><span aria-hidden="true">ℹ️</span> 基础配置信息</h2>
+            <div class="config-grid">
+                <div class="config-item">
+                    <label>管理员日志路径</label>
+                    <input type="text" id="admin_log_path" readonly style="background-color: #f8f9fa; color: #666; cursor: not-allowed;">
+                    <div class="help-text">该路径在 config.yaml 中配置，用于记录管理后台操作审计</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 安全配置 -->
+        <section class="config-section" aria-labelledby="security-heading">
+            <h2 id="security-heading"><span aria-hidden="true">🔐</span> 安全配置</h2>
+
+            <div class="config-subsection">
+                <h3>登录安全</h3>
+            </div>
+            <div class="config-grid">
+                <div class="config-item">
+                    <label for="login_max_attempts">登录失败次数限制 <small>(次)</small></label>
+                    <input type="number" id="login_max_attempts" min="1" max="20" autocomplete="off">
+                    <div class="help-text">超过此次数后锁定账户</div>
+                </div>
+                <div class="config-item">
+                    <label for="login_block_duration">账户锁定时长 <small>(分钟)</small></label>
+                    <input type="number" id="login_block_duration" min="1" max="1440" autocomplete="off">
+                    <div class="help-text">账户被锁定的时间</div>
+                </div>
+            </div>
+
+            <div class="config-subsection">
+                <h3>Session 配置</h3>
+            </div>
+            <div class="config-grid">
+                <div class="config-item">
+                    <label for="session_ttl">Session 有效期 <small>(小时)</small></label>
+                    <input type="number" id="session_ttl" min="1" max="168" autocomplete="off">
+                    <div class="help-text">登录保持时间，建议 8-24 小时</div>
+                </div>
+                <div class="config-item">
+                    <label for="session_cleanup_interval">Session 清理间隔 <small>(分钟)</small></label>
+                    <input type="number" id="session_cleanup_interval" min="1" max="60" autocomplete="off">
+                    <div class="help-text">定期清理过期 Session</div>
+                </div>
+            </div>
+
+            <div class="config-subsection">
+                <h3>验证码配置</h3>
+            </div>
+            <div class="config-grid">
+                <div class="config-item">
+                    <label for="captcha_ttl">验证码有效期 <small>(分钟)</small></label>
+                    <input type="number" id="captcha_ttl" min="1" max="30" autocomplete="off">
+                    <div class="help-text">验证码过期时间</div>
+                </div>
+            </div>
+
+            <div class="config-subsection">
+                <h3>API 限流</h3>
+            </div>
+            <div class="config-grid">
+                <div class="config-item">
+                    <label for="api_limit">API 限流阈值 <small>(次/分钟)</small></label>
+                    <input type="number" id="api_limit" min="10" max="10000" autocomplete="off">
+                    <div class="help-text">每分钟最大 API 请求次数</div>
+                </div>
+                <div class="config-item">
+                    <label for="api_window">限流窗口 <small>(分钟)</small></label>
+                    <input type="number" id="api_window" min="1" max="60" autocomplete="off">
+                    <div class="help-text">限流统计时间窗口</div>
+                </div>
+            </div>
+        </section>
+
+        <div class="btn-group">
+            <button type="button" class="btn btn-danger" onclick="resetConfig()">
+                <span aria-hidden="true">🔄</span> 恢复默认
+            </button>
+            <button type="button" class="btn btn-secondary" onclick="location.reload()">
+                <span aria-hidden="true">↻</span> 刷新页面
+            </button>
+            <button type="button" class="btn btn-primary" id="saveBtn" onclick="saveConfig()">
+                <span aria-hidden="true">💾</span> 保存配置
+            </button>
+        </div>
+    </main>
+
+    <script>
+        let originalConfig = {};
+        let hasChanges = false;
+
+        function safeInt(val, def) { var n = parseInt(val, 10); return isNaN(n) ? def : n; }
+
+        function loadConfig() {
+            fetch('/api/config/security')
+                .then(r => {
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                    return r.json();
+                })
+                .then(data => {
+                    if (data.error) {
+                        showAlert('error', '❌ ' + data.error);
+                        return;
+                    }
+
+                    originalConfig = JSON.parse(JSON.stringify(data));
+
+                    if (document.getElementById('admin_log_path')) {
+                        fetch('/api/config/basic')
+                            .then(r => r.json())
+                            .then(basic => {
+                                document.getElementById('admin_log_path').value = basic.admin_log || '未配置';
+                            })
+                            .catch(() => {
+                                document.getElementById('admin_log_path').value = '未配置';
+                            });
+                    }
+
+                    document.getElementById('login_max_attempts').value    = (data.login && data.login.max_attempts) || 5;
+                    document.getElementById('login_block_duration').value  = (data.login && data.login.block_duration) || 15;
+                    document.getElementById('session_ttl').value           = (data.session && data.session.ttl) || 8;
+                    document.getElementById('session_cleanup_interval').value = (data.session && data.session.cleanup_interval) || 5;
+                    document.getElementById('captcha_ttl').value           = (data.captcha && data.captcha.ttl) || 5;
+                    document.getElementById('api_limit').value             = (data.rate_limit && data.rate_limit.api_limit) || 300;
+                    document.getElementById('api_window').value            = (data.rate_limit && data.rate_limit.api_window) || 1;
+                })
+                .catch(err => {
+                    showAlert('error', '❌ 加载配置失败: ' + err.message);
+                });
+        }
+
+        function saveConfig() {
+            const btn = document.getElementById('saveBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span aria-hidden="true">⏳</span> 保存中...';
+
+            const config = {
+                login: {
+                    max_attempts: safeInt(document.getElementById('login_max_attempts').value, 5),
+                    block_duration: safeInt(document.getElementById('login_block_duration').value, 15)
+                },
+                session: {
+                    ttl: safeInt(document.getElementById('session_ttl').value, 8),
+                    cleanup_interval: safeInt(document.getElementById('session_cleanup_interval').value, 5)
+                },
+                captcha: {
+                    ttl: safeInt(document.getElementById('captcha_ttl').value, 5)
+                },
+                rate_limit: {
+                    api_limit: safeInt(document.getElementById('api_limit').value, 300),
+                    api_window: safeInt(document.getElementById('api_window').value, 1)
+                }
+            };
+
+            fetch('/api/config/security', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(config)
+            })
+            .then(r => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
+            })
+            .then(data => {
+                if (data.error) {
+                    showAlert('error', '❌ ' + data.error);
+                } else {
+                    showAlert('success', '✅ 安全配置保存成功！登录安全和验证码配置立即生效，Session和限流配置需重启服务生效。');
+                    hasChanges = false;
+                    originalConfig = JSON.parse(JSON.stringify(config));
+                    // 移除所有修改高亮
+                    document.querySelectorAll('.config-changed').forEach(el => el.classList.remove('config-changed'));
+                }
+            })
+            .catch(err => {
+                showAlert('error', '❌ 保存配置失败: ' + err.message);
+            })
+            .finally(() => {
+                btn.disabled = false;
+                btn.innerHTML = '<span aria-hidden="true">💾</span> 保存配置';
+            });
+        }
+
+        function resetConfig() {
+            if (!confirm('⚠️ 确定要恢复默认安全配置吗？这将覆盖当前所有安全配置。')) return;
+
+            fetch('/api/config/security/reset', {
+                method: 'POST'
+            })
+            .then(r => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
+            })
+            .then(data => {
+                if (data.error) {
+                    showAlert('error', '❌ ' + data.error);
+                } else {
+                    showAlert('success', '✅ 已恢复默认安全配置');
+                    setTimeout(loadConfig, 500);
+                }
+            })
+            .catch(err => {
+                showAlert('error', '❌ 恢复默认配置失败: ' + err.message);
+            });
+        }
+
+        function showAlert(type, message) {
+            const alert = document.getElementById('alert');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            alert.style.display = 'flex';
+            setTimeout(() => {
+                alert.style.display = 'none';
+            }, 5000);
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            loadConfig();
+
+            const inputs = document.querySelectorAll('input, select');
+            inputs.forEach(input => {
+                input.addEventListener('change', function() {
+                    hasChanges = true;
+                    this.classList.add('config-changed');
+                });
+            });
+        });
+
+        window.addEventListener('beforeunload', function(e) {
+            if (hasChanges) {
+                e.preventDefault();
+                e.returnValue = '您有未保存的配置更改，确定要离开吗？';
+            }
+        });
+    </script>
+</body>
+</html>

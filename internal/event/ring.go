@@ -1,52 +1,84 @@
-package event
+﻿package event
 
 import (
 	"container/ring"
+	"encoding/json"
 	"sync"
 	"time"
 )
 
 // InterceptEvent 拦截事件（与metrics.InterceptEvent保持一致）
 type InterceptEvent struct {
-	ID          int64     `json:"id,omitempty"`
-	Time        time.Time `json:"time"`
-	ClientIP    string    `json:"client_ip"`
-	Host        string    `json:"host,omitempty"`
-	Path        string    `json:"path"`
-	Query       string    `json:"query,omitempty"`
-	Method      string    `json:"method,omitempty"`
-	UserAgent   string    `json:"user_agent,omitempty"`
-	Referer     string    `json:"referer,omitempty"`
-	ContentType string    `json:"content_type,omitempty"`
-	Rule        string    `json:"rule"`
-	Status      int       `json:"status,omitempty"`
-	RequestID   string    `json:"request_id,omitempty"`
-	LatencyMs   float64   `json:"latency_ms,omitempty"`
+	ID            int64     `json:"id"`
+	Time          time.Time `json:"timestamp"`                   // 统一使用timestamp
+	ClientIP      string    `json:"client_ip"`
+	Host          string    `json:"host,omitempty"`
+	Path          string    `json:"path"`
+	Query         string    `json:"query,omitempty"`
+	Method        string    `json:"method"`
+	UserAgent     string    `json:"user_agent,omitempty"`
+	Referer       string    `json:"referer,omitempty"`
+	ContentType   string    `json:"content_type,omitempty"`
+	Rule          string    `json:"rule_id"`                     // 统一使用rule_id
+	Status        int       `json:"status"`
+	RequestID     string    `json:"request_id"`
+	LatencyMs     float64   `json:"latency_ms,omitempty"`
+	GeoCountry    string    `json:"geo_country,omitempty"`
+	GeoFlag       string    `json:"geo_flag,omitempty"`
+	MatchDetail   string    `json:"match_detail,omitempty"`
+	MatchLocation string    `json:"match_location,omitempty"`
+	Action        string    `json:"action"`                      // 处理动作: block
+	UpstreamAddr  string    `json:"upstream_addr,omitempty"`     // 后端服务地址
+	Protocol      string    `json:"protocol,omitempty"`          // HTTP协议版本
+	Scheme        string    `json:"scheme,omitempty"`            // 请求协议
+	UpstreamLatencyMs float64 `json:"upstream_latency_ms,omitempty"` // 后端响应延迟
+	RequestSize   int64     `json:"request_size,omitempty"`      // 请求体大小
+	ErrorMessage  string    `json:"error_message,omitempty"`     // 错误信息
+}
+
+// MarshalJSON 自定义JSON序列化，确保时间以本地时区格式输出
+func (e InterceptEvent) MarshalJSON() ([]byte, error) {
+	type Alias InterceptEvent
+	return json.Marshal(&struct {
+		Time string `json:"time"`
+		*Alias
+	}{
+		Time:  e.Time.Format("2006-01-02T15:04:05.999999"),
+		Alias: (*Alias)(&e),
+	})
 }
 
 var (
 	eventRing = ring.New(200)
-	eventMu   sync.Mutex
+	eventMu   sync.RWMutex
 )
 
 // AddEvent 添加拦截事件到内存环形缓冲
-func AddEvent(clientIP, host, path, query, method, userAgent, referer, contentType, rule string, status int, requestID string, latencyMs float64) {
-	// 保存到内存环形缓冲
+func AddEvent(clientIP, host, path, query, method, userAgent, referer, contentType, rule string, status int, requestID string, latencyMs float64, geoCountry, geoFlag, matchDetail, matchLocation, action, upstreamAddr, protocol, scheme string, requestSize int64) {
 	eventMu.Lock()
 	eventRing.Value = InterceptEvent{
-		Time:        time.Now(),
-		ClientIP:    clientIP,
-		Host:        host,
-		Path:        path,
-		Query:       query,
-		Method:      method,
-		UserAgent:   userAgent,
-		Referer:     referer,
-		ContentType: contentType,
-		Rule:        rule,
-		Status:      status,
-		RequestID:   requestID,
-		LatencyMs:   latencyMs,
+		Time:          time.Now(),
+		ClientIP:      clientIP,
+		Host:          host,
+		Path:          path,
+		Query:         query,
+		Method:        method,
+		UserAgent:     userAgent,
+		Referer:       referer,
+		ContentType:   contentType,
+		Rule:          rule,
+		Status:        status,
+		RequestID:     requestID,
+		LatencyMs:     latencyMs,
+		GeoCountry:    geoCountry,
+		GeoFlag:       geoFlag,
+		MatchDetail:   matchDetail,
+		MatchLocation: matchLocation,
+		Action:        action,
+		UpstreamAddr:  upstreamAddr,
+		Protocol:      protocol,
+		Scheme:        scheme,
+		RequestSize:   requestSize,
 	}
 	eventRing = eventRing.Next()
 	eventMu.Unlock()
@@ -54,8 +86,8 @@ func AddEvent(clientIP, host, path, query, method, userAgent, referer, contentTy
 
 // GetEvents 获取所有拦截事件
 func GetEvents() []InterceptEvent {
-	eventMu.Lock()
-	defer eventMu.Unlock()
+	eventMu.RLock()
+	defer eventMu.RUnlock()
 	var events []InterceptEvent
 	eventRing.Do(func(v interface{}) {
 		if v != nil {

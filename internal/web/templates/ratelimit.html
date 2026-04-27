@@ -64,8 +64,8 @@
         }
         .form-group input:focus {
             outline: none;
-            border-color: #3498db;
-            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+            border-color: #409eff;
+            box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.1);
         }
         .form-group .hint {
             font-size: 12px;
@@ -75,6 +75,7 @@
         .form-row {
             display: flex;
             gap: 20px;
+            flex-wrap: wrap;
         }
         .form-row .form-group {
             flex: 1;
@@ -89,11 +90,11 @@
             transition: all 0.3s;
         }
         .btn-primary {
-            background: #3498db;
+            background: #409eff;
             color: white;
         }
         .btn-primary:hover {
-            background: #2980b9;
+            background: #66b1ff;
         }
         .btn-secondary {
             background: #f5f6fa;
@@ -106,10 +107,11 @@
             display: flex;
             gap: 10px;
             margin-top: 30px;
+            flex-wrap: wrap;
         }
         .info-box {
             background: #f8f9fa;
-            border-left: 4px solid #3498db;
+            border-left: 4px solid #409eff;
             padding: 15px;
             margin-bottom: 25px;
             border-radius: 4px;
@@ -125,6 +127,16 @@
             grid-template-columns: repeat(3, 1fr);
             gap: 20px;
             margin-bottom: 25px;
+        }
+        @media (max-width: 768px) {
+            .current-config {
+                grid-template-columns: 1fr;
+            }
+        }
+        @media (min-width: 769px) and (max-width: 1024px) {
+            .current-config {
+                grid-template-columns: repeat(2, 1fr);
+            }
         }
         .config-item {
             background: #f8f9fa;

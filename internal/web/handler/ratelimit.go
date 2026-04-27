@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"golang.org/x/time/rate"
-	"gowaf-demo/internal/proxyconfig"
 	"gowaf-demo/internal/web/templates"
 )
 
@@ -17,14 +16,9 @@ type LimiterInterface interface {
 }
 
 var limiterInstance LimiterInterface
-var proxyConfigManager *proxyconfig.Manager
 
 func SetLimiter(l LimiterInterface) {
 	limiterInstance = l
-}
-
-func SetProxyConfigManager(pcm *proxyconfig.Manager) {
-	proxyConfigManager = pcm
 }
 
 func RateLimitPage(w http.ResponseWriter, r *http.Request) {
@@ -112,10 +106,10 @@ func APIPostRateLimit(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	// 持久化配置到数据库
-	if proxyConfigManager != nil {
+	if ProxyConfigManager != nil {
 		enabled := limiterInstance.GetEnabled()
 		qps, burst := limiterInstance.GetConfig()
-		if err := proxyConfigManager.SetRateLimitConfig(enabled, int(qps), burst); err != nil {
+		if err := ProxyConfigManager.SetRateLimitConfig(enabled, int(qps), burst); err != nil {
 			// 记录错误但不影响响应
 			// 实际生产环境应该记录日志
 		}

@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"gowaf-demo/internal/web/templates"
 )
@@ -57,6 +59,7 @@ func UAPage(w http.ResponseWriter, r *http.Request) {
 		ruleType := r.FormValue("rule_type")
 		matchType := r.FormValue("match_type")
 		pattern := r.FormValue("pattern")
+		description := r.FormValue("description")
 		
 		if pattern != "" {
 			if RuleEngine == nil {
@@ -66,7 +69,7 @@ func UAPage(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			
-			err := RuleEngine.AddUARule(ruleType, matchType, pattern)
+			err := RuleEngine.AddUARule(ruleType, matchType, pattern, description)
 			if err != nil {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)
@@ -96,4 +99,58 @@ func UAPage(w http.ResponseWriter, r *http.Request) {
 		"Active": "ua",
 	}
 	templates.UATmpl.ExecuteTemplate(w, "ua", data)
+}
+
+func UAUpdateAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Method not allowed"})
+		return
+	}
+	var req struct {
+		ID          int    `json:"id"`
+		RuleType    string `json:"rule_type"`
+		MatchType   string `json:"match_type"`
+		Pattern     string `json:"pattern"`
+		Description string `json:"description"`
+		Enabled     bool   `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+		return
+	}
+	if RuleEngine == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "RuleEngine not initialized"})
+		return
+	}
+	if err := RuleEngine.UpdateUARule(req.ID, req.RuleType, req.MatchType, req.Pattern, req.Description, req.Enabled); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+func UAToggleAPI(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(r.URL.Query().Get("id"))
+	if id == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "invalid id"})
+		return
+	}
+	if RuleEngine == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "RuleEngine not initialized"})
+		return
+	}
+	if err := RuleEngine.ToggleUARule(id); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }

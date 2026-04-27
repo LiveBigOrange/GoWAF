@@ -9,34 +9,42 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/common.css">
     <style>
+        /* 徽章样式 - 与访问日志保持一致 */
         .badge {
             display: inline-block;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 12px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
             font-weight: 500;
-            text-transform: uppercase;
         }
         .badge.ip { background: #fee; color: #c0392b; }
         .badge.ua { background: #fef3e2; color: #e67e22; }
         .badge.path { background: #e8f5e9; color: #27ae60; }
-        .badge.ratelimit { background: #e3f2fd; color: #3498db; }
+        .badge.ratelimit { background: #e3f2fd; color: #409eff; }
         .badge.other { background: #f5f5f5; color: #7f8c8d; }
-        
+
+        /* 筛选栏样式 - 与访问日志保持一致 */
         .filter-bar {
             display: flex;
-            gap: 10px;
+            gap: 15px;
             margin-bottom: 20px;
-            flex-wrap: wrap;
             align-items: center;
+            flex-wrap: wrap;
         }
         .filter-bar input[type="text"],
         .filter-bar select,
         .filter-bar input[type="date"] {
             padding: 8px 12px;
-            border: 1px solid #dce1e8;
-            border-radius: 6px;
+            border: 1px solid #dcdfe6;
+            border-radius: 4px;
             font-size: 14px;
+            background: white;
+        }
+        .filter-bar input[type="text"]:focus,
+        .filter-bar select:focus,
+        .filter-bar input[type="date"]:focus {
+            outline: none;
+            border-color: #409eff;
         }
         .filter-bar input[type="text"] {
             flex: 1;
@@ -44,17 +52,16 @@
         }
         .filter-bar button {
             padding: 8px 16px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #409eff;
             color: white;
             border: none;
-            border-radius: 6px;
+            border-radius: 4px;
             cursor: pointer;
-            transition: all 0.3s;
             font-weight: 500;
+            font-size: 14px;
         }
         .filter-bar button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+            background: #66b1ff;
         }
         .time-filter {
             display: flex;
@@ -62,7 +69,38 @@
             align-items: center;
         }
         .time-filter span { color: #7f8c8d; font-size: 14px; }
-        
+
+        /* 表格样式 - 与访问日志保持一致 */
+        .log-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+        }
+        .log-table th {
+            background: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-weight: 500;
+            color: #2c3e50;
+            font-size: 13px;
+            border-bottom: 1px solid #e8e9ed;
+        }
+        .log-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 13px;
+        }
+        .log-table tr:hover {
+            background: #f8f9fa;
+        }
+        .log-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        /* 详情行样式 - 与访问日志保持一致 */
         .detail-row {
             display: none;
             background: #f8f9fa;
@@ -72,7 +110,7 @@
         }
         .detail-content {
             padding: 15px;
-            border-left: 3px solid #667eea;
+            border-left: 3px solid #409eff;
         }
         .detail-item {
             display: flex;
@@ -95,9 +133,10 @@
             border-radius: 3px;
             font-size: 12px;
         }
-        
+
+        /* 查看详情按钮 - 与访问日志保持一致 */
         .view-btn {
-            color: #3498db;
+            color: #409eff;
             text-decoration: none;
             padding: 4px 12px;
             border-radius: 4px;
@@ -108,16 +147,24 @@
             font-size: 13px;
         }
         .view-btn:hover {
-            background-color: #3498db;
+            background-color: #409eff;
             color: white;
+        }
+
+        .empty-message {
+            text-align: center;
+            padding: 40px;
+            color: #95a5a6;
+            font-size: 14px;
         }
     </style>
 </head>
 <body>
     {{template "sidebar" .}}
     <div class="main">
-        <div class="card">
-            <div class="filter-bar">
+        <h2 style="margin-bottom: 20px; font-size: 20px; color: #2c3e50;">🛡️ 拦截数据</h2>
+
+        <div class="filter-bar">
                 <input type="text" id="searchInput" placeholder="搜索IP、路径或规则类型..." onkeyup="filterTable()">
                 <select id="typeFilter" onchange="filterTable()">
                     <option value="">全部拦截</option>
@@ -125,7 +172,15 @@
                     <option value="ip">IP黑名单</option>
                     <option value="ua">UA规则</option>
                     <option value="path">路径规则</option>
+                    <option value="geo">地理规则</option>
+                    <option value="method">HTTP方法限制</option>
                     <option value="ratelimit">限流拦截</option>
+                    <option value="sql">SQL注入</option>
+                    <option value="xss">XSS攻击</option>
+                    <option value="cmd">命令注入</option>
+                    <option value="path_traversal">路径遍历</option>
+                    <option value="header_injection">头部注入</option>
+                    <option value="sensitive_data">敏感数据</option>
                 </select>
                 <div class="time-filter">
                     <span>时间：</span>
@@ -135,11 +190,12 @@
                 </div>
                 <button onclick="clearFilters()">清除筛选</button>
             </div>
-            <table>
+            <table class="log-table">
                 <thead>
                     <tr>
                         <th>时间</th>
                         <th>IP地址</th>
+                        <th>地理位置</th>
                         <th>请求方法</th>
                         <th>请求路径</th>
                         <th>规则类型</th>
@@ -165,7 +221,6 @@
                     <button class="pagination-btn" id="nextBtn" onclick="nextPage()">下一页</button>
                 </div>
             </div>
-        </div>
     </div>
     <script>
         (function() {
@@ -183,9 +238,7 @@
 
             function formatTime(time) {
                 if (!time) return '-';
-                var date;
-                if (typeof time === 'string') date = new Date(time);
-                else date = new Date(time);
+                var date = new Date(time);
                 if (isNaN(date.getTime())) return time;
                 return date.getFullYear() + '-' + 
                     String(date.getMonth() + 1).padStart(2, '0') + '-' + 
@@ -193,6 +246,22 @@
                     String(date.getHours()).padStart(2, '0') + ':' + 
                     String(date.getMinutes()).padStart(2, '0') + ':' + 
                     String(date.getSeconds()).padStart(2, '0');
+            }
+
+            // 格式化字节大小
+            function formatBytes(bytes) {
+                if (!bytes || bytes === 0) return '0 B';
+                var k = 1024;
+                var sizes = ['B', 'KB', 'MB', 'GB'];
+                var i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            }
+
+            // 解析时间为Date对象
+            function parseTime(time) {
+                if (!time) return null;
+                var date = new Date(time);
+                return isNaN(date.getTime()) ? null : date;
             }
 
             function getUrlParam(param) {
@@ -211,21 +280,31 @@
             var serverTotal = 0;
 
             function loadData() {
-                fetch('/api/intercepts?page=' + currentPage + '&page_size=' + (pageSize > 100 ? 100 : pageSize))
-                    .then(r => r.json())
+                fetch('/api/intercepts?page=1&page_size=10000')
+                    .then(r => {
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        return r.json();
+                    })
                     .then(d => {
                         if (d && d.data) {
                             allData = d.data || [];
                             serverTotal = d.total || 0;
-                            filteredData = allData;
                         } else {
                             allData = d || [];
                             serverTotal = allData.length;
-                            filteredData = allData;
                         }
-                        renderData();
+                        filteredData = allData;
+                        filterTable();
                     })
-                    .catch(e => console.error('获取数据失败', e));
+                    .catch(e => {
+                        console.error('获取数据失败', e);
+                        allData = [];
+                        filteredData = [];
+                        serverTotal = 0;
+                        document.getElementById('tableBody').innerHTML = 
+                            '<tr><td colspan="8" style="text-align:center; color:#95a5a6; padding:40px;"><div style="font-size:16px;margin-bottom:8px;">暂无拦截数据</div><div style="font-size:12px;">当前没有拦截记录</div></td></tr>';
+                        document.getElementById('pagination').style.display = 'none';
+                    });
             }
 
             window.filterTable = function() {
@@ -236,37 +315,42 @@
 
                 var ruleTypeMap = {
                     'ip': 'IP黑名单', 'path': '路径黑名单', 'ua': 'UA黑名单',
+                    'geo': '地理规则', 'method': 'HTTP方法限制',
                     'ratelimit': '限流', 'sql': '攻击检测:sql_injection',
-                    'xss': '攻击检测:xss', 'cmd': '攻击检测:command_injection'
+                    'xss': '攻击检测:xss', 'cmd': '攻击检测:command_injection',
+                    'path_traversal': '攻击检测:path_traversal', 'header_injection': '攻击检测:header_injection',
+                    'sensitive_data': '攻击检测:sensitive_data'
                 };
 
                 filteredData = allData.filter(function(item) {
                     var matchesSearch = !searchText || 
                         (item.client_ip && item.client_ip.toLowerCase().includes(searchText)) ||
                         (item.path && item.path.toLowerCase().includes(searchText)) ||
-                        (item.rule && item.rule.toLowerCase().includes(searchText));
+                        (item.rule_id && item.rule_id.toLowerCase().includes(searchText));
                     
                     var matchesType = false;
                     if (!typeFilter) matchesType = true;
-                    else if (typeFilter === 'rule') matchesType = item.rule !== '限流' && !item.rule.startsWith('限流');
+                    else if (typeFilter === 'rule') matchesType = item.rule_id && item.rule_id !== '限流' && !item.rule_id.startsWith('限流');
                     else {
                         var targetRule = ruleTypeMap[typeFilter];
-                        if (targetRule) matchesType = item.rule === targetRule || item.rule.startsWith(targetRule);
-                        else matchesType = item.rule === typeFilter;
+                        if (targetRule) matchesType = item.rule_id && (item.rule_id === targetRule || item.rule_id.startsWith(targetRule));
+                        else matchesType = item.rule_id && item.rule_id === typeFilter;
                     }
                     
                     var matchesTime = true;
                     if (startDate || endDate) {
-                        var itemDate = new Date(item.time);
-                        if (startDate) {
-                            var start = new Date(startDate);
-                            start.setHours(0, 0, 0, 0);
-                            matchesTime = matchesTime && itemDate >= start;
-                        }
-                        if (endDate) {
-                            var end = new Date(endDate);
-                            end.setHours(23, 59, 59, 999);
-                            matchesTime = matchesTime && itemDate <= end;
+                        var itemDate = parseTime(item.timestamp || item.time);
+                        if (itemDate) {
+                            if (startDate) {
+                                var start = new Date(startDate);
+                                start.setHours(0, 0, 0, 0);
+                                matchesTime = matchesTime && itemDate >= start;
+                            }
+                            if (endDate) {
+                                var end = new Date(endDate);
+                                end.setHours(23, 59, 59, 999);
+                                matchesTime = matchesTime && itemDate <= end;
+                            }
                         }
                     }
                     
@@ -292,7 +376,7 @@
                 var pagination = document.getElementById('pagination');
 
                 if (!filteredData || filteredData.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#95a5a6; padding:20px;">暂无拦截数据</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#95a5a6; padding:40px;"><div style="font-size:16px;margin-bottom:8px;">暂无拦截数据</div><div style="font-size:12px;">当前没有拦截记录</div></td></tr>';
                     pagination.style.display = 'none';
                     return;
                 }
@@ -310,53 +394,94 @@
                     var tr = document.createElement('tr');
                     var escapedIP = escapeHtml(item.client_ip || '');
                     var escapedPath = escapeHtml(item.path || '');
-                    var escapedRule = escapeHtml(item.rule || '');
+                    var escapedRule = escapeHtml(item.rule_id || '');  // 使用rule_id
                     var escapedMethod = escapeHtml(item.method || 'GET');
                     var escapedStatus = escapeHtml(item.status || 403);
-                    var timeStr = formatTime(item.time);
+                    var timeStr = formatTime(item.timestamp);  // 使用timestamp
                     
                     var ruleTypeText = '';
                     var ruleClass = '';
-                    if (item.rule === 'IP黑名单') { ruleTypeText = 'IP黑名单'; ruleClass = 'ip'; }
-                    else if (item.rule === 'UA黑名单') { ruleTypeText = 'UA黑名单'; ruleClass = 'ua'; }
-                    else if (item.rule === '路径黑名单') { ruleTypeText = '路径黑名单'; ruleClass = 'path'; }
-                    else if (item.rule === '限流') { ruleTypeText = '限流'; ruleClass = 'ratelimit'; }
+                    if (item.rule_id === 'IP黑名单') { ruleTypeText = 'IP黑名单'; ruleClass = 'ip'; }
+                    else if (item.rule_id === 'UA黑名单') { ruleTypeText = 'UA黑名单'; ruleClass = 'ua'; }
+                    else if (item.rule_id === '路径黑名单') { ruleTypeText = '路径黑名单'; ruleClass = 'path'; }
+                    else if (item.rule_id === '限流') { ruleTypeText = '限流'; ruleClass = 'ratelimit'; }
                     else { ruleTypeText = escapedRule; ruleClass = 'other'; }
+
+                    var geoText = '-';
+                    if (item.geo_country) {
+                        geoText = escapeHtml(item.geo_flag || '') + ' ' + escapeHtml(item.geo_country);
+                    }
 
                     tr.innerHTML = '<td>' + escapeHtml(timeStr) + '</td>' +
                         '<td><code>' + escapedIP + '</code></td>' +
+                        '<td>' + geoText + '</td>' +
                         '<td>' + escapedMethod + '</td>' +
                         '<td><code>' + escapedPath + '</code></td>' +
                         '<td><span class="badge ' + ruleClass + '">' + ruleTypeText + '</span></td>' +
                         '<td>' + escapedStatus + '</td>' +
-                        '<td><button class="view-btn" onclick="toggleDetail(' + index + ')">查看详情</button></td>';
+                        '<td><button class="view-btn" onclick="toggleDetail(' + index + ', event)">查看详情</button></td>';
                     tbody.appendChild(tr);
                     
                     var detailTr = document.createElement('tr');
                     detailTr.className = 'detail-row';
                     detailTr.id = 'detail-' + index;
                     
-                    var detailHtml = '<td colspan="7"><div class="detail-content">';
+                    var detailHtml = '<td colspan="8"><div class="detail-content">';
                     detailHtml += '<div class="detail-item"><span class="detail-label">请求ID：</span><span class="detail-value"><code>' + escapeHtml(item.request_id || '-') + '</code></span></div>';
+                    detailHtml += '<div class="detail-item"><span class="detail-label">拦截时间：</span><span class="detail-value">' + escapeHtml(timeStr) + '</span></div>';
                     detailHtml += '<div class="detail-item"><span class="detail-label">客户端IP：</span><span class="detail-value"><code>' + escapedIP + '</code></span></div>';
+                    if (item.geo_country) {
+                        detailHtml += '<div class="detail-item"><span class="detail-label">地理位置：</span><span class="detail-value">' + escapeHtml(item.geo_flag || '') + ' ' + escapeHtml(item.geo_country) + '</span></div>';
+                    }
                     detailHtml += '<div class="detail-item"><span class="detail-label">请求Host：</span><span class="detail-value"><code>' + escapeHtml(item.host || '-') + '</code></span></div>';
                     detailHtml += '<div class="detail-item"><span class="detail-label">请求方法：</span><span class="detail-value"><code>' + escapedMethod + '</code></span></div>';
                     detailHtml += '<div class="detail-item"><span class="detail-label">请求路径：</span><span class="detail-value"><code>' + escapedPath + '</code></span></div>';
-                    detailHtml += '<div class="detail-item"><span class="detail-label">查询参数：</span><span class="detail-value"><code>' + escapeHtml(item.query || '-') + '</code></span></div>';
-                    detailHtml += '<div class="detail-item"><span class="detail-label">User-Agent：</span><span class="detail-value">' + escapeHtml(item.user_agent || '-') + '</span></div>';
-                    detailHtml += '<div class="detail-item"><span class="detail-label">Referer：</span><span class="detail-value">' + escapeHtml(item.referer || '-') + '</span></div>';
-                    detailHtml += '<div class="detail-item"><span class="detail-label">Content-Type：</span><span class="detail-value"><code>' + escapeHtml(item.content_type || '-') + '</code></span></div>';
+                    if (item.query) {
+                        detailHtml += '<div class="detail-item"><span class="detail-label">查询参数：</span><span class="detail-value"><code>' + escapeHtml(item.query) + '</code></span></div>';
+                    }
+                    if (item.protocol) {
+                        detailHtml += '<div class="detail-item"><span class="detail-label">HTTP协议：</span><span class="detail-value"><code>' + escapeHtml(item.protocol) + '</code></span></div>';
+                    }
+                    if (item.scheme) {
+                        detailHtml += '<div class="detail-item"><span class="detail-label">请求协议：</span><span class="detail-value"><code>' + escapeHtml(item.scheme) + '</code></span></div>';
+                    }
+                    if (item.user_agent) {
+                        detailHtml += '<div class="detail-item"><span class="detail-label">User-Agent：</span><span class="detail-value">' + escapeHtml(item.user_agent) + '</span></div>';
+                    }
+                    if (item.referer) {
+                        detailHtml += '<div class="detail-item"><span class="detail-label">Referer：</span><span class="detail-value">' + escapeHtml(item.referer) + '</span></div>';
+                    }
+                    if (item.content_type) {
+                        detailHtml += '<div class="detail-item"><span class="detail-label">Content-Type：</span><span class="detail-value"><code>' + escapeHtml(item.content_type) + '</code></span></div>';
+                    }
                     detailHtml += '<div class="detail-item"><span class="detail-label">拦截规则：</span><span class="detail-value"><span class="badge ' + ruleClass + '">' + ruleTypeText + '</span></span></div>';
+                    if (item.match_detail) {
+                        detailHtml += '<div class="detail-item"><span class="detail-label">匹配模式：</span><span class="detail-value"><code>' + escapeHtml(item.match_detail) + '</code></span></div>';
+                    }
+                    if (item.match_location) {
+                        detailHtml += '<div class="detail-item"><span class="detail-label">检测位置：</span><span class="detail-value"><code>' + escapeHtml(item.match_location) + '</code></span></div>';
+                    }
                     detailHtml += '<div class="detail-item"><span class="detail-label">状态码：</span><span class="detail-value"><code>' + escapedStatus + '</code></span></div>';
                     detailHtml += '<div class="detail-item"><span class="detail-label">延迟时间：</span><span class="detail-value">' + (item.latency_ms ? item.latency_ms.toFixed(2) + ' ms' : '-') + '</span></div>';
-                    detailHtml += '<div class="detail-item"><span class="detail-label">拦截时间：</span><span class="detail-value">' + escapeHtml(timeStr) + '</span></div>';
+                    if (item.upstream_latency_ms) {
+                        detailHtml += '<div class="detail-item"><span class="detail-label">后端延迟：</span><span class="detail-value">' + item.upstream_latency_ms.toFixed(2) + ' ms</span></div>';
+                    }
+                    if (item.request_size) {
+                        detailHtml += '<div class="detail-item"><span class="detail-label">请求大小：</span><span class="detail-value">' + formatBytes(item.request_size) + '</span></div>';
+                    }
+                    if (item.upstream_addr) {
+                        detailHtml += '<div class="detail-item"><span class="detail-label">后端地址：</span><span class="detail-value"><code>' + escapeHtml(item.upstream_addr) + '</code></span></div>';
+                    }
+                    if (item.error_message) {
+                        detailHtml += '<div class="detail-item"><span class="detail-label">错误信息：</span><span class="detail-value" style="color:#e74c3c;">' + escapeHtml(item.error_message) + '</span></div>';
+                    }
                     detailHtml += '</div></td>';
                     
                     detailTr.innerHTML = detailHtml;
                     tbody.appendChild(detailTr);
                 });
 
-                document.getElementById('pageInfo').textContent = '第' + currentPage + ' 页 / 第' + totalPages + ' 页（共' + filteredData.length + ' 条）';
+                document.getElementById('pageInfo').textContent = '第' + currentPage + ' 页 / 第' + totalPages + ' 页（共' + (serverTotal > filteredData.length ? serverTotal : filteredData.length) + ' 条）';
                 document.getElementById('prevBtn').disabled = currentPage <= 1;
                 document.getElementById('nextBtn').disabled = currentPage >= totalPages;
                 pagination.style.display = 'flex';
@@ -366,9 +491,9 @@
             window.nextPage = function() { var totalPages = Math.ceil(filteredData.length / pageSize); if (currentPage < totalPages) { currentPage++; renderData(); } };
             window.changePageSize = function() { pageSize = parseInt(document.getElementById('pageSize').value); currentPage = 1; renderData(); };
 
-            window.toggleDetail = function(index) {
+            window.toggleDetail = function(index, e) {
                 var detailRow = document.getElementById('detail-' + index);
-                var btn = event.target;
+                var btn = e.target;
                 if (detailRow.classList.contains('show')) {
                     detailRow.classList.remove('show');
                     btn.textContent = '查看详情';

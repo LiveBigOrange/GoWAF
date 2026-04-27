@@ -2,12 +2,13 @@ package middleware
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"sync"
 	"time"
 )
 
-// --- Session 管理（带服务端过期） ---
+// --- Session 管理（带服务端过期和数据库持久化） ---
 
 type sessionEntry struct {
 	createdAt time.Time
@@ -16,8 +17,59 @@ type sessionEntry struct {
 var (
 	sessionStore = make(map[string]sessionEntry)
 	sessionMu    sync.RWMutex
-	sessionTTL   = 1 * time.Hour
+	sessionDB    *sql.DB // 数据库连接
+	// sessionTTL   = 8 * time.Hour // 移除硬编码,改用配置
 )
+
+// 配置变量,由外部设置
+var sessionTTL time.Duration
+
+// InitSessionConfig 初始化Session配置
+func InitSessionConfig(ttlHours int) {
+	sessionTTL = time.Duration(ttlHours) * time.Hour
+}
+
+// InitSessionDB 初始化Session数据库
+func InitSessionDB(db *sql.DB) error {
+	sessionDB = db
+
+	// 创建session表
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS sessions (
+			token TEXT PRIMARY KEY,
+			created_at INTEGER NOT NULL
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	// 从数据库加载现有session到内存
+	return loadSessionsFromDB()
+}
+
+// loadSessionsFromDB 从数据库加载session到内存
+func loadSessionsFromDB() error {
+	rows, err := sessionDB.Query("SELECT token, created_at FROM sessions")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	sessionMu.Lock()
+	defer sessionMu.Unlock()
+
+	for rows.Next() {
+		var token string
+		var createdAt int64
+		if err := rows.Scan(&token, &createdAt); err != nil {
+			continue
+		}
+		sessionStore[token] = sessionEntry{createdAt: time.Unix(createdAt, 0)}
+	}
+
+	return rows.Err()
+}
 
 // GenerateSessionToken 生成 session token
 func GenerateSessionToken() string {
@@ -43,7 +95,15 @@ func IsValidSession(token string) bool {
 func AddSession(token string) {
 	sessionMu.Lock()
 	defer sessionMu.Unlock()
-	sessionStore[token] = sessionEntry{createdAt: time.Now()}
+
+	now := time.Now()
+	sessionStore[token] = sessionEntry{createdAt: now}
+
+	// 持久化到数据库
+	if sessionDB != nil {
+		sessionDB.Exec("INSERT OR REPLACE INTO sessions (token, created_at) VALUES (?, ?)",
+			token, now.Unix())
+	}
 }
 
 // RemoveSession 移除 session
@@ -51,16 +111,42 @@ func RemoveSession(token string) {
 	sessionMu.Lock()
 	defer sessionMu.Unlock()
 	delete(sessionStore, token)
+
+	// 从数据库删除
+	if sessionDB != nil {
+		sessionDB.Exec("DELETE FROM sessions WHERE token = ?", token)
+	}
+}
+
+// RenewSession 续期 session (用户活跃时调用)
+func RenewSession(token string) {
+	sessionMu.Lock()
+	defer sessionMu.Unlock()
+
+	now := time.Now()
+	sessionStore[token] = sessionEntry{createdAt: now}
+
+	// 更新数据库
+	if sessionDB != nil {
+		sessionDB.Exec("UPDATE sessions SET created_at = ? WHERE token = ?",
+			now.Unix(), token)
+	}
 }
 
 // CleanExpiredSessions 清理过期 session
 func CleanExpiredSessions() {
 	sessionMu.Lock()
 	defer sessionMu.Unlock()
+
 	now := time.Now()
 	for token, entry := range sessionStore {
 		if now.Sub(entry.createdAt) >= sessionTTL {
 			delete(sessionStore, token)
+
+			// 从数据库删除
+			if sessionDB != nil {
+				sessionDB.Exec("DELETE FROM sessions WHERE token = ?", token)
+			}
 		}
 	}
 }

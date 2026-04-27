@@ -1,0 +1,94 @@
+{{define "pathratelimit"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>路径级限流 - GoWAF</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <style>
+        .filter-bar { display: flex; gap: 15px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
+        .path-pattern { font-family: monospace; background: #f0f4ff; padding: 2px 8px; border-radius: 4px; }
+        .info-box { background: #f8f9fa; border-left: 4px solid #409eff; padding: 15px; margin-bottom: 20px; border-radius: 4px; font-size: 13px; color: #596275; }
+        .modal.show { display: flex; }
+        .form-row { display: flex; gap: 15px; }
+        .form-row .form-group { flex: 1; }
+    </style>
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main">
+        <div class="card">
+            <div class="info-box">对匹配路径正则的请求进行独立限流，每个路径模式拥有独立的令牌桶。路径模式使用Go正则语法。</div>
+            <div class="filter-bar">
+                <button class="add-btn" onclick="openModal()">+ 添加规则</button>
+            </div>
+            <table>
+                <thead><tr><th>路径模式</th><th>速率(次/秒)</th><th>突发</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody id="limitList"><tr><td colspan="5" style="text-align:center;color:#95a5a6;">加载中...</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+    <div id="addModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>添加路径限流规则</h3>
+                <span class="close" onclick="closeModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>路径正则</label>
+                    <input id="addPattern" placeholder="^/api/.*">
+                    <small>Go正则语法，如 ^/api/.* 或 /login</small>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>速率(次/秒)</label>
+                        <input id="addRate" type="number" value="10" min="1">
+                    </div>
+                    <div class="form-group">
+                        <label>突发容量</label>
+                        <input id="addBurst" type="number" value="20" min="1">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closeModal()">取消</button>
+                <button class="btn-submit" onclick="addRule()">添加</button>
+            </div>
+        </div>
+    </div>
+    <script>
+    function escapeHtml(text){var d=document.createElement('div');d.textContent=text;return d.innerHTML;}
+    function loadRules(){
+        fetch('/api/path-ratelimit/list').then(r=>r.json()).then(d=>{
+            if(!d.success) return;
+            var tbody=document.getElementById('limitList');
+            if(!d.data||!d.data.length){tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:#95a5a6;">暂无规则</td></tr>';return;}
+            tbody.innerHTML=d.data.map(r=>'<tr><td><span class="path-pattern">'+escapeHtml(r.path_pattern)+'</span></td><td>'+r.rate+'</td><td>'+r.burst+'</td><td>'+(r.enabled?'<span style="color:#27ae60">启用</span>':'<span style="color:#95a5a6">禁用</span>')+'</td><td><button class="delete-btn" onclick="delRule('+r.id+')">删除</button></td></tr>').join('');
+        }).catch(e=>showToast('error','加载规则失败'));
+    }
+    function openModal(){document.getElementById('addModal').classList.add('show');}
+    function closeModal(){document.getElementById('addModal').classList.remove('show');}
+    function addRule(){
+        var btn=document.querySelector('.btn-submit');if(btn&&btn.disabled)return;
+        var pattern=document.getElementById('addPattern').value.trim(),rate=parseFloat(document.getElementById('addRate').value),burst=parseInt(document.getElementById('addBurst').value);
+        if(!pattern){showToast('error','请输入路径模式');return;}
+        if(!rate||rate<=0||!burst||burst<=0){showToast('error','速率和突发容量必须大于0');return;}
+        if(btn)btn.disabled=true;
+        fetch('/api/path-ratelimit/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path_pattern:pattern,rate:rate,burst:burst,enabled:true})}).then(r=>r.json()).then(d=>{
+            if(d.success){showToast('success','添加成功');closeModal();document.getElementById('addPattern').value='';loadRules();}else showToast('error',d.message||'添加失败');
+        }).catch(e=>showToast('error','添加失败: '+e.message)).finally(()=>{if(btn)btn.disabled=false;});
+    }
+    function delRule(id){
+        if(!confirm('确认删除此规则？'))return;
+        fetch('/api/path-ratelimit/delete?id='+id,{method:'POST'}).then(r=>r.json()).then(d=>{
+            if(d.success){showToast('success','删除成功');loadRules();}else showToast('error',d.message||'删除失败');
+        }).catch(e=>showToast('error','删除失败: '+e.message));
+    }
+    loadRules();
+    </script>
+</body>
+</html>
+{{end}}

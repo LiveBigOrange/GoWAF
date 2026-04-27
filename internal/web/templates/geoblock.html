@@ -1,0 +1,101 @@
+{{define "geoblock"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GeoIP阻断 - GoWAF</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <style>
+        .filter-bar { display: flex; gap: 15px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
+        .modal.show { display: flex; }
+        .info-box { background: #f8f9fa; border-left: 4px solid #409eff; padding: 15px; margin-bottom: 20px; border-radius: 4px; font-size: 13px; color: #596275; line-height: 1.8; }
+        .info-box strong { color: #2c3e50; }
+    </style>
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main">
+        <div class="card">
+            <div class="info-box">
+                <strong>说明：</strong>ISO 3166-1 地区代码中，<strong>CN</strong> 仅代表中国大陆，不包含台湾（<strong>TW</strong>）、香港（<strong>HK</strong>）和澳门（<strong>MO</strong>）。如需覆盖完整的中国地区范围，请同时添加 CN、TW、HK、MO 四个地区代码。
+            </div>
+            <div class="filter-bar">
+                <select id="filterMode" onchange="loadRules()">
+                    <option value="">所有模式</option>
+                    <option value="blacklist">黑名单</option>
+                    <option value="whitelist">白名单</option>
+                </select>
+                <button class="add-btn" onclick="openModal()">+ 添加规则</button>
+            </div>
+            <table>
+                <thead><tr><th>模式</th><th>地区代码</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody id="ruleList"><tr><td colspan="4" style="text-align:center;color:#95a5a6;">加载中...</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+    <div id="addModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>添加 GeoIP 规则</h3>
+                <span class="close" onclick="closeModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>模式</label>
+                    <select id="addMode">
+                        <option value="blacklist">黑名单（阻断列出的国家）</option>
+                        <option value="whitelist">白名单（仅允许列出的国家）</option>
+                    </select>
+                    <small>黑名单模式下，列表中的国家将被阻断；白名单模式下，仅允许列表中的国家</small>
+                </div>
+                <div class="form-group">
+                    <label>地区代码</label>
+                    <input id="addCode" placeholder="CN" maxlength="2">
+                    <small>ISO 3166-1 二字母地区代码，如 CN(中国大陆)、US(美国)、RU(俄罗斯)。CN 不含港澳台，完整中国范围需同时添加 CN、TW、HK、MO</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closeModal()">取消</button>
+                <button class="btn-submit" onclick="addRule()">添加</button>
+            </div>
+        </div>
+    </div>
+    <script>
+    function escapeHtml(text){var d=document.createElement('div');d.textContent=text;return d.innerHTML;}
+    var allRules=[];
+    function loadRules(){
+        fetch('/api/geo/list').then(r=>r.json()).then(d=>{
+            if(!d.success) return;
+            allRules=d.data||[];
+            var filter=document.getElementById('filterMode').value;
+            var rules=allRules;
+            if(filter) rules=rules.filter(r=>r.mode===filter);
+            var tbody=document.getElementById('ruleList');
+            if(!rules.length){tbody.innerHTML='<tr><td colspan="4" style="text-align:center;color:#95a5a6;">暂无规则</td></tr>';return;}
+            tbody.innerHTML=rules.map(r=>'<tr><td><span class="badge '+(r.mode==='blacklist'?'blacklist':'whitelist')+'">'+(r.mode==='blacklist'?'黑名单':'白名单')+'</span></td><td><b>'+escapeHtml(r.country_code)+'</b></td><td>'+(r.enabled?'<span style="color:#27ae60">启用</span>':'<span style="color:#95a5a6">禁用</span>')+'</td><td><button class="delete-btn" onclick="delRule('+r.id+')">删除</button></td></tr>').join('');
+        }).catch(e=>showToast('error','加载规则失败'));
+    }
+    function openModal(){document.getElementById('addModal').classList.add('show');}
+    function closeModal(){document.getElementById('addModal').classList.remove('show');}
+    function addRule(){
+        var btn=document.querySelector('.btn-submit');if(btn&&btn.disabled)return;
+        var mode=document.getElementById('addMode').value,code=document.getElementById('addCode').value.trim().toUpperCase();
+        if(!code){showToast('error','请输入地区代码');return;}
+        if(btn)btn.disabled=true;
+        fetch('/api/geo/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:mode,country_code:code,enabled:true})}).then(r=>r.json()).then(d=>{
+            if(d.success){showToast('success','添加成功');closeModal();document.getElementById('addCode').value='';loadRules();}else showToast('error',d.message||'添加失败');
+        }).catch(e=>showToast('error','添加失败: '+e.message)).finally(()=>{if(btn)btn.disabled=false;});
+    }
+    function delRule(id){
+        if(!confirm('确认删除此规则？'))return;
+        fetch('/api/geo/delete?id='+id,{method:'POST'}).then(r=>r.json()).then(d=>{
+            if(d.success){showToast('success','删除成功');loadRules();}else showToast('error',d.message||'删除失败');
+        }).catch(e=>showToast('error','删除失败: '+e.message));
+    }
+    loadRules();
+    </script>
+</body>
+</html>
+{{end}}

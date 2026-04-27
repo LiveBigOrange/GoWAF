@@ -3,6 +3,7 @@ package backend
 import (
 	"database/sql"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -29,7 +30,7 @@ type Manager struct {
 	db        *sql.DB
 	mu        sync.RWMutex
 	backends  []*Backend
-	roundIdx  int // 轮询索引
+	roundIdx  uint64 // 轮询索引（atomic）
 	failCount map[string]int // 失败计数
 }
 
@@ -261,10 +262,9 @@ func (m *Manager) UpdateBackend(backend *Backend) error {
 
 // SelectBackend 选择后端（轮询）
 func (m *Manager) SelectBackend() *Backend {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
-	// 过滤出启用且健康的后端
 	var available []*Backend
 	for _, b := range m.backends {
 		if b.Enabled && b.Healthy {
@@ -276,10 +276,8 @@ func (m *Manager) SelectBackend() *Backend {
 		return nil
 	}
 
-	// 简单轮询
-	b := available[m.roundIdx%len(available)]
-	m.roundIdx++
-	return b
+	idx := atomic.AddUint64(&m.roundIdx, 1) - 1
+	return available[idx%uint64(len(available))]
 }
 
 // SelectBackendByID 根据ID选择后端

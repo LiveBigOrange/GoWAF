@@ -35,6 +35,15 @@ func APIProxyAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.ListenAddr == "" {
+		http.Error(w, "listen_addr不能为空", http.StatusBadRequest)
+		return
+	}
+	if req.Protocol != "http" && req.Protocol != "https" {
+		http.Error(w, "protocol必须为http或https", http.StatusBadRequest)
+		return
+	}
+
 	cfg := &proxyconfig.ProxyConfig{
 		ID:         uuid.New().String(),
 		ListenAddr: req.ListenAddr,
@@ -47,13 +56,14 @@ func APIProxyAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 动态启动代理服务器
 	if ProxyServerManager != nil {
 		if err := ProxyServerManager.AddProxy(cfg); err != nil {
-			// 记录错误但不影响配置保存
-			// 因为配置已经保存成功，只是启动失败
-			log.Printf("警告: 启动代理服务器失败 [%s]: %v", cfg.ListenAddr, err)
+			ProxyConfigManager.DeleteProxy(cfg.ID)
+			http.Error(w, "启动代理服务器失败: "+err.Error(), http.StatusInternalServerError)
+			return
 		}
+	} else {
+		log.Printf("警告: ProxyServerManager未初始化，代理配置已保存但监听器未启动，请重启服务生效")
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -73,6 +83,26 @@ func APIProxyUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.ID == "" {
+		http.Error(w, "id不能为空", http.StatusBadRequest)
+		return
+	}
+	if req.ListenAddr == "" {
+		http.Error(w, "listen_addr不能为空", http.StatusBadRequest)
+		return
+	}
+	if req.Protocol != "http" && req.Protocol != "https" {
+		http.Error(w, "protocol必须为http或https", http.StatusBadRequest)
+		return
+	}
+
+	var oldCfg *proxyconfig.ProxyConfig
+	if ProxyServerManager != nil {
+		if existing, err := ProxyConfigManager.GetProxy(req.ID); err == nil {
+			oldCfg = existing
+		}
+	}
+
 	cfg := &proxyconfig.ProxyConfig{
 		ID:         req.ID,
 		ListenAddr: req.ListenAddr,
@@ -85,12 +115,21 @@ func APIProxyUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 动态更新代理服务器
 	if ProxyServerManager != nil {
 		if err := ProxyServerManager.UpdateProxy(cfg); err != nil {
-			// 记录错误但不影响配置保存
 			log.Printf("警告: 更新代理服务器失败 [%s]: %v", cfg.ListenAddr, err)
+			if oldCfg != nil {
+				if rollbackErr := ProxyConfigManager.UpdateProxy(oldCfg); rollbackErr != nil {
+					log.Printf("警告: 回滚数据库配置失败 [%s]: %v", req.ID, rollbackErr)
+				} else {
+					log.Printf("已回滚数据库配置至更新前状态 [%s]", req.ID)
+				}
+			}
+			http.Error(w, "更新代理服务器失败: "+err.Error(), http.StatusInternalServerError)
+			return
 		}
+	} else {
+		log.Printf("警告: ProxyServerManager未初始化，配置已更新但监听器未刷新，请重启服务生效")
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -112,12 +151,12 @@ func APIProxyDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 动态停止代理服务器
 	if ProxyServerManager != nil {
 		if err := ProxyServerManager.DeleteProxy(req.ID); err != nil {
-			// 记录错误但不影响配置删除
 			log.Printf("警告: 停止代理服务器失败 [%s]: %v", req.ID, err)
 		}
+	} else {
+		log.Printf("警告: ProxyServerManager未初始化，配置已删除但监听器未停止，请重启服务生效")
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -397,8 +436,6 @@ func APICertGet(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"id":         cert.ID,
 		"name":       cert.Name,
-		"cert_pem":   cert.CertPEM,
-		"key_pem":    cert.KeyPEM,
 		"not_before": cert.NotBefore,
 		"not_after":  cert.NotAfter,
 		"issuer":     cert.Issuer,
@@ -406,6 +443,8 @@ func APICertGet(w http.ResponseWriter, r *http.Request) {
 		"days_left":  cert.DaysLeft,
 		"status":     proxyconfig.GetCertExpiryStatus(cert.DaysLeft),
 		"created_at": cert.CreatedAt,
+		"cert_pem":   cert.CertPEM,
+		"key_pem":    cert.KeyPEM,
 	})
 }
 

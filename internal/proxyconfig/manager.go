@@ -409,12 +409,6 @@ func (m *Manager) GetCert(id string) (*SSLCert, error) {
 	return &cert, nil
 }
 
-// GetCertByBackendID 根据后端ID获取证书（已废弃，证书不再关联后端）
-func (m *Manager) GetCertByBackendID(backendID string) (*SSLCert, error) {
-	// 此方法已废弃，证书不再关联后端服务
-	return nil, fmt.Errorf("method deprecated: certificates no longer associated with backends")
-}
-
 // ========== 系统配置相关 ==========
 
 // GetSystemConfig 获取系统配置

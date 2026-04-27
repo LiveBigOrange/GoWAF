@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -51,7 +52,15 @@ func APIAdminLogList(w http.ResponseWriter, r *http.Request) {
 	// 读取日志文件
 	file, err := os.Open(logPath)
 	if err != nil {
-		http.Error(w, "无法打开日志文件", http.StatusInternalServerError)
+		// 文件不存在时返回空数组，而不是错误
+		if os.IsNotExist(err) {
+			log.Printf("管理日志文件不存在: %s", logPath)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode([]AdminLogEntry{})
+			return
+		}
+		log.Printf("无法打开管理日志文件: %v", err)
+		http.Error(w, "无法打开日志文件: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer file.Close()
@@ -59,15 +68,24 @@ func APIAdminLogList(w http.ResponseWriter, r *http.Request) {
 	// 获取文件大小
 	stat, err := file.Stat()
 	if err != nil {
-		http.Error(w, "获取文件信息失败", http.StatusInternalServerError)
+		log.Printf("获取文件信息失败: %v", err)
+		http.Error(w, "获取文件信息失败: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	fileSize := stat.Size()
 
+	// 如果文件为空，返回空数组
+	if fileSize == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]AdminLogEntry{})
+		return
+	}
+
 	// 从文件末尾反向读取，提高性能
 	logs, err := readRecentAdminLogsFromFile(file, fileSize, limit)
 	if err != nil {
-		http.Error(w, "读取日志文件失败", http.StatusInternalServerError)
+		log.Printf("读取日志文件失败: %v", err)
+		http.Error(w, "读取日志文件失败: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 

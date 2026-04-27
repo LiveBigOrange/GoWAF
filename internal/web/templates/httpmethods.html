@@ -1,0 +1,88 @@
+{{define "httpmethods"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HTTP方法限制 - GoWAF</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <style>
+        .filter-bar { display: flex; gap: 15px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
+        .method-tag { display: inline-block; padding: 4px 12px; border-radius: 4px; font-weight: 600; font-size: 13px; background: #ecf0f1; color: #2c3e50; }
+        .info-box { background: #f8f9fa; border-left: 4px solid #409eff; padding: 15px; margin-bottom: 20px; border-radius: 4px; font-size: 13px; color: #596275; }
+        .modal.show { display: flex; }
+    </style>
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main">
+        <div class="card">
+            <div class="info-box">仅允许列出的HTTP方法访问，未列出的方法将被拒绝（405）。留空则允许所有方法。</div>
+            <div class="filter-bar">
+                <button class="add-btn" onclick="openModal()">+ 添加方法</button>
+            </div>
+            <table>
+                <thead><tr><th>HTTP方法</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody id="methodList"><tr><td colspan="3" style="text-align:center;color:#95a5a6;">加载中...</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+    <div id="addModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>添加允许的 HTTP 方法</h3>
+                <span class="close" onclick="closeModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>方法名</label>
+                    <select id="addMethod">
+                        <option value="GET">GET</option>
+                        <option value="POST">POST</option>
+                        <option value="PUT">PUT</option>
+                        <option value="DELETE">DELETE</option>
+                        <option value="PATCH">PATCH</option>
+                        <option value="HEAD">HEAD</option>
+                        <option value="OPTIONS">OPTIONS</option>
+                    </select>
+                    <small>选择要允许的HTTP方法</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closeModal()">取消</button>
+                <button class="btn-submit" onclick="addMethod()">添加</button>
+            </div>
+        </div>
+    </div>
+    <script>
+    function escapeHtml(text){var d=document.createElement('div');d.textContent=text;return d.innerHTML;}
+    function loadMethods(){
+        fetch('/api/methods/list').then(r=>r.json()).then(d=>{
+            if(!d.success) return;
+            var tbody=document.getElementById('methodList');
+            if(!d.data||!d.data.length){tbody.innerHTML='<tr><td colspan="3" style="text-align:center;color:#95a5a6;">暂无限制（允许所有方法）</td></tr>';return;}
+            tbody.innerHTML=d.data.map(m=>'<tr><td><span class="method-tag">'+escapeHtml(m.method)+'</span></td><td>'+(m.enabled?'<span style="color:#27ae60">允许</span>':'<span style="color:#95a5a6">禁用</span>')+'</td><td><button class="delete-btn" onclick="delMethod(\''+escapeHtml(m.method)+'\')">删除</button></td></tr>').join('');
+        }).catch(e=>showToast('error','加载方法列表失败'));
+    }
+    function openModal(){document.getElementById('addModal').classList.add('show');}
+    function closeModal(){document.getElementById('addModal').classList.remove('show');}
+    function addMethod(){
+        var btn=document.querySelector('.btn-submit');if(btn&&btn.disabled)return;
+        var method=document.getElementById('addMethod').value;
+        if(btn)btn.disabled=true;
+        fetch('/api/methods/set',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({method:method,enabled:true})}).then(r=>r.json()).then(d=>{
+            if(d.success){showToast('success','添加成功');closeModal();loadMethods();}else showToast('error',d.message||'添加失败');
+        }).catch(e=>showToast('error','添加失败: '+e.message)).finally(()=>{if(btn)btn.disabled=false;});
+    }
+    function delMethod(method){
+        if(!confirm('确认删除方法 '+method+'？'))return;
+        fetch('/api/methods/delete?method='+method,{method:'POST'}).then(r=>r.json()).then(d=>{
+            if(d.success){showToast('success','删除成功');loadMethods();}else showToast('error',d.message||'删除失败');
+        }).catch(e=>showToast('error','删除失败: '+e.message));
+    }
+    loadMethods();
+    </script>
+</body>
+</html>
+{{end}}

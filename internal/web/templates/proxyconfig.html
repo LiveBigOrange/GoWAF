@@ -16,7 +16,7 @@
             margin-bottom: 20px;
         }
         .add-btn {
-            background: #3498db;
+            background: #409eff;
             color: white;
             border: none;
             padding: 10px 20px;
@@ -27,7 +27,7 @@
             transition: all 0.3s;
         }
         .add-btn:hover {
-            background: #2980b9;
+            background: #66b1ff;
             transform: translateY(-1px);
         }
         
@@ -70,7 +70,7 @@
         
         /* 操作按钮 */
         .edit-btn {
-            color: #3498db;
+            color: #409eff;
             text-decoration: none;
             padding: 4px 12px;
             border-radius: 4px;
@@ -81,7 +81,7 @@
             font-size: 13px;
         }
         .edit-btn:hover {
-            background-color: #3498db;
+            background-color: #409eff;
             color: white;
         }
         .toggle-btn {
@@ -182,8 +182,8 @@
         .form-group input:focus,
         .form-group select:focus {
             outline: none;
-            border-color: #3498db;
-            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+            border-color: #409eff;
+            box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.1);
         }
         .form-group .hint {
             font-size: 12px;
@@ -228,11 +228,11 @@
             transition: all 0.3s;
         }
         .btn-primary {
-            background: #3498db;
+            background: #409eff;
             color: white;
         }
         .btn-primary:hover {
-            background: #2980b9;
+            background: #66b1ff;
         }
         .btn-secondary {
             background: #f5f6fa;
@@ -247,7 +247,7 @@
     {{template "sidebar" .}}
     <div class="main">
         <div class="card">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:8px;">
                 <h3>代理配置列表</h3>
                 <button class="btn btn-primary" onclick="showAddModal()">+ 添加代理</button>
             </div>
@@ -354,6 +354,9 @@
                 fetch('/api/proxy/list').then(r => r.json()).then(data => {
                     allData = data || [];
                     renderData();
+                }).catch(err => {
+                    console.error('加载代理列表失败:', err);
+                    document.getElementById('proxyList').innerHTML = '<tr><td colspan="7" style="text-align:center;color:#95a5a6;padding:20px;">加载失败</td></tr>';
                 });
             }
 
@@ -391,51 +394,68 @@
                     tbody.appendChild(tr);
                 });
 
-                tbody.addEventListener('click', function(e) {
-                    var target = e.target;
-                    var id = target.dataset.id;
-                    if (!id) return;
-                    
-                    if (target.classList.contains('delete-btn')) {
-                        if (confirm('确定删除？')) {
-                            fetch('/api/proxy/delete', {
-                                method: 'POST',
-                                headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({id: id})
-                            }).then(r => r.json()).then(res => {
-                                if (res.success) loadList();
-                                else alert('删除失败: ' + (res.error || '未知错误'));
-                            }).catch(err => alert('删除失败: ' + err.message));
-                        }
-                    } else if (target.classList.contains('edit-btn')) {
-                        editProxy(id, target.dataset.addr, target.dataset.protocol, target.dataset.enabled === 'true');
-                    } else if (target.classList.contains('toggle-btn')) {
-                        var enabled = target.dataset.enabled === 'true';
-                        var item = allData.find(p => p.id === id);
-                        if (item) {
-                            var data = {
-                                id: id,
-                                listen_addr: item.listen_addr,
-                                protocol: item.protocol,
-                                enabled: enabled
-                            };
-                            fetch('/api/proxy/update', {
-                                method: 'POST',
-                                headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify(data)
-                            }).then(r => r.json()).then(res => {
-                                if (res.success) loadList();
-                                else alert('操作失败: ' + (res.error || '未知错误'));
-                            }).catch(err => alert('操作失败: ' + err.message));
-                        }
-                    }
-                });
-                
                 document.getElementById('pageInfo').textContent = '第' + currentPage + ' 页 / 第' + totalPages + ' 页（共' + allData.length + ' 条）';
                 document.getElementById('prevBtn').disabled = currentPage <= 1;
                 document.getElementById('nextBtn').disabled = currentPage >= totalPages;
                 pagination.style.display = 'flex';
             }
+
+            // 事件委托 - 只绑定一次
+            document.getElementById('proxyList').addEventListener('click', function(e) {
+                var target = e.target;
+                var id = target.getAttribute('data-id');
+                if (!id) return;
+                
+                if (target.classList.contains('delete-btn')) {
+                    if (confirm('确定删除？')) {
+                        fetch('/api/proxy/delete', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({id: id})
+                        }).then(r => r.json()).then(res => {
+                            if (res.success) loadList();
+                            else alert('删除失败: ' + (res.error || '未知错误'));
+                        }).catch(err => alert('删除失败: ' + err.message));
+                    }
+                } else if (target.classList.contains('edit-btn')) {
+                    var addr = target.getAttribute('data-addr');
+                    var protocol = target.getAttribute('data-protocol');
+                    var enabled = target.getAttribute('data-enabled') === 'true';
+                    editingId = id;
+                    document.getElementById('modalTitle').textContent = '编辑代理';
+                    document.getElementById('listenAddr').value = addr;
+                    document.getElementById('protocol').value = protocol;
+                    document.getElementById('enabled').checked = enabled;
+                    document.getElementById('addrError').style.display = 'none';
+                    document.getElementById('saveBtn').disabled = false;
+                    document.getElementById('addModal').classList.add('show');
+                } else if (target.classList.contains('toggle-btn')) {
+                    var enabled = target.getAttribute('data-enabled') === 'true';
+                    var item = null;
+                    for (var i = 0; i < allData.length; i++) {
+                        if (allData[i].id === id) {
+                            item = allData[i];
+                            break;
+                        }
+                    }
+                    if (item) {
+                        var data = {
+                            id: id,
+                            listen_addr: item.listen_addr,
+                            protocol: item.protocol,
+                            enabled: enabled
+                        };
+                        fetch('/api/proxy/update', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify(data)
+                        }).then(r => r.json()).then(res => {
+                            if (res.success) loadList();
+                            else alert('操作失败: ' + (res.error || '未知错误'));
+                        }).catch(err => alert('操作失败: ' + err.message));
+                    }
+                }
+            });
 
             window.prevPage = function() { if (currentPage > 1) { currentPage--; renderData(); } };
             window.nextPage = function() { var totalPages = Math.ceil(allData.length / pageSize); if (currentPage < totalPages) { currentPage++; renderData(); } };
@@ -456,17 +476,6 @@
                 document.getElementById('addModal').classList.remove('show');
             };
 
-            function editProxy(id, addr, protocol, enabled) {
-                editingId = id;
-                document.getElementById('modalTitle').textContent = '编辑代理';
-                document.getElementById('listenAddr').value = addr;
-                document.getElementById('protocol').value = protocol;
-                document.getElementById('enabled').checked = enabled;
-                document.getElementById('addrError').style.display = 'none';
-                document.getElementById('saveBtn').disabled = false;
-                document.getElementById('addModal').classList.add('show');
-            }
-
             window.saveProxy = function() {
                 if (!validateListenAddr()) {
                     alert('请检查监听地址格式');
@@ -484,6 +493,7 @@
                     return;
                 }
 
+                var btn = document.getElementById('saveBtn'); btn.disabled = true;
                 var url = '/api/proxy/add';
                 if (editingId) {
                     data.id = editingId;
@@ -504,7 +514,7 @@
                 }).catch(err => {
                     console.error('保存失败:', err);
                     alert('保存失败: ' + err.message);
-                });
+                }).finally(function() { btn.disabled = false; });
             };
 
             loadList();

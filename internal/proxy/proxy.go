@@ -1,4 +1,4 @@
-package proxy
+﻿package proxy
 
 import (
 	"bytes"
@@ -20,15 +20,10 @@ import (
 	"gowaf-demo/internal/proxyconfig"
 	"gowaf-demo/internal/rules"
 	"gowaf-demo/internal/stats"
+	"gowaf-demo/internal/web/middleware"
 
 	"github.com/google/uuid"
 )
-
-// responseInfo 用于在 modifyResponse 中捕获响应信息
-type responseInfo struct {
-	statusCode int
-	bodySize   int64
-}
 
 type WAFProxy struct {
 	ruleEngine        *rules.Engine
@@ -57,9 +52,11 @@ func NewWAFProxy(cfg *config.Config, engine *rules.Engine, lim *limiter.IPRateLi
 		ModifyResponse: p.modifyResponse,
 		ErrorHandler:   p.errorHandler,
 		Transport: &http.Transport{
-			MaxIdleConns:       100,
-			IdleConnTimeout:    90 * time.Second,
-			DisableCompression: true,
+			MaxIdleConns:        500,
+			MaxIdleConnsPerHost: 100,
+			IdleConnTimeout:     90 * time.Second,
+			DisableCompression:  true,
+			ForceAttemptHTTP2:   true,
 		},
 	}
 	return p, nil
@@ -142,11 +139,54 @@ func (p *WAFProxy) director(req *http.Request) {
 func (p *WAFProxy) modifyResponse(resp *http.Response) error {
 	resp.Header.Set("X-Content-Type-Options", "nosniff")
 	resp.Header.Set("X-Frame-Options", "DENY")
+	resp.Header.Set("X-XSS-Protection", "1; mode=block")
+	resp.Header.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+	resp.Header.Del("Server")
+	resp.Header.Del("X-Powered-By")
 
-	// 将响应状态码存入请求context，供后续日志记录使用
+	if resp.Request != nil && resp.Request.URL.Scheme == "https" {
+		if resp.Header.Get("Strict-Transport-Security") == "" {
+			resp.Header.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+	}
+
+	for _, cookie := range resp.Cookies() {
+		if !cookie.HttpOnly {
+			cookie.HttpOnly = true
+		}
+		if !cookie.Secure && resp.Request != nil && resp.Request.URL.Scheme == "https" {
+			cookie.Secure = true
+		}
+		if cookie.SameSite == 0 {
+			cookie.SameSite = http.SameSiteLaxMode
+		}
+	}
+
 	if resp.Request != nil {
 		ctx := context.WithValue(resp.Request.Context(), "resp_status", resp.StatusCode)
 		*resp.Request = *resp.Request.WithContext(ctx)
+	}
+
+	// 响应体敏感数据检测
+	if p.detectorManager != nil && p.detectorManager.IsDetectorEnabled("sensitive_data") {
+		contentType := resp.Header.Get("Content-Type")
+		if contentType != "" && (strings.Contains(contentType, "text/") || strings.Contains(contentType, "json") || strings.Contains(contentType, "javascript")) {
+			if resp.Body != nil {
+				bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024+1))
+				if err == nil && int64(len(bodyBytes)) <= 1024*1024 {
+					results := p.detectorManager.DetectString(string(bodyBytes))
+					if p.detectorManager.HasAttack(results) {
+						attackTypes := p.detectorManager.GetAttackTypes(results)
+						if resp.Request != nil {
+							clientIP := getClientIP(resp.Request, p.cfg.TrustedProxies)
+							p.recordBlock(clientIP, resp.Request.URL.Path, "", "", "敏感数据泄露:"+strings.Join(attackTypes, ","), http.StatusOK, getRequestID(resp.Request), "", time.Now(), resp.Request, "", "")
+						}
+					}
+					resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+					resp.ContentLength = int64(len(bodyBytes))
+				}
+			}
+		}
 	}
 
 	return nil
@@ -197,7 +237,10 @@ func (p *WAFProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	userAgent := r.Header.Get("User-Agent")
 	upstreamAddr := p.getUpstreamAddr()
 
+	// 统计活跃连接
 	stats.IncTotal()
+	stats.IncActiveConn()
+	defer stats.DecActiveConn()
 
 	// 记录总请求数到 metrics
 	if p.metricsManager != nil {
@@ -206,21 +249,39 @@ func (p *WAFProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 1. IP 黑名单检查
 	if p.ruleEngine.IsIPBlocked(clientIP) {
-		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "IP黑名单", http.StatusForbidden, requestID, upstreamAddr, start, r)
+		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "IP黑名单", http.StatusForbidden, requestID, upstreamAddr, start, r, "", "")
 		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
+	// 1.5 GeoIP阻断检查
+	if p.metricsManager != nil {
+		if geoInfo := p.metricsManager.GetGeoInfo(clientIP); geoInfo != nil {
+			if geoInfo.CountryISO != "" && p.ruleEngine.IsGeoBlocked(geoInfo.CountryISO) {
+				p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "GeoIP阻断:"+geoInfo.CountryISO, http.StatusForbidden, requestID, upstreamAddr, start, r, "", "")
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
+		}
+	}
+
+	// 1.6 HTTP方法限制检查
+	if !p.ruleEngine.IsMethodAllowed(r.Method) {
+		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "HTTP方法限制", http.StatusMethodNotAllowed, requestID, upstreamAddr, start, r, "", "")
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	// 2. 路径黑/白名单检查（白名单优先）
 	if p.ruleEngine.CheckPath(r.URL.Path) {
-		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "路径黑名单", http.StatusForbidden, requestID, upstreamAddr, start, r)
+		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "路径黑名单", http.StatusForbidden, requestID, upstreamAddr, start, r, "", "")
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
 
 	// 3. UA 黑/白名单检查
 	if p.ruleEngine.CheckUA(userAgent) {
-		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "UA黑名单", http.StatusForbidden, requestID, upstreamAddr, start, r)
+		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "UA黑名单", http.StatusForbidden, requestID, upstreamAddr, start, r, "", "")
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
@@ -228,7 +289,16 @@ func (p *WAFProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 4. 限流检查
 	if p.limiter != nil {
 		if !p.limiter.Allow(clientIP) {
-			p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "限流", http.StatusTooManyRequests, requestID, upstreamAddr, start, r)
+			p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "限流", http.StatusTooManyRequests, requestID, upstreamAddr, start, r, "", "")
+			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+			return
+		}
+	}
+
+	// 4.5 路径级限流检查
+	if p.ruleEngine != nil {
+		if !p.ruleEngine.CheckPathRateLimit(r.URL.Path) {
+			p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "路径限流", http.StatusTooManyRequests, requestID, upstreamAddr, start, r, "", "")
 			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 			return
 		}
@@ -240,14 +310,16 @@ func (p *WAFProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var body string
 		if r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH" {
 			if r.Body != nil {
-				// 限制请求体大小为10MB，防止DoS攻击
-				const maxBodySize = 10 * 1024 * 1024
+				maxBodySize := int64(10 * 1024 * 1024)
+				if configuredMax := middleware.GetMaxRequestBody(); configuredMax > 0 {
+					maxBodySize = configuredMax
+				}
 				bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, maxBodySize+1))
 				if err != nil {
 					body = ""
-				} else if len(bodyBytes) > maxBodySize {
+				} else if int64(len(bodyBytes)) > maxBodySize {
 					// 请求体过大，拒绝请求
-					p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "请求体过大", http.StatusRequestEntityTooLarge, requestID, upstreamAddr, start, r)
+					p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "请求体过大", http.StatusRequestEntityTooLarge, requestID, upstreamAddr, start, r, "", "")
 					http.Error(w, "Request Entity Too Large", http.StatusRequestEntityTooLarge)
 					return
 				} else {
@@ -260,10 +332,24 @@ func (p *WAFProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		results := p.detectorManager.DetectRequestWithBody(r, body)
 		if p.detectorManager.HasAttack(results) {
-			// 记录攻击类型
+			// 记录攻击类型和匹配详情
 			attackTypes := p.detectorManager.GetAttackTypes(results)
 			attackType := strings.Join(attackTypes, ",")
-			p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "攻击检测:"+attackType, http.StatusForbidden, requestID, upstreamAddr, start, r)
+			// 提取匹配详情
+			var matchPatterns, matchLocations []string
+			for _, res := range results {
+				if res.Detected {
+					if res.Pattern != "" {
+						matchPatterns = append(matchPatterns, res.Pattern)
+					}
+					if res.Location != "" {
+						matchLocations = append(matchLocations, res.Location)
+					}
+				}
+			}
+			matchDetail := strings.Join(matchPatterns, ", ")
+			matchLocation := strings.Join(matchLocations, ", ")
+			p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "攻击检测:"+attackType, http.StatusForbidden, requestID, upstreamAddr, start, r, matchDetail, matchLocation)
 			http.Error(w, "Forbidden: Attack Detected", http.StatusForbidden)
 			return
 		}
@@ -281,13 +367,23 @@ func (p *WAFProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respStatus = http.StatusOK
 	}
 
+	// 统计延迟和错误
+	latencyMs := uint64(time.Since(start).Milliseconds())
+	stats.AddLatency(latencyMs)
+	if respStatus >= 400 {
+		stats.IncError()
+	}
+
+	// 统计网络流量
+	inboundBytes := uint64(estimateRequestSize(r))
+	outboundBytes := uint64(rw.bytesWritten)
+	stats.AddNetworkBytes(inboundBytes, outboundBytes)
+
 	// 记录分钟级统计数据（实时监控）
 	if p.metricsManager != nil {
 		latency := time.Since(start).Seconds() * 1000 // 转换为毫秒
 		// QPS由metrics模块统计，这里不再估算
-		inboundBytes := int64(estimateRequestSize(r))
-		outboundBytes := rw.bytesWritten
-		p.metricsManager.RecordMinuteStats(1, 0, 0, latency, inboundBytes, outboundBytes)
+		p.metricsManager.RecordMinuteStats(1, 0, 0, latency, int64(inboundBytes), int64(outboundBytes))
 	}
 
 	// 使用新的日志格式记录正常请求（使用实际响应状态码）
@@ -305,13 +401,16 @@ func (p *WAFProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		SetReferer(r.Header.Get("Referer")).
 		SetContentType(r.Header.Get("Content-Type")).
 		SetLatency(time.Since(start)).
-		SetBodySize(rw.bytesWritten)
+		SetBodySize(rw.bytesWritten).
+		SetRequestSize(int64(estimateRequestSize(r))).  // 使用完整请求大小
+		SetProtocol(r.Proto).                            // 记录HTTP协议版本
+		SetScheme(getScheme(r))                          // 记录请求协议
 
 	logger.Write(*log)
 }
 
 // recordBlock 记录拦截事件
-func (p *WAFProxy) recordBlock(clientIP, path, method, userAgent, rule string, statusCode int, requestID, backendAddr string, start time.Time, r *http.Request) {
+func (p *WAFProxy) recordBlock(clientIP, path, method, userAgent, rule string, statusCode int, requestID, backendAddr string, start time.Time, r *http.Request, matchDetail, matchLocation string) {
 	stats.IncBlocked()
 	stats.IncBlockedIP(clientIP)
 	stats.IncBlockedPath(path)
@@ -320,15 +419,23 @@ func (p *WAFProxy) recordBlock(clientIP, path, method, userAgent, rule string, s
 	// 计算延迟时间
 	latencyMs := time.Since(start).Seconds() * 1000
 	
+	// 计算地理位置
+	var geoCountry, geoFlag string
+	if p.metricsManager != nil {
+		geo := p.metricsManager.GetGeoLocation(clientIP)
+		geoCountry = geo.Country
+		geoFlag = geo.Flag
+	}
+
 	// 保存到内存事件缓冲
 	event.AddEvent(clientIP, r.Host, path, r.URL.RawQuery, method, userAgent, 
-		r.Header.Get("Referer"), r.Header.Get("Content-Type"), rule, statusCode, requestID, latencyMs)
+		r.Header.Get("Referer"), r.Header.Get("Content-Type"), rule, statusCode, requestID, latencyMs, geoCountry, geoFlag, matchDetail, matchLocation, "block", "", r.Proto, getScheme(r), int64(estimateRequestSize(r)))
 
 	// 保存到 metrics 数据库
 	if p.metricsManager != nil {
 		p.metricsManager.IncBlockedRequest() // 增加拦截计数
 		p.metricsManager.SaveEvent(clientIP, r.Host, path, r.URL.RawQuery, method, userAgent, 
-			r.Header.Get("Referer"), r.Header.Get("Content-Type"), rule, statusCode, requestID, latencyMs)
+			r.Header.Get("Referer"), r.Header.Get("Content-Type"), rule, statusCode, requestID, latencyMs, geoCountry, geoFlag, matchDetail, matchLocation, "block", "", r.Proto, getScheme(r), int64(estimateRequestSize(r)))
 		p.metricsManager.IncTopStat("blocked_ip", clientIP)
 		p.metricsManager.IncTopStat("attacked_path", path)
 		p.metricsManager.IncRuleHit(rule)
@@ -354,7 +461,10 @@ func (p *WAFProxy) recordBlock(clientIP, path, method, userAgent, rule string, s
 		SetUserAgent(userAgent).
 		SetReferer(r.Header.Get("Referer")).
 		SetContentType(r.Header.Get("Content-Type")).
-		SetLatency(time.Since(start))
+		SetLatency(time.Since(start)).
+		SetRequestSize(int64(estimateRequestSize(r))).  // 使用完整请求大小
+		SetProtocol(r.Proto).                            // 记录HTTP协议版本
+		SetScheme(getScheme(r))                          // 记录请求协议
 	
 	logger.Write(*log)
 }
@@ -456,6 +566,14 @@ func estimateRequestSize(r *http.Request) int {
 	return size
 }
 
+// getScheme 获取请求协议
+func getScheme(r *http.Request) string {
+	if r.TLS != nil {
+		return "https"
+	}
+	return "http"
+}
+
 // responseWriter 自定义 ResponseWriter，捕获响应状态码和写入字节数
 type responseWriter struct {
 	http.ResponseWriter
@@ -486,3 +604,4 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 func (p *WAFProxy) GetLimiter() *limiter.IPRateLimiter {
 	return p.limiter
 }
+

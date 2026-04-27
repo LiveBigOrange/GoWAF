@@ -36,11 +36,22 @@ var (
 	useDB       bool              // 是否使用数据库存储
 )
 
-const (
-	channelSize   = 10000
-	batchSize     = 100
-	flushInterval = 2 * time.Second
+// 移除硬编码常量,改用配置变量
+var (
+	channelSize   = 10000           // 日志通道大小
+	batchSize     = 100             // 批量大小
+	flushInterval = 2 * time.Second // 刷新间隔
 )
+
+// SetLogConfig 设置日志系统配置
+func SetLogConfig(channelSz int, flushSec int) {
+	if channelSz > 0 {
+		channelSize = channelSz
+	}
+	if flushSec > 0 {
+		flushInterval = time.Duration(flushSec) * time.Second
+	}
+}
 
 // Init 初始化日志系统
 func Init(filePath string) error {

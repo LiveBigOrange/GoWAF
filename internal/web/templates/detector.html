@@ -87,12 +87,19 @@
             display: flex;
             align-items: center;
             margin-bottom: 16px;
+            flex-wrap: wrap;
+            gap: 8px;
         }
         .config-label {
             width: 140px;
             font-weight: 500;
             color: #2c3e50;
             font-size: 14px;
+        }
+        @media (max-width: 600px) {
+            .config-label {
+                width: 100%;
+            }
         }
         .config-input {
             flex: 1;
@@ -149,6 +156,7 @@
             display: flex;
             gap: 10px;
             margin-bottom: 16px;
+            flex-wrap: wrap;
         }
         .filter-btn {
             padding: 8px 16px;
@@ -280,9 +288,11 @@
             display: flex;
             gap: 20px;
             margin-bottom: 20px;
+            flex-wrap: wrap;
         }
         .stat-item {
             flex: 1;
+            min-width: 120px;
             background: #f8f9fa;
             padding: 16px;
             border-radius: 8px;
@@ -555,20 +565,25 @@
     </div>
     
     <!-- 添加规则对话框 -->
-    <div id="add-rule-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000;">
-        <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:30px; border-radius:12px; width:600px; box-shadow:0 4px 20px rgba(0,0,0,0.15);">
-            <h3 style="margin:0 0 20px 0; color:#2c3e50;">添加自定义规则</h3>
-            <div style="margin-bottom:20px;">
-                <label style="display:block; margin-bottom:8px; color:#7f8c8d; font-size:14px;">规则模式 (正则表达式)</label>
-                <input type="text" id="rule-pattern" class="config-input" style="width:100%;" placeholder="例如: (?i)\bunion\b.*\bselect\b">
+    <div id="add-rule-modal" class="modal">
+        <div class="modal-content" style="width:600px;">
+            <div class="modal-header">
+                <h3>添加自定义规则</h3>
+                <span class="close" onclick="closeAddRuleModal()">&times;</span>
             </div>
-            <div style="margin-bottom:20px;">
-                <label style="display:block; margin-bottom:8px; color:#7f8c8d; font-size:14px;">规则描述</label>
-                <input type="text" id="rule-description" class="config-input" style="width:100%;" placeholder="例如: UNION注入检测">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>规则模式 (正则表达式)</label>
+                    <input type="text" id="rule-pattern" class="config-input" placeholder="例如: (?i)\bunion\b.*\bselect\b">
+                </div>
+                <div class="form-group">
+                    <label>规则描述</label>
+                    <input type="text" id="rule-description" class="config-input" placeholder="例如: UNION注入检测">
+                </div>
             </div>
-            <div style="text-align:right; display:flex; gap:10px; justify-content:flex-end;">
-                <button class="btn btn-outline" onclick="closeAddRuleModal()">取消</button>
-                <button class="btn btn-primary" onclick="addRule()">添加</button>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closeAddRuleModal()">取消</button>
+                <button class="btn-submit" onclick="addRule()">添加</button>
             </div>
         </div>
     </div>
@@ -739,6 +754,7 @@
                 btns.forEach(btn => { if (btn.classList.contains('active')) sensitivity = btn.dataset.level; });
                 var whitelistIPs = document.getElementById(prefix + '-whitelist-ips').value;
                 var whitelistPaths = document.getElementById(prefix + '-whitelist-paths').value;
+                var saveBtn = document.querySelector('#panel-' + type + ' .btn-primary'); if (saveBtn) saveBtn.disabled = true;
                 fetch('/api/detector/update', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -752,25 +768,27 @@
                 })
                 .then(r => r.json())
                 .then(data => { if (data.status === 'ok') loadConfigs(); })
-                .catch(err => console.error('Save config error:', err));
+                .catch(err => console.error('Save config error:', err))
+                .finally(function() { if (saveBtn) saveBtn.disabled = false; });
             };
 
             window.showAddRule = function(type) {
                 currentDetectorType = type;
-                document.getElementById('add-rule-modal').style.display = 'block';
+                document.getElementById('add-rule-modal').classList.add('show');
                 document.getElementById('rule-pattern').value = '';
                 document.getElementById('rule-description').value = '';
                 document.getElementById('rule-pattern').focus();
             };
 
             window.closeAddRuleModal = function() {
-                document.getElementById('add-rule-modal').style.display = 'none';
+                document.getElementById('add-rule-modal').classList.remove('show');
             };
 
             window.addRule = function() {
                 var pattern = document.getElementById('rule-pattern').value.trim();
                 var description = document.getElementById('rule-description').value.trim();
                 if (!pattern) { alert('请输入规则模式'); return; }
+                var btn = document.querySelector('#add-rule-modal .btn-submit'); if (btn) btn.disabled = true;
                 fetch('/api/detector/rule/add', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -783,7 +801,8 @@
                         loadRules(currentDetectorType);
                     } else alert('添加失败');
                 })
-                .catch(err => alert('添加失败: ' + err));
+                .catch(err => alert('添加失败: ' + err))
+                .finally(function() { if (btn) btn.disabled = false; });
             };
 
             window.removeRule = function(ruleID, type) {
@@ -811,6 +830,11 @@
 
             loadConfigs();
             setInterval(loadConfigs, 30000);
+
+            window.addEventListener('click', function(event) {
+                var modal = document.getElementById('add-rule-modal');
+                if (event.target == modal) closeAddRuleModal();
+            });
         })();
     </script>
 </body>
