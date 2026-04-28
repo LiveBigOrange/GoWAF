@@ -943,7 +943,7 @@ func (m *Manager) flushCounters() {
 	if total == 0 && blocked == 0 {
 		return
 	}
-	date := time.Now().Format("2006-01-02")
+	date := time.Now().UTC().Format("2006-01-02")
 	if total > 0 {
 		m.db.Exec(`INSERT INTO daily_stats (date, total_requests, blocked_requests) VALUES (?, ?, 0) ON CONFLICT(date) DO UPDATE SET total_requests = total_requests + ?`, date, total, total)
 	}
@@ -1032,7 +1032,7 @@ func (m *Manager) RecordMinuteStats(totalReqs, blockedReqs int64, qps, latencyMs
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	minute := time.Now().Truncate(time.Minute).Format("2006-01-02 15:04:05.999999")
+	minute := time.Now().UTC().Truncate(time.Minute).Format("2006-01-02 15:04:05.999999")
 	_, err := m.db.Exec(`
 		INSERT INTO minute_stats (time_minute, total_requests, blocked_requests, avg_qps, avg_latency_ms, inbound_bytes, outbound_bytes)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -1083,9 +1083,9 @@ func (m *Manager) RecordHourlyStats() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	now := time.Now()
+	now := time.Now().UTC()
 	// 当前小时的开始时间
-	currentHour := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, now.Location())
+	currentHour := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC)
 	// 上一个完整小时的开始时间
 	lastHour := currentHour.Add(-time.Hour)
 
@@ -1150,15 +1150,15 @@ func (m *Manager) CleanupMinuteStats() error {
 	defer m.mu.Unlock()
 
 	// 删除2小时前的分钟级数据
-	cutoff := time.Now().Add(-2 * time.Hour).Format("2006-01-02 15:04:05.999999")
+	cutoff := time.Now().UTC().Add(-2 * time.Hour).Format("2006-01-02 15:04:05.999999")
 	_, err := m.db.Exec(`DELETE FROM minute_stats WHERE time_minute < ?`, cutoff)
 	return err
 }
 
 // IncTopStat 增加TOP统计计数
 func (m *Manager) IncTopStat(statType, itemKey string) error {
-	date := time.Now().Format("2006-01-02")
-	now := time.Now().Format("2006-01-02 15:04:05.999999")
+	date := time.Now().UTC().Format("2006-01-02")
+	now := time.Now().UTC().Format("2006-01-02 15:04:05.999999")
 	_, err := m.db.Exec(`
 		INSERT INTO top_stats (date, stat_type, item_key, count, last_seen)
 		VALUES (?, ?, ?, 1, ?)
@@ -1263,8 +1263,8 @@ func (m *Manager) GetTopStats(statType string, startTime, endTime time.Time, lim
 
 // IncRuleHit 增加规则命中计数
 func (m *Manager) IncRuleHit(ruleType string) error {
-	date := time.Now().Format("2006-01-02")
-	now := time.Now().Format("2006-01-02 15:04:05.999999")
+	date := time.Now().UTC().Format("2006-01-02")
+	now := time.Now().UTC().Format("2006-01-02 15:04:05.999999")
 	_, err := m.db.Exec(`
 		INSERT INTO rule_hit_stats (date, rule_type, hit_count, last_seen)
 		VALUES (?, ?, 1, ?)
@@ -1325,7 +1325,7 @@ func (m *Manager) CleanupOldData(retentionDays int) error {
 		retentionDays = 7
 	}
 
-	cutoffTime := time.Now().AddDate(0, 0, -retentionDays)
+	cutoffTime := time.Now().UTC().AddDate(0, 0, -retentionDays)
 	cutoffDate := cutoffTime.Format("2006-01-02")
 	cutoffTimeStr := cutoffTime.Format("2006-01-02 15:04:05.999999")
 

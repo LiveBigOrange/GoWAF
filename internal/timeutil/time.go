@@ -1,6 +1,7 @@
 package timeutil
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -65,13 +66,16 @@ func (t *LocalTime) UnmarshalJSON(data []byte) error {
 
 // FormatRFC3339 将 time.Time 格式化为 RFC3339 本地时区字符串
 func FormatRFC3339(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
 	return t.Local().Format(time.RFC3339)
 }
 
 // ParseTime 安全解析时间字符串，支持多种格式
 func ParseTime(s string) (time.Time, error) {
 	if s == "" {
-		return time.Time{}, nil
+		return time.Time{}, fmt.Errorf("timeutil.ParseTime:无法解析时间字符串: %q", s)
 	}
 	if idx := strings.Index(s, " m="); idx != -1 {
 		s = s[:idx]

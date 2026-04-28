@@ -54,7 +54,7 @@ func IncBlocked() {
 func IncBlockedIP(ip string) {
 	topMutex.Lock()
 	blockedIPs[ip]++
-	blockedIPsTime[ip] = time.Now()
+	blockedIPsTime[ip] = time.Now().UTC()
 	topMutex.Unlock()
 }
 
@@ -62,7 +62,7 @@ func IncBlockedIP(ip string) {
 func IncBlockedPath(path string) {
 	topMutex.Lock()
 	blockedPaths[path]++
-	blockedPathsTime[path] = time.Now()
+	blockedPathsTime[path] = time.Now().UTC()
 	topMutex.Unlock()
 }
 
@@ -70,7 +70,7 @@ func IncBlockedPath(path string) {
 func IncRuleHit(rule string) {
 	topMutex.Lock()
 	ruleHits[rule]++
-	ruleHitsTime[rule] = time.Now()
+	ruleHitsTime[rule] = time.Now().UTC()
 	topMutex.Unlock()
 }
 
