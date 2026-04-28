@@ -130,8 +130,19 @@ type HourlyStats struct {
 	BlockedRequests int64     `json:"blocked_requests"`
 	AvgQPS          float64   `json:"avg_qps"`
 	AvgLatencyMs    float64   `json:"avg_latency_ms"`
-	InboundBytes    int64     `json:"inbound_bytes"`  // 入站流量（字节）
-	OutboundBytes   int64     `json:"outbound_bytes"` // 出站流量（字节）
+	InboundBytes    int64     `json:"inbound_bytes"`
+	OutboundBytes   int64     `json:"outbound_bytes"`
+}
+
+func (h HourlyStats) MarshalJSON() ([]byte, error) {
+	type Alias HourlyStats
+	return json.Marshal(&struct {
+		TimeHour string `json:"time_hour"`
+		*Alias
+	}{
+		TimeHour: h.TimeHour.Local().Format(time.RFC3339),
+		Alias:    (*Alias)(&h),
+	})
 }
 
 // MinuteStats 分钟统计（实时监控）
@@ -141,32 +152,65 @@ type MinuteStats struct {
 	BlockedRequests int64     `json:"blocked_requests"`
 	AvgQPS          float64   `json:"avg_qps"`
 	AvgLatencyMs    float64   `json:"avg_latency_ms"`
-	InboundBytes    int64     `json:"inbound_bytes"`  // 入站流量（字节）
-	OutboundBytes   int64     `json:"outbound_bytes"` // 出站流量（字节）
+	InboundBytes    int64     `json:"inbound_bytes"`
+	OutboundBytes   int64     `json:"outbound_bytes"`
+}
+
+func (m MinuteStats) MarshalJSON() ([]byte, error) {
+	type Alias MinuteStats
+	return json.Marshal(&struct {
+		TimeMinute string `json:"time_minute"`
+		*Alias
+	}{
+		TimeMinute: m.TimeMinute.Local().Format(time.RFC3339),
+		Alias:      (*Alias)(&m),
+	})
 }
 
 // TopStatItem TOP统计项
 type TopStatItem struct {
-	Name          string            `json:"name"`                // 前端期望 name 字段
+	Name          string            `json:"name"`
 	Count         int64             `json:"count"`
-	LastSeen      time.Time         `json:"last_seen"`           // 最后出现时间
-	RuleTypes     map[string]int    `json:"rule_types,omitempty"` // 拦截类型分布
-	SourceIPCount int               `json:"source_ip_count,omitempty"` // 来源IP数
-	Methods       map[string]int    `json:"methods,omitempty"`   // 请求方法分布
-	RiskLevel     string            `json:"risk_level,omitempty"` // 风险等级 (high/medium/low)
-	RuleType      string            `json:"rule_type,omitempty"` // 规则类型分类
-	GeoCountry    string            `json:"geo_country,omitempty"` // 地理位置-国家
-	GeoFlag       string            `json:"geo_flag,omitempty"`   // 地理位置-国旗
+	LastSeen      time.Time         `json:"last_seen"`
+	RuleTypes     map[string]int    `json:"rule_types,omitempty"`
+	SourceIPCount int               `json:"source_ip_count,omitempty"`
+	Methods       map[string]int    `json:"methods,omitempty"`
+	RiskLevel     string            `json:"risk_level,omitempty"`
+	RuleType      string            `json:"rule_type,omitempty"`
+	GeoCountry    string            `json:"geo_country,omitempty"`
+	GeoFlag       string            `json:"geo_flag,omitempty"`
+}
+
+func (t TopStatItem) MarshalJSON() ([]byte, error) {
+	type Alias TopStatItem
+	return json.Marshal(&struct {
+		LastSeen string `json:"last_seen"`
+		*Alias
+	}{
+		LastSeen: t.LastSeen.Local().Format(time.RFC3339),
+		Alias:    (*Alias)(&t),
+	})
 }
 
 // RuleHitStat 规则命中统计
 type RuleHitStat struct {
-	Name        string    `json:"name"`                // 前端期望 name 字段
-	Count       int64     `json:"count"`               // 前端期望 count 字段
-	LastSeen    time.Time `json:"last_seen"`           // 最后出现时间
-	AffectedIPs int       `json:"affected_ips,omitempty"` // 影响IP数
-	Severity    string    `json:"severity,omitempty"`  // 严重程度 (high/medium/low)
-	RuleType    string    `json:"rule_type,omitempty"` // 规则类型分类
+	Name        string    `json:"name"`
+	Count       int64     `json:"count"`
+	LastSeen    time.Time `json:"last_seen"`
+	AffectedIPs int       `json:"affected_ips,omitempty"`
+	Severity    string    `json:"severity,omitempty"`
+	RuleType    string    `json:"rule_type,omitempty"`
+}
+
+func (r RuleHitStat) MarshalJSON() ([]byte, error) {
+	type Alias RuleHitStat
+	return json.Marshal(&struct {
+		LastSeen string `json:"last_seen"`
+		*Alias
+	}{
+		LastSeen: r.LastSeen.Local().Format(time.RFC3339),
+		Alias:    (*Alias)(&r),
+	})
 }
 
 // calculateRiskLevel 计算风险等级

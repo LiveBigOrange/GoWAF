@@ -295,7 +295,7 @@ func (h *DashboardHub) collectDashboardData() map[string]interface{} {
 
 	return map[string]interface{}{
 		"type": "dashboard_update",
-		"timestamp": time.Now().Unix(),
+		"timestamp": time.Now().Local().Format(time.RFC3339),
 		"stats": map[string]interface{}{
 			"total":   int(total),
 			"blocked": int(blocked),

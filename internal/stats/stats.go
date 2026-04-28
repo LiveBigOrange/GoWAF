@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"encoding/json"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -191,6 +192,17 @@ type TopItem struct {
 	RuleType      string            `json:"rule_type,omitempty"`
 	GeoCountry    string            `json:"geo_country,omitempty"`
 	GeoFlag       string            `json:"geo_flag,omitempty"`
+}
+
+func (t TopItem) MarshalJSON() ([]byte, error) {
+	type Alias TopItem
+	return json.Marshal(&struct {
+		LastSeen string `json:"last_seen,omitempty"`
+		*Alias
+	}{
+		LastSeen: t.LastSeen.Local().Format(time.RFC3339),
+		Alias:    (*Alias)(&t),
+	})
 }
 
 // GetTopBlockedIPs 获取被拦截最多的 IP（TOP N）

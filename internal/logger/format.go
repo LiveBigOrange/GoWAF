@@ -82,7 +82,7 @@ func NewAccessLog() *AccessLog {
 
 // SetTimestamp 设置时间戳
 func (l *AccessLog) SetTimestamp(t time.Time) *AccessLog {
-	l.Timestamp = t.Format(time.RFC3339)
+	l.Timestamp = t.Local().Format(time.RFC3339)
 	return l
 }
 
