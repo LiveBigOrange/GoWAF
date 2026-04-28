@@ -2,7 +2,6 @@ package metrics
 
 import (
 	"database/sql"
-	"encoding/json"
 	"log"
 	"net"
 	"strings"
@@ -11,57 +10,10 @@ import (
 	"time"
 
 	"github.com/oschwald/geoip2-golang"
+	"gowaf-demo/internal/timeutil"
 	_ "modernc.org/sqlite"
 )
 
-// parseTimeSafe 安全解析时间字符串，兼容 modernc.org/sqlite 驱动输出的带单调时钟格式
-// 例如: "2026-04-25 01:18:41.3576014 +0800 CST m=+242.426396501"
-func parseTimeSafe(s string) time.Time {
-	if s == "" {
-		return time.Time{}
-	}
-	// 去掉 Go 单调时钟部分 "m=+xxx"
-	if idx := strings.Index(s, " m="); idx != -1 {
-		s = s[:idx]
-	}
-	// 去掉 Go 时区名部分（如 "CST"、"UTC"），只保留数字偏移（如 "+0800"）
-	// 格式变为: "2026-04-25 01:18:41.3576014 +0800"
-	if parts := strings.SplitN(s, " ", 4); len(parts) == 4 {
-		// parts: ["2026-04-25", "01:18:41.3576014", "+0800", "CST"]
-		if len(parts[2]) >= 5 && (parts[2][0] == '+' || parts[2][0] == '-') {
-			s = parts[0] + " " + parts[1] + " " + parts[2]
-		}
-	}
-	// 尝试多种格式解析
-	// 带时区偏移的格式
-	formats := []string{
-		"2006-01-02 15:04:05.9999999 -0700",
-		"2006-01-02 15:04:05.999999 -0700",
-		"2006-01-02 15:04:05 -0700",
-		"2006-01-02T15:04:05.9999999Z07:00",
-		"2006-01-02T15:04:05.999999Z07:00",
-		"2006-01-02T15:04:05Z07:00",
-		time.RFC3339Nano,
-		time.RFC3339,
-	}
-	for _, format := range formats {
-		if t, err := time.Parse(format, s); err == nil {
-			return t
-		}
-	}
-	// 无时区的格式（数据库存储的时间为UTC时间，按UTC解析）
-	localFormats := []string{
-		"2006-01-02 15:04:05.9999999",
-		"2006-01-02 15:04:05.999999",
-		"2006-01-02 15:04:05",
-	}
-	for _, format := range localFormats {
-		if t, err := time.Parse(format, s); err == nil {
-			return t
-		}
-	}
-	return time.Time{}
-}
 
 // Manager 指标数据管理器
 type Manager struct {
@@ -82,7 +34,7 @@ const geoCacheMaxSize = 4096
 // InterceptEvent 拦截事件
 type InterceptEvent struct {
 	ID            int64     `json:"id"`
-	Time          time.Time `json:"timestamp"`                   // 统一使用timestamp
+	Time          timeutil.LocalTime `json:"timestamp"`                   // 统一使用timestamp
 	ClientIP      string    `json:"client_ip"`
 	Host          string    `json:"host,omitempty"`
 	Path          string    `json:"path"`
@@ -108,24 +60,10 @@ type InterceptEvent struct {
 	ErrorMessage  string    `json:"error_message,omitempty"`     // 错误信息
 }
 
-// MarshalJSON 自定义JSON序列化，输出RFC3339格式带本地时区偏移
-// 与访问日志、管理日志格式一致（如2026-04-28T21:14:45+08:00）
-func (e InterceptEvent) MarshalJSON() ([]byte, error) {
-	type Alias InterceptEvent
-	return json.Marshal(&struct {
-		Time      string `json:"time"`
-		Timestamp string `json:"timestamp"`
-		*Alias
-	}{
-		Time:      e.Time.Local().Format(time.RFC3339),
-		Timestamp: e.Time.Local().Format(time.RFC3339),
-		Alias:     (*Alias)(&e),
-	})
-}
 
 // HourlyStats 小时统计
 type HourlyStats struct {
-	TimeHour        time.Time `json:"time_hour"`
+	TimeHour        timeutil.LocalTime `json:"time_hour"`
 	TotalRequests   int64     `json:"total_requests"`
 	BlockedRequests int64     `json:"blocked_requests"`
 	AvgQPS          float64   `json:"avg_qps"`
@@ -134,20 +72,10 @@ type HourlyStats struct {
 	OutboundBytes   int64     `json:"outbound_bytes"`
 }
 
-func (h HourlyStats) MarshalJSON() ([]byte, error) {
-	type Alias HourlyStats
-	return json.Marshal(&struct {
-		TimeHour string `json:"time_hour"`
-		*Alias
-	}{
-		TimeHour: h.TimeHour.Local().Format(time.RFC3339),
-		Alias:    (*Alias)(&h),
-	})
-}
 
 // MinuteStats 分钟统计（实时监控）
 type MinuteStats struct {
-	TimeMinute      time.Time `json:"time_minute"`
+	TimeMinute      timeutil.LocalTime `json:"time_minute"`
 	TotalRequests   int64     `json:"total_requests"`
 	BlockedRequests int64     `json:"blocked_requests"`
 	AvgQPS          float64   `json:"avg_qps"`
@@ -156,22 +84,12 @@ type MinuteStats struct {
 	OutboundBytes   int64     `json:"outbound_bytes"`
 }
 
-func (m MinuteStats) MarshalJSON() ([]byte, error) {
-	type Alias MinuteStats
-	return json.Marshal(&struct {
-		TimeMinute string `json:"time_minute"`
-		*Alias
-	}{
-		TimeMinute: m.TimeMinute.Local().Format(time.RFC3339),
-		Alias:      (*Alias)(&m),
-	})
-}
 
 // TopStatItem TOP统计项
 type TopStatItem struct {
 	Name          string            `json:"name"`
 	Count         int64             `json:"count"`
-	LastSeen      time.Time         `json:"last_seen"`
+	LastSeen      timeutil.LocalTime `json:"last_seen"`
 	RuleTypes     map[string]int    `json:"rule_types,omitempty"`
 	SourceIPCount int               `json:"source_ip_count,omitempty"`
 	Methods       map[string]int    `json:"methods,omitempty"`
@@ -181,37 +99,17 @@ type TopStatItem struct {
 	GeoFlag       string            `json:"geo_flag,omitempty"`
 }
 
-func (t TopStatItem) MarshalJSON() ([]byte, error) {
-	type Alias TopStatItem
-	return json.Marshal(&struct {
-		LastSeen string `json:"last_seen"`
-		*Alias
-	}{
-		LastSeen: t.LastSeen.Local().Format(time.RFC3339),
-		Alias:    (*Alias)(&t),
-	})
-}
 
 // RuleHitStat 规则命中统计
 type RuleHitStat struct {
 	Name        string    `json:"name"`
 	Count       int64     `json:"count"`
-	LastSeen    time.Time `json:"last_seen"`
+	LastSeen    timeutil.LocalTime `json:"last_seen"`
 	AffectedIPs int       `json:"affected_ips,omitempty"`
 	Severity    string    `json:"severity,omitempty"`
 	RuleType    string    `json:"rule_type,omitempty"`
 }
 
-func (r RuleHitStat) MarshalJSON() ([]byte, error) {
-	type Alias RuleHitStat
-	return json.Marshal(&struct {
-		LastSeen string `json:"last_seen"`
-		*Alias
-	}{
-		LastSeen: r.LastSeen.Local().Format(time.RFC3339),
-		Alias:    (*Alias)(&r),
-	})
-}
 
 // calculateRiskLevel 计算风险等级
 func calculateRiskLevel(count int64, ruleTypes map[string]int) string {
@@ -975,7 +873,8 @@ func (m *Manager) GetEvents(startTime, endTime time.Time, offset, limit int) ([]
 		var host, query, userAgent, referer, contentType, geoCountry, geoFlag, matchDetail, matchLocation, action, upstreamAddr, protocol, scheme, errorMessage sql.NullString
 		if err := rows.Scan(&e.ID, &timeStr, &e.ClientIP, &host, &e.Path, &query, &e.Method,
 			&userAgent, &referer, &contentType, &e.Rule, &e.Status, &e.RequestID, &latencyMs, &geoCountry, &geoFlag, &matchDetail, &matchLocation, &action, &upstreamAddr, &protocol, &scheme, &upstreamLatencyMs, &requestSize, &errorMessage); err == nil {
-			e.Time = parseTimeSafe(timeStr)
+			pt, _ := timeutil.ParseTime(timeStr)
+			e.Time = timeutil.FromTime(pt)
 			if host.Valid { e.Host = host.String }
 			if query.Valid { e.Query = query.String }
 			if userAgent.Valid { e.UserAgent = userAgent.String }
@@ -1117,7 +1016,8 @@ func (m *Manager) GetHourlyStats(startTime, endTime time.Time) ([]HourlyStats, e
 		var timeHourStr string
 		if err := rows.Scan(&timeHourStr, &s.TotalRequests, &s.BlockedRequests,
 			&s.AvgQPS, &s.AvgLatencyMs, &s.InboundBytes, &s.OutboundBytes); err == nil {
-			s.TimeHour = parseTimeSafe(timeHourStr)
+			pt, _ := timeutil.ParseTime(timeHourStr)
+			s.TimeHour = timeutil.FromTime(pt)
 			stats = append(stats, s)
 		}
 	}
@@ -1167,7 +1067,8 @@ func (m *Manager) GetMinuteStats(startTime, endTime time.Time) ([]MinuteStats, e
 		var timeMinuteStr string
 		if err := rows.Scan(&timeMinuteStr, &s.TotalRequests, &s.BlockedRequests,
 			&s.AvgQPS, &s.AvgLatencyMs, &s.InboundBytes, &s.OutboundBytes); err == nil {
-			s.TimeMinute = parseTimeSafe(timeMinuteStr)
+			pt, _ := timeutil.ParseTime(timeMinuteStr)
+			s.TimeMinute = timeutil.FromTime(pt)
 			stats = append(stats, s)
 		}
 	}
@@ -1286,7 +1187,8 @@ func (m *Manager) GetTopStats(statType string, startTime, endTime time.Time, lim
 		var item TopStatItem
 		var lastSeenStr string
 		if err := rows.Scan(&item.Name, &item.Count, &lastSeenStr); err == nil {
-			item.LastSeen = parseTimeSafe(lastSeenStr)
+			pt, _ := timeutil.ParseTime(lastSeenStr)
+			item.LastSeen = timeutil.FromTime(pt)
 			items = append(items, item)
 		}
 	}
@@ -1390,7 +1292,8 @@ func (m *Manager) GetRuleHitStats(startTime, endTime time.Time) ([]RuleHitStat, 
 		var s RuleHitStat
 		var lastSeenStr string
 		if err := rows.Scan(&s.Name, &s.Count, &lastSeenStr); err == nil {
-			s.LastSeen = parseTimeSafe(lastSeenStr)
+			pt, _ := timeutil.ParseTime(lastSeenStr)
+			s.LastSeen = timeutil.FromTime(pt)
 			stats = append(stats, s)
 		}
 	}

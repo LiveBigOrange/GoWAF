@@ -1,11 +1,12 @@
 package stats
 
 import (
-	"encoding/json"
 	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"gowaf-demo/internal/timeutil"
 )
 
 var (
@@ -184,7 +185,7 @@ func GetBusinessStats() BusinessStats {
 type TopItem struct {
 	Name          string            `json:"name"`
 	Count         int               `json:"count"`
-	LastSeen      time.Time         `json:"last_seen,omitempty"`
+	LastSeen      timeutil.LocalTime `json:"last_seen,omitempty"`
 	RuleTypes     map[string]int    `json:"rule_types,omitempty"`
 	SourceIPCount int               `json:"source_ip_count,omitempty"`
 	Methods       map[string]int    `json:"methods,omitempty"`
@@ -194,16 +195,6 @@ type TopItem struct {
 	GeoFlag       string            `json:"geo_flag,omitempty"`
 }
 
-func (t TopItem) MarshalJSON() ([]byte, error) {
-	type Alias TopItem
-	return json.Marshal(&struct {
-		LastSeen string `json:"last_seen,omitempty"`
-		*Alias
-	}{
-		LastSeen: t.LastSeen.Local().Format(time.RFC3339),
-		Alias:    (*Alias)(&t),
-	})
-}
 
 // GetTopBlockedIPs 获取被拦截最多的 IP（TOP N）
 func GetTopBlockedIPs(n int) []TopItem {
@@ -215,7 +206,7 @@ func GetTopBlockedIPs(n int) []TopItem {
 		items = append(items, TopItem{
 			Name:     ip,
 			Count:    count,
-			LastSeen: blockedIPsTime[ip],
+			LastSeen: timeutil.FromTime(blockedIPsTime[ip]),
 		})
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -237,7 +228,7 @@ func GetTopBlockedPaths(n int) []TopItem {
 		items = append(items, TopItem{
 			Name:     path,
 			Count:    count,
-			LastSeen: blockedPathsTime[path],
+			LastSeen: timeutil.FromTime(blockedPathsTime[path]),
 		})
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -259,7 +250,7 @@ func GetRuleHits() []TopItem {
 		items = append(items, TopItem{
 			Name:     rule,
 			Count:    count,
-			LastSeen: ruleHitsTime[rule],
+			LastSeen: timeutil.FromTime(ruleHitsTime[rule]),
 		})
 	}
 	sort.Slice(items, func(i, j int) bool {

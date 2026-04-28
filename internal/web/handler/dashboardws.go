@@ -9,6 +9,7 @@ import (
 
 	"gowaf-demo/internal/event"
 	"gowaf-demo/internal/stats"
+	"gowaf-demo/internal/timeutil"
 	"gowaf-demo/internal/web/middleware"
 
 	"github.com/gorilla/websocket"
@@ -295,7 +296,7 @@ func (h *DashboardHub) collectDashboardData() map[string]interface{} {
 
 	return map[string]interface{}{
 		"type": "dashboard_update",
-		"timestamp": time.Now().Local().Format(time.RFC3339),
+		"timestamp": timeutil.FormatRFC3339(time.Now()),
 		"stats": map[string]interface{}{
 			"total":   int(total),
 			"blocked": int(blocked),

@@ -2,15 +2,15 @@ package event
 
 import (
 	"container/ring"
-	"encoding/json"
 	"sync"
-	"time"
+
+	"gowaf-demo/internal/timeutil"
 )
 
 // InterceptEvent 拦截事件（与metrics.InterceptEvent保持一致）
 type InterceptEvent struct {
 	ID            int64     `json:"id"`
-	Time          time.Time `json:"timestamp"`                   // 统一使用timestamp
+	Time          timeutil.LocalTime `json:"timestamp"`                   // 统一使用timestamp
 	ClientIP      string    `json:"client_ip"`
 	Host          string    `json:"host,omitempty"`
 	Path          string    `json:"path"`
@@ -36,21 +36,6 @@ type InterceptEvent struct {
 	ErrorMessage  string    `json:"error_message,omitempty"`     // 错误信息
 }
 
-// MarshalJSON 自定义JSON序列化，输出RFC3339格式带本地时区偏移
-// 与访问日志、管理日志格式一致（如2026-04-28T21:14:45+08:00）
-func (e InterceptEvent) MarshalJSON() ([]byte, error) {
-	type Alias InterceptEvent
-	return json.Marshal(&struct {
-		Time      string `json:"time"`
-		Timestamp string `json:"timestamp"`
-		*Alias
-	}{
-		Time:      e.Time.Local().Format(time.RFC3339),
-		Timestamp: e.Time.Local().Format(time.RFC3339),
-		Alias:     (*Alias)(&e),
-	})
-}
-
 var (
 	eventRing = ring.New(200)
 	eventMu   sync.RWMutex
@@ -60,7 +45,7 @@ var (
 func AddEvent(clientIP, host, path, query, method, userAgent, referer, contentType, rule string, status int, requestID string, latencyMs float64, geoCountry, geoFlag, matchDetail, matchLocation, action, upstreamAddr, protocol, scheme string, requestSize int64) {
 	eventMu.Lock()
 	eventRing.Value = InterceptEvent{
-		Time:          time.Now().UTC(),
+		Time:          timeutil.NowUTC(),
 		ClientIP:      clientIP,
 		Host:          host,
 		Path:          path,

@@ -5,7 +5,6 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"gowaf-demo/internal/logger"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,6 +12,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gowaf-demo/internal/logger"
+	"gowaf-demo/internal/timeutil"
 )
 
 // LogEntry 日志条目结构 - 使用统一的AccessLog结构
@@ -329,7 +331,7 @@ func GetLogFileInfo(w http.ResponseWriter, r *http.Request) {
 		TotalLines:    totalLines,
 		FirstLineTime: firstLineTime,
 		LastLineTime:  lastLineTime,
-		ModifiedTime:  info.ModTime().Local().Format(time.RFC3339),
+		ModifiedTime:  timeutil.FormatRFC3339(info.ModTime()),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

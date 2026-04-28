@@ -2,6 +2,8 @@ package logger
 
 import (
 	"time"
+
+	"gowaf-demo/internal/timeutil"
 )
 
 // AccessLog 统一的访问日志结构
@@ -76,13 +78,13 @@ func DefaultLogFieldConfig() LogFieldConfig {
 // NewAccessLog 创建新的访问日志（使用当前时间戳）
 func NewAccessLog() *AccessLog {
 	return &AccessLog{
-		Timestamp: time.Now().Local().Format(time.RFC3339),
+		Timestamp: timeutil.FormatRFC3339(time.Now()),
 	}
 }
 
 // SetTimestamp 设置时间戳
 func (l *AccessLog) SetTimestamp(t time.Time) *AccessLog {
-	l.Timestamp = t.Local().Format(time.RFC3339)
+	l.Timestamp = timeutil.FormatRFC3339(t)
 	return l
 }
 

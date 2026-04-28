@@ -5,6 +5,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"gowaf-demo/internal/timeutil"
 )
 
 // Backend 后端服务器配置
@@ -328,7 +330,7 @@ func (m *Manager) MarkHealthy(id string, healthy bool) {
 	for _, b := range m.backends {
 		if b.ID == id {
 			b.Healthy = healthy
-			b.LastCheck = time.Now().Local().Format(time.RFC3339)
+			b.LastCheck = timeutil.FormatRFC3339(time.Now())
 			// 更新数据库
 			healthyInt := 0
 			if healthy {

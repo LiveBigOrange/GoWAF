@@ -8,6 +8,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"gowaf-demo/internal/timeutil"
 )
 
 // --- 管理端口访问日志 ---
@@ -67,7 +69,7 @@ func writeAdminLog(entry AdminLogEntry) {
 func LogAdminAction(r *http.Request, action, username string) {
 	clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
 	entry := AdminLogEntry{
-		Timestamp: time.Now().Local().Format(time.RFC3339),
+		Timestamp: timeutil.FormatRFC3339(time.Now()),
 		ClientIP:  clientIP,
 		Method:    r.Method,
 		Path:      r.URL.Path,
@@ -117,7 +119,7 @@ func AdminAccessLog(next http.Handler) http.Handler {
 		}
 
 		entry := AdminLogEntry{
-			Timestamp: time.Now().Local().Format(time.RFC3339),
+			Timestamp: timeutil.FormatRFC3339(time.Now()),
 			ClientIP:  clientIP,
 			Method:    r.Method,
 			Path:      path,
