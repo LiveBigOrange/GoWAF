@@ -76,7 +76,7 @@ func DefaultLogFieldConfig() LogFieldConfig {
 // NewAccessLog 创建新的访问日志（使用当前时间戳）
 func NewAccessLog() *AccessLog {
 	return &AccessLog{
-		Timestamp: time.Now().Format(time.RFC3339),
+		Timestamp: time.Now().Local().Format(time.RFC3339),
 	}
 }
 

@@ -328,7 +328,7 @@ func (m *Manager) MarkHealthy(id string, healthy bool) {
 	for _, b := range m.backends {
 		if b.ID == id {
 			b.Healthy = healthy
-			b.LastCheck = time.Now().Format(time.RFC3339)
+			b.LastCheck = time.Now().Local().Format(time.RFC3339)
 			// 更新数据库
 			healthyInt := 0
 			if healthy {

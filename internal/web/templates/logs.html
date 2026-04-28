@@ -521,7 +521,7 @@
                 var url = URL.createObjectURL(blob);
                 var a = document.createElement('a');
                 a.href = url;
-                a.download = 'access_logs_' + new Date().toISOString().slice(0, 10) + '.json';
+                var d = new Date(); a.download = 'access_logs_' + d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') + '.json';
                 a.click();
                 URL.revokeObjectURL(url);
             };

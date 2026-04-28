@@ -329,7 +329,7 @@ func GetLogFileInfo(w http.ResponseWriter, r *http.Request) {
 		TotalLines:    totalLines,
 		FirstLineTime: firstLineTime,
 		LastLineTime:  lastLineTime,
-		ModifiedTime:  info.ModTime().Format("2006-01-02 15:04:05"),
+		ModifiedTime:  info.ModTime().Local().Format(time.RFC3339),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -67,7 +67,7 @@ func writeAdminLog(entry AdminLogEntry) {
 func LogAdminAction(r *http.Request, action, username string) {
 	clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
 	entry := AdminLogEntry{
-		Timestamp: time.Now().Format(time.RFC3339),
+		Timestamp: time.Now().Local().Format(time.RFC3339),
 		ClientIP:  clientIP,
 		Method:    r.Method,
 		Path:      r.URL.Path,
@@ -117,7 +117,7 @@ func AdminAccessLog(next http.Handler) http.Handler {
 		}
 
 		entry := AdminLogEntry{
-			Timestamp: time.Now().Format(time.RFC3339),
+			Timestamp: time.Now().Local().Format(time.RFC3339),
 			ClientIP:  clientIP,
 			Method:    r.Method,
 			Path:      path,
