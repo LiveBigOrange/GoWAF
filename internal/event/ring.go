@@ -36,7 +36,8 @@ type InterceptEvent struct {
 	ErrorMessage  string    `json:"error_message,omitempty"`     // 错误信息
 }
 
-// MarshalJSON 自定义JSON序列化，确保时间以本地时区格式输出（带时区偏移避免前端解析歧义）
+// MarshalJSON 自定义JSON序列化，确保时间以无时区的本地时间格式输出
+// 避免带Z/+00:00等UTC标记导致前端二次时区转换
 func (e InterceptEvent) MarshalJSON() ([]byte, error) {
 	type Alias InterceptEvent
 	return json.Marshal(&struct {
@@ -44,8 +45,8 @@ func (e InterceptEvent) MarshalJSON() ([]byte, error) {
 		Timestamp string `json:"timestamp"`
 		*Alias
 	}{
-		Time:      e.Time.Local().Format("2006-01-02T15:04:05.999999-07:00"),
-		Timestamp: e.Time.Local().Format("2006-01-02T15:04:05.999999-07:00"),
+		Time:      e.Time.Local().Format("2006-01-02 15:04:05"),
+		Timestamp: e.Time.Local().Format("2006-01-02 15:04:05"),
 		Alias:     (*Alias)(&e),
 	})
 }

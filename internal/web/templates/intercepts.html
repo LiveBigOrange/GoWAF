@@ -238,6 +238,8 @@
 
             function formatTime(time) {
                 if (!time) return '-';
+                // 如果是"YYYY-MM-DD HH:MM:SS"格式（无时区标记），直接返回避免Date解析歧义
+                if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(time)) return time.substring(0, 19);
                 var date = new Date(time);
                 if (isNaN(date.getTime())) return time;
                 return date.getFullYear() + '-' + 
@@ -260,6 +262,11 @@
             // 解析时间为Date对象
             function parseTime(time) {
                 if (!time) return null;
+                // 无时区标记的"YYYY-MM-DD HH:MM:SS"格式，按本地时间解析
+                if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(time)) {
+                    var d = new Date(time.replace(' ', 'T'));
+                    return isNaN(d.getTime()) ? null : d;
+                }
                 var date = new Date(time);
                 return isNaN(date.getTime()) ? null : date;
             }
