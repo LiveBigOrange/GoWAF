@@ -40,11 +40,13 @@ type InterceptEvent struct {
 func (e InterceptEvent) MarshalJSON() ([]byte, error) {
 	type Alias InterceptEvent
 	return json.Marshal(&struct {
-		Time string `json:"time"`
+		Time      string `json:"time"`
+		Timestamp string `json:"timestamp"`
 		*Alias
 	}{
-		Time:  e.Time.Local().Format("2006-01-02T15:04:05.999999-07:00"),
-		Alias: (*Alias)(&e),
+		Time:      e.Time.Local().Format("2006-01-02T15:04:05.999999-07:00"),
+		Timestamp: e.Time.Local().Format("2006-01-02T15:04:05.999999-07:00"),
+		Alias:     (*Alias)(&e),
 	})
 }
 
