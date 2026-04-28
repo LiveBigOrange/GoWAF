@@ -36,8 +36,8 @@ type InterceptEvent struct {
 	ErrorMessage  string    `json:"error_message,omitempty"`     // 错误信息
 }
 
-// MarshalJSON 自定义JSON序列化，输出RFC3339格式带时区偏移
-// 确保前端new Date()能正确转换到用户本地时区
+// MarshalJSON 自定义JSON序列化，输出RFC3339格式带本地时区偏移
+// 与访问日志、管理日志格式一致（如2026-04-28T21:14:45+08:00）
 func (e InterceptEvent) MarshalJSON() ([]byte, error) {
 	type Alias InterceptEvent
 	return json.Marshal(&struct {
@@ -45,8 +45,8 @@ func (e InterceptEvent) MarshalJSON() ([]byte, error) {
 		Timestamp string `json:"timestamp"`
 		*Alias
 	}{
-		Time:      e.Time.Format(time.RFC3339),
-		Timestamp: e.Time.Format(time.RFC3339),
+		Time:      e.Time.Local().Format(time.RFC3339),
+		Timestamp: e.Time.Local().Format(time.RFC3339),
 		Alias:     (*Alias)(&e),
 	})
 }
