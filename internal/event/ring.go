@@ -1,4 +1,4 @@
-﻿package event
+package event
 
 import (
 	"container/ring"
@@ -36,8 +36,8 @@ type InterceptEvent struct {
 	ErrorMessage  string    `json:"error_message,omitempty"`     // 错误信息
 }
 
-// MarshalJSON 自定义JSON序列化，确保时间以无时区的本地时间格式输出
-// 避免带Z/+00:00等UTC标记导致前端二次时区转换
+// MarshalJSON 自定义JSON序列化，输出RFC3339格式带时区偏移
+// 确保前端new Date()能正确转换到用户本地时区
 func (e InterceptEvent) MarshalJSON() ([]byte, error) {
 	type Alias InterceptEvent
 	return json.Marshal(&struct {
@@ -45,8 +45,8 @@ func (e InterceptEvent) MarshalJSON() ([]byte, error) {
 		Timestamp string `json:"timestamp"`
 		*Alias
 	}{
-		Time:      e.Time.Local().Format("2006-01-02 15:04:05"),
-		Timestamp: e.Time.Local().Format("2006-01-02 15:04:05"),
+		Time:      e.Time.Format(time.RFC3339),
+		Timestamp: e.Time.Format(time.RFC3339),
 		Alias:     (*Alias)(&e),
 	})
 }
@@ -60,7 +60,7 @@ var (
 func AddEvent(clientIP, host, path, query, method, userAgent, referer, contentType, rule string, status int, requestID string, latencyMs float64, geoCountry, geoFlag, matchDetail, matchLocation, action, upstreamAddr, protocol, scheme string, requestSize int64) {
 	eventMu.Lock()
 	eventRing.Value = InterceptEvent{
-		Time:          time.Now(),
+		Time:          time.Now().UTC(),
 		ClientIP:      clientIP,
 		Host:          host,
 		Path:          path,

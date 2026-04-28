@@ -49,14 +49,14 @@ func parseTimeSafe(s string) time.Time {
 			return t
 		}
 	}
-	// 无时区的格式（数据库存储的时间无时区信息，视为本地时间）
+	// 无时区的格式（数据库存储的时间为UTC时间，按UTC解析）
 	localFormats := []string{
 		"2006-01-02 15:04:05.9999999",
 		"2006-01-02 15:04:05.999999",
 		"2006-01-02 15:04:05",
 	}
 	for _, format := range localFormats {
-		if t, err := time.ParseInLocation(format, s, time.Local); err == nil {
+		if t, err := time.Parse(format, s); err == nil {
 			return t
 		}
 	}
@@ -108,8 +108,8 @@ type InterceptEvent struct {
 	ErrorMessage  string    `json:"error_message,omitempty"`     // 错误信息
 }
 
-// MarshalJSON 自定义JSON序列化，确保时间以无时区的本地时间格式输出
-// 避免带Z/+00:00等UTC标记导致前端二次时区转换
+// MarshalJSON 自定义JSON序列化，输出RFC3339格式带时区偏移
+// 确保前端new Date()能正确转换到用户本地时区
 func (e InterceptEvent) MarshalJSON() ([]byte, error) {
 	type Alias InterceptEvent
 	return json.Marshal(&struct {
@@ -117,8 +117,8 @@ func (e InterceptEvent) MarshalJSON() ([]byte, error) {
 		Timestamp string `json:"timestamp"`
 		*Alias
 	}{
-		Time:      e.Time.Local().Format("2006-01-02 15:04:05"),
-		Timestamp: e.Time.Local().Format("2006-01-02 15:04:05"),
+		Time:      e.Time.Format(time.RFC3339),
+		Timestamp: e.Time.Format(time.RFC3339),
 		Alias:     (*Alias)(&e),
 	})
 }
@@ -899,7 +899,7 @@ func (m *Manager) createTables() error {
 
 // SaveEvent 保存拦截事件（增强版）
 func (m *Manager) SaveEvent(clientIP, host, path, query, method, userAgent, referer, contentType, rule string, status int, requestID string, latencyMs float64, geoCountry, geoFlag, matchDetail, matchLocation, action, upstreamAddr, protocol, scheme string, requestSize int64) error {
-	now := time.Now().Format("2006-01-02 15:04:05.999999")
+	now := time.Now().UTC().Format("2006-01-02 15:04:05.999999")
 	_, err := m.db.Exec(`
 		INSERT INTO intercept_events (time, client_ip, host, path, query, method, user_agent, referer, content_type, rule, status, request_id, latency_ms, geo_country, geo_flag, match_detail, match_location, action, upstream_addr, protocol, scheme, request_size)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
