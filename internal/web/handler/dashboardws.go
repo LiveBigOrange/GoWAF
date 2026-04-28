@@ -142,8 +142,8 @@ func (h *DashboardHub) collectDashboardData() map[string]interface{} {
 	// 收集统计指标
 	var total, blocked int64
 	if MetricsManager != nil {
-		start := time.Now().AddDate(0, 0, -7)
-		end := time.Now()
+		start := time.Now().UTC().AddDate(0, 0, -7)
+		end := time.Now().UTC()
 		total, blocked, _ = MetricsManager.GetTotalStats(start, end)
 	}
 	if total == 0 && blocked == 0 {
@@ -154,8 +154,8 @@ func (h *DashboardHub) collectDashboardData() map[string]interface{} {
 	// 收集拦截事件（从数据库加载最近7天数据，确保重启后数据不丢失）
 	var events []event.InterceptEvent
 	if MetricsManager != nil {
-		startTime := time.Now().AddDate(0, 0, -7) // 最近7天
-		endTime := time.Now()
+		startTime := time.Now().UTC().AddDate(0, 0, -7)
+		endTime := time.Now().UTC()
 		metricsEvents, err := MetricsManager.GetEvents(startTime, endTime, 0, 5)
 		if err != nil {
 			log.Printf("仪表盘: 从metrics获取事件失败: %v", err)
@@ -207,8 +207,8 @@ func (h *DashboardHub) collectDashboardData() map[string]interface{} {
 	// 收集 TOP 数据 — 优先从数据库获取，降级到内存（与 HTTP API 保持一致）
 	var topIPs []stats.TopItem
 	if MetricsManager != nil {
-		start := time.Now().AddDate(0, 0, -7)
-		end := time.Now()
+		start := time.Now().UTC().AddDate(0, 0, -7)
+		end := time.Now().UTC()
 		metricsTop, err := MetricsManager.GetTopStats("blocked_ip", start, end, 5)
 		if err == nil && len(metricsTop) > 0 {
 			topIPs = make([]stats.TopItem, len(metricsTop))
@@ -234,8 +234,8 @@ func (h *DashboardHub) collectDashboardData() map[string]interface{} {
 
 	var topPaths []stats.TopItem
 	if MetricsManager != nil {
-		start := time.Now().AddDate(0, 0, -7)
-		end := time.Now()
+		start := time.Now().UTC().AddDate(0, 0, -7)
+		end := time.Now().UTC()
 		metricsTop, err := MetricsManager.GetTopStats("attacked_path", start, end, 5)
 		if err == nil && len(metricsTop) > 0 {
 			topPaths = make([]stats.TopItem, len(metricsTop))
@@ -261,8 +261,8 @@ func (h *DashboardHub) collectDashboardData() map[string]interface{} {
 
 	var ruleHits []stats.TopItem
 	if MetricsManager != nil {
-		start := time.Now().AddDate(0, 0, -7)
-		end := time.Now()
+		start := time.Now().UTC().AddDate(0, 0, -7)
+		end := time.Now().UTC()
 		metricsHits, err := MetricsManager.GetRuleHitStats(start, end)
 		if err == nil && len(metricsHits) > 0 {
 			ruleHits = make([]stats.TopItem, len(metricsHits))

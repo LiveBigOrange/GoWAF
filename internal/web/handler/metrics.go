@@ -29,10 +29,10 @@ func GetMetricsEvents(w http.ResponseWriter, r *http.Request) {
 	pageSize := 20
 
 	if startTime == "" {
-		startTime = time.Now().AddDate(0, 0, -7).Format("2006-01-02")
+		startTime = time.Now().UTC().AddDate(0, 0, -7).Format("2006-01-02")
 	}
 	if endTime == "" {
-		endTime = time.Now().Format("2006-01-02")
+		endTime = time.Now().UTC().Format("2006-01-02")
 	}
 
 	// 解析分页参数
@@ -49,13 +49,16 @@ func GetMetricsEvents(w http.ResponseWriter, r *http.Request) {
 
 	start, err := time.Parse("2006-01-02", startTime)
 	if err != nil {
-		start = time.Now().AddDate(0, 0, -7)
+		start = time.Now().UTC().AddDate(0, 0, -7)
+	} else {
+		start = start.UTC()
 	}
 	end, err := time.Parse("2006-01-02", endTime)
 	if err != nil {
-		end = time.Now()
+		end = time.Now().UTC()
+	} else {
+		end = end.UTC()
 	}
-	// 设置结束时间为当天的最后一刻
 	end = end.Add(24*time.Hour - time.Second)
 
 	events, err := MetricsManager.GetEvents(start, end, (page-1)*pageSize, pageSize)
@@ -99,19 +102,14 @@ func GetMetricsMinuteStats(w http.ResponseWriter, r *http.Request) {
 	var start, end time.Time
 	var err error
 
-	// 尝试解析 ISO 格式（前端发送的是 UTC 时间）
 	if startStr != "" {
 		start, err = time.Parse(time.RFC3339, startStr)
 		if err != nil {
-			// 尝试日期格式
 			start, err = time.Parse("2006-01-02", startStr)
-		} else {
-			// ISO 格式解析成功，转换为本地时区
-			start = start.Local()
 		}
 	}
 	if err != nil || startStr == "" {
-		start = time.Now().Add(-1 * time.Hour)
+		start = time.Now().UTC().Add(-1 * time.Hour)
 	}
 
 	if endStr != "" {
@@ -121,13 +119,10 @@ func GetMetricsMinuteStats(w http.ResponseWriter, r *http.Request) {
 			if err == nil {
 				end = end.Add(24*time.Hour - time.Second)
 			}
-		} else {
-			// ISO 格式解析成功，转换为本地时区
-			end = end.Local()
 		}
 	}
 	if err != nil || endStr == "" {
-		end = time.Now()
+		end = time.Now().UTC()
 	}
 
 	stats, err := MetricsManager.GetMinuteStats(start, end)
@@ -160,19 +155,16 @@ func GetMetricsHourlyStats(w http.ResponseWriter, r *http.Request) {
 	var start, end time.Time
 	var err error
 
-	// 尝试解析 ISO 格式（前端发送的是 UTC 时间）
+	// 尝试解析 ISO 格式（前端发送UTC，数据库存UTC，直接用UTC查询）
 	if startStr != "" {
 		start, err = time.Parse(time.RFC3339, startStr)
 		if err != nil {
 			// 尝试日期格式
 			start, err = time.Parse("2006-01-02", startStr)
-		} else {
-			// ISO 格式解析成功，转换为本地时区
-			start = start.Local()
 		}
 	}
 	if err != nil || startStr == "" {
-		start = time.Now().AddDate(0, 0, -1)
+		start = time.Now().UTC().AddDate(0, 0, -1)
 	}
 
 	if endStr != "" {
@@ -182,13 +174,10 @@ func GetMetricsHourlyStats(w http.ResponseWriter, r *http.Request) {
 			if err == nil {
 				end = end.Add(24*time.Hour - time.Second)
 			}
-		} else {
-			// ISO 格式解析成功，转换为本地时区
-			end = end.Local()
 		}
 	}
 	if err != nil || endStr == "" {
-		end = time.Now()
+		end = time.Now().UTC()
 	}
 
 	stats, err := MetricsManager.GetHourlyStats(start, end)
@@ -217,19 +206,23 @@ func GetMetricsTopStats(w http.ResponseWriter, r *http.Request) {
 		statType = "blocked_ip"
 	}
 	if startTime == "" {
-		startTime = time.Now().AddDate(0, 0, -7).Format("2006-01-02")
+		startTime = time.Now().UTC().Format("2006-01-02")
 	}
 	if endTime == "" {
-		endTime = time.Now().Format("2006-01-02")
+		endTime = time.Now().UTC().Format("2006-01-02")
 	}
 
 	start, err := time.Parse("2006-01-02", startTime)
 	if err != nil {
-		start = time.Now().AddDate(0, 0, -7)
+		start = time.Now().UTC().AddDate(0, 0, -7)
+	} else {
+		start = start.UTC()
 	}
 	end, err := time.Parse("2006-01-02", endTime)
 	if err != nil {
-		end = time.Now()
+		end = time.Now().UTC()
+	} else {
+		end = end.UTC()
 	}
 
 	stats, err := MetricsManager.GetTopStats(statType, start, end, limit)
@@ -253,19 +246,23 @@ func GetMetricsRuleHitStats(w http.ResponseWriter, r *http.Request) {
 	endTime := r.URL.Query().Get("end_time")
 
 	if startTime == "" {
-		startTime = time.Now().AddDate(0, 0, -7).Format("2006-01-02")
+		startTime = time.Now().UTC().AddDate(0, 0, -7).Format("2006-01-02")
 	}
 	if endTime == "" {
-		endTime = time.Now().Format("2006-01-02")
+		endTime = time.Now().UTC().Format("2006-01-02")
 	}
 
 	start, err := time.Parse("2006-01-02", startTime)
 	if err != nil {
-		start = time.Now().AddDate(0, 0, -7)
+		start = time.Now().UTC().AddDate(0, 0, -7)
+	} else {
+		start = start.UTC()
 	}
 	end, err := time.Parse("2006-01-02", endTime)
 	if err != nil {
-		end = time.Now()
+		end = time.Now().UTC()
+	} else {
+		end = end.UTC()
 	}
 
 	stats, err := MetricsManager.GetRuleHitStats(start, end)
