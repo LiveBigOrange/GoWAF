@@ -853,7 +853,7 @@ func (m *Manager) createTables() error {
 // SaveEvent 保存拦截事件（增强版）
 func (m *Manager) SaveEvent(clientIP, host, path, query, method, userAgent, referer, contentType, rule string, status int, requestID string, latencyMs float64, geoCountry, geoCity, geoFlag, matchDetail, matchLocation, action, upstreamAddr, protocol, scheme string, requestSize int64, upstreamLatencyMs float64, errorMessage string) error {
 	now := time.Now().UTC().Format("2006-01-02 15:04:05.999999")
-	result, err := m.db.Exec(`
+	_, err := m.db.Exec(`
 		INSERT INTO intercept_events (time, client_ip, host, path, query, method, user_agent, referer, content_type, rule, status, request_id, latency_ms, geo_country, geo_city, geo_flag, match_detail, match_location, action, upstream_addr, protocol, scheme, request_size, upstream_latency_ms, error_message)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, now, clientIP, host, path, query, method, userAgent, referer, contentType, rule, status, requestID, latencyMs, geoCountry, geoCity, geoFlag, matchDetail, matchLocation, action, upstreamAddr, protocol, scheme, requestSize, upstreamLatencyMs, errorMessage)
