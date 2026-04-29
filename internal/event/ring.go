@@ -24,6 +24,7 @@ type InterceptEvent struct {
 	RequestID     string    `json:"request_id"`
 	LatencyMs     float64   `json:"latency_ms,omitempty"`
 	GeoCountry    string    `json:"geo_country,omitempty"`
+	GeoCity       string    `json:"geo_city,omitempty"`
 	GeoFlag       string    `json:"geo_flag,omitempty"`
 	MatchDetail   string    `json:"match_detail,omitempty"`
 	MatchLocation string    `json:"match_location,omitempty"`
@@ -42,7 +43,7 @@ var (
 )
 
 // AddEvent 添加拦截事件到内存环形缓冲
-func AddEvent(clientIP, host, path, query, method, userAgent, referer, contentType, rule string, status int, requestID string, latencyMs float64, geoCountry, geoFlag, matchDetail, matchLocation, action, upstreamAddr, protocol, scheme string, requestSize int64) {
+func AddEvent(clientIP, host, path, query, method, userAgent, referer, contentType, rule string, status int, requestID string, latencyMs float64, geoCountry, geoCity, geoFlag, matchDetail, matchLocation, action, upstreamAddr, protocol, scheme string, requestSize int64) {
 	eventMu.Lock()
 	eventRing.Value = InterceptEvent{
 		Time:          timeutil.NowUTC(),
@@ -59,6 +60,7 @@ func AddEvent(clientIP, host, path, query, method, userAgent, referer, contentTy
 		RequestID:     requestID,
 		LatencyMs:     latencyMs,
 		GeoCountry:    geoCountry,
+		GeoCity:       geoCity,
 		GeoFlag:       geoFlag,
 		MatchDetail:   matchDetail,
 		MatchLocation: matchLocation,

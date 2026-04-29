@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"log"
 	"sync"
 	"time"
 )
@@ -70,5 +71,6 @@ func (s *Scheduler) run() {
 
 func (s *Scheduler) cleanup() {
 	if err := s.manager.CleanupOldData(s.retention); err != nil {
+		log.Printf("[WARN] 数据清理失败: %v", err)
 	}
 }

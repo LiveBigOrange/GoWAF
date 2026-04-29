@@ -67,13 +67,18 @@ var (
 // )
 
 func isLoginBlocked(ip string) bool {
-	loginMu.RLock()
-	defer loginMu.RUnlock()
+	loginMu.Lock()
+	defer loginMu.Unlock()
 	blockedUntil, ok := loginBlocked[ip]
 	if !ok {
 		return false
 	}
-	return time.Now().Before(blockedUntil)
+	if time.Now().After(blockedUntil) {
+		delete(loginBlocked, ip)
+		delete(loginAttempts, ip)
+		return false
+	}
+	return true
 }
 
 // getSecurityConfig 获取当前的安全配置（优先从数据库）

@@ -153,7 +153,13 @@ func flushBatch(batch []AccessLog) {
 	// 写入前检查是否需要轮转
 	checkRotation(len(data))
 
-	n, err := logFile.Write(data)
+	var n int
+	var err error
+	rotationMu.Lock()
+	if logFile != nil {
+		n, err = logFile.Write(data)
+	}
+	rotationMu.Unlock()
 	if err == nil {
 		currentSize += int64(n)
 	}
@@ -169,26 +175,31 @@ func writeToDB(batch []AccessLog) {
 	var records []*logdb.AccessLogRecord
 	for _, entry := range batch {
 		record := &logdb.AccessLogRecord{
-			Timestamp:    entry.Timestamp,
-			ClientIP:     entry.ClientIP,
-			Method:       entry.Method,
-			Host:         entry.Host,
-			Path:         entry.Path,
-			Query:        entry.Query,
-			Status:       entry.Status,
-			Action:       entry.Action,
-			RequestID:    entry.RequestID,
-			UserAgent:    entry.UserAgent,
-			Referer:      entry.Referer,
-			ContentType:  entry.ContentType,
-			BodySize:     entry.BodySize,
-			LatencyMs:    entry.LatencyMs,
-			UpstreamAddr: entry.UpstreamAddr,
+			Timestamp:     entry.Timestamp,
+			ClientIP:      entry.ClientIP,
+			Method:        entry.Method,
+			Host:          entry.Host,
+			Path:          entry.Path,
+			Query:         entry.Query,
+			Status:        entry.Status,
+			Action:        entry.Action,
+			RequestID:     entry.RequestID,
+			UserAgent:     entry.UserAgent,
+			Referer:       entry.Referer,
+			ContentType:   entry.ContentType,
+			BodySize:      entry.BodySize,
+			LatencyMs:     entry.LatencyMs,
+			UpstreamAddr:  entry.UpstreamAddr,
+			RuleID:        entry.RuleID,
+			MatchDetail:   entry.MatchDetail,
+			MatchLocation: entry.MatchLocation,
+			GeoCountry:    entry.GeoCountry,
+			GeoCity:       entry.GeoCity,
+			GeoFlag:       entry.GeoFlag,
 		}
 		records = append(records, record)
 	}
 
-	// 批量插入
 	if len(records) > 0 {
 		logDB.BatchInsertLogs(records)
 	}

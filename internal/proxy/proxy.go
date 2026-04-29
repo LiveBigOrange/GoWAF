@@ -3,6 +3,7 @@
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -177,9 +178,20 @@ func (p *WAFProxy) modifyResponse(resp *http.Response) error {
 					results := p.detectorManager.DetectString(string(bodyBytes))
 					if p.detectorManager.HasAttack(results) {
 						attackTypes := p.detectorManager.GetAttackTypes(results)
+						var sensitiveDetails []string
+						for _, res := range results {
+							if res.Detected {
+								if res.RuleID > 0 && res.RuleDesc != "" {
+									sensitiveDetails = append(sensitiveDetails, fmt.Sprintf("[Rule#%d|%s] %s", res.RuleID, res.RuleDesc, res.Pattern))
+								} else {
+									sensitiveDetails = append(sensitiveDetails, res.Pattern)
+								}
+							}
+						}
+						sensitiveDetail := strings.Join(sensitiveDetails, ", ")
 						if resp.Request != nil {
 							clientIP := getClientIP(resp.Request, p.cfg.TrustedProxies)
-							p.recordBlock(clientIP, resp.Request.URL.Path, "", "", "敏感数据泄露:"+strings.Join(attackTypes, ","), http.StatusOK, getRequestID(resp.Request), "", time.Now(), resp.Request, "", "")
+							p.recordBlock(clientIP, resp.Request.URL.Path, "", "", "敏感数据泄露:"+strings.Join(attackTypes, ","), http.StatusOK, getRequestID(resp.Request), "", time.Now(), resp.Request, sensitiveDetail, "body")
 						}
 					}
 					resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
@@ -248,8 +260,8 @@ func (p *WAFProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 1. IP 黑名单检查
-	if p.ruleEngine.IsIPBlocked(clientIP) {
-		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "IP黑名单", http.StatusForbidden, requestID, upstreamAddr, start, r, "", "")
+	if ipResult := p.ruleEngine.IsIPBlocked(clientIP); ipResult.Matched {
+		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "IP黑名单", http.StatusForbidden, requestID, upstreamAddr, start, r, ipResult.Detail, "ip")
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
@@ -257,31 +269,33 @@ func (p *WAFProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 1.5 GeoIP阻断检查
 	if p.metricsManager != nil {
 		if geoInfo := p.metricsManager.GetGeoInfo(clientIP); geoInfo != nil {
-			if geoInfo.CountryISO != "" && p.ruleEngine.IsGeoBlocked(geoInfo.CountryISO) {
-				p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "GeoIP阻断:"+geoInfo.CountryISO, http.StatusForbidden, requestID, upstreamAddr, start, r, "", "")
-				http.Error(w, "Forbidden", http.StatusForbidden)
-				return
+			if geoInfo.CountryISO != "" {
+				if geoResult := p.ruleEngine.IsGeoBlocked(geoInfo.CountryISO); geoResult.Matched {
+					p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "GeoIP阻断:"+geoInfo.CountryISO, http.StatusForbidden, requestID, upstreamAddr, start, r, geoResult.Detail, "geo")
+					http.Error(w, "Forbidden", http.StatusForbidden)
+					return
+				}
 			}
 		}
 	}
 
 	// 1.6 HTTP方法限制检查
-	if !p.ruleEngine.IsMethodAllowed(r.Method) {
-		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "HTTP方法限制", http.StatusMethodNotAllowed, requestID, upstreamAddr, start, r, "", "")
+	if methodResult := p.ruleEngine.IsMethodAllowed(r.Method); methodResult.Matched {
+		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "HTTP方法限制", http.StatusMethodNotAllowed, requestID, upstreamAddr, start, r, methodResult.Detail, "method")
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	// 2. 路径黑/白名单检查（白名单优先）
-	if p.ruleEngine.CheckPath(r.URL.Path) {
-		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "路径黑名单", http.StatusForbidden, requestID, upstreamAddr, start, r, "", "")
+	if pathResult := p.ruleEngine.CheckPath(r.URL.Path); pathResult.Matched {
+		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "路径黑名单", http.StatusForbidden, requestID, upstreamAddr, start, r, pathResult.Detail, "path")
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
 
 	// 3. UA 黑/白名单检查
-	if p.ruleEngine.CheckUA(userAgent) {
-		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "UA黑名单", http.StatusForbidden, requestID, upstreamAddr, start, r, "", "")
+	if uaResult := p.ruleEngine.CheckUA(userAgent); uaResult.Matched {
+		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "UA黑名单", http.StatusForbidden, requestID, upstreamAddr, start, r, uaResult.Detail, "ua")
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
@@ -332,22 +346,26 @@ func (p *WAFProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		results := p.detectorManager.DetectRequestWithBody(r, body)
 		if p.detectorManager.HasAttack(results) {
-			// 记录攻击类型和匹配详情
 			attackTypes := p.detectorManager.GetAttackTypes(results)
 			attackType := strings.Join(attackTypes, ",")
-			// 提取匹配详情
-			var matchPatterns, matchLocations []string
+			var matchDetails, matchLocations []string
 			for _, res := range results {
 				if res.Detected {
-					if res.Pattern != "" {
-						matchPatterns = append(matchPatterns, res.Pattern)
+					detail := res.Pattern
+					if res.RuleID > 0 && res.RuleDesc != "" {
+						detail = fmt.Sprintf("[Rule#%d|%s] %s", res.RuleID, res.RuleDesc, res.Pattern)
+					} else if res.RuleID > 0 {
+						detail = fmt.Sprintf("[Rule#%d] %s", res.RuleID, res.Pattern)
+					} else if res.RuleDesc != "" {
+						detail = fmt.Sprintf("[%s] %s", res.RuleDesc, res.Pattern)
 					}
+					matchDetails = append(matchDetails, detail)
 					if res.Location != "" {
 						matchLocations = append(matchLocations, res.Location)
 					}
 				}
 			}
-			matchDetail := strings.Join(matchPatterns, ", ")
+			matchDetail := strings.Join(matchDetails, ", ")
 			matchLocation := strings.Join(matchLocations, ", ")
 			p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "攻击检测:"+attackType, http.StatusForbidden, requestID, upstreamAddr, start, r, matchDetail, matchLocation)
 			http.Error(w, "Forbidden: Attack Detected", http.StatusForbidden)
@@ -412,30 +430,31 @@ func (p *WAFProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // recordBlock 记录拦截事件
 func (p *WAFProxy) recordBlock(clientIP, path, method, userAgent, rule string, statusCode int, requestID, backendAddr string, start time.Time, r *http.Request, matchDetail, matchLocation string) {
 	stats.IncBlocked()
-	stats.IncBlockedIP(clientIP)
-	stats.IncBlockedPath(path)
+	stats.IncBlockedIP(clientIP, rule)
+	stats.IncBlockedPath(path, method, clientIP)
 	stats.IncRuleHit(rule)
 	
 	// 计算延迟时间
 	latencyMs := time.Since(start).Seconds() * 1000
 	
 	// 计算地理位置
-	var geoCountry, geoFlag string
+	var geoCountry, geoCity, geoFlag string
 	if p.metricsManager != nil {
 		geo := p.metricsManager.GetGeoLocation(clientIP)
 		geoCountry = geo.Country
+		geoCity = geo.City
 		geoFlag = geo.Flag
 	}
 
 	// 保存到内存事件缓冲
 	event.AddEvent(clientIP, r.Host, path, r.URL.RawQuery, method, userAgent, 
-		r.Header.Get("Referer"), r.Header.Get("Content-Type"), rule, statusCode, requestID, latencyMs, geoCountry, geoFlag, matchDetail, matchLocation, "block", "", r.Proto, getScheme(r), int64(estimateRequestSize(r)))
+		r.Header.Get("Referer"), r.Header.Get("Content-Type"), rule, statusCode, requestID, latencyMs, geoCountry, geoCity, geoFlag, matchDetail, matchLocation, "block", "", r.Proto, getScheme(r), int64(estimateRequestSize(r)))
 
 	// 保存到 metrics 数据库
 	if p.metricsManager != nil {
 		p.metricsManager.IncBlockedRequest() // 增加拦截计数
 		p.metricsManager.SaveEvent(clientIP, r.Host, path, r.URL.RawQuery, method, userAgent, 
-			r.Header.Get("Referer"), r.Header.Get("Content-Type"), rule, statusCode, requestID, latencyMs, geoCountry, geoFlag, matchDetail, matchLocation, "block", "", r.Proto, getScheme(r), int64(estimateRequestSize(r)))
+			r.Header.Get("Referer"), r.Header.Get("Content-Type"), rule, statusCode, requestID, latencyMs, geoCountry, geoCity, geoFlag, matchDetail, matchLocation, "block", "", r.Proto, getScheme(r), int64(estimateRequestSize(r)))
 		p.metricsManager.IncTopStat("blocked_ip", clientIP)
 		p.metricsManager.IncTopStat("attacked_path", path)
 		p.metricsManager.IncRuleHit(rule)
@@ -462,9 +481,14 @@ func (p *WAFProxy) recordBlock(clientIP, path, method, userAgent, rule string, s
 		SetReferer(r.Header.Get("Referer")).
 		SetContentType(r.Header.Get("Content-Type")).
 		SetLatency(time.Since(start)).
-		SetRequestSize(int64(estimateRequestSize(r))).  // 使用完整请求大小
-		SetProtocol(r.Proto).                            // 记录HTTP协议版本
-		SetScheme(getScheme(r))                          // 记录请求协议
+		SetRequestSize(int64(estimateRequestSize(r))).
+		SetProtocol(r.Proto).
+		SetScheme(getScheme(r)).
+		SetMatchDetail(matchDetail).
+		SetMatchLocation(matchLocation).
+		SetGeoCountry(geoCountry).
+		SetGeoCity(geoCity).
+		SetGeoFlag(geoFlag)
 	
 	logger.Write(*log)
 }

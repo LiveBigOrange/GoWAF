@@ -1,6 +1,7 @@
 package detector
 
 import (
+	"log"
 	"regexp"
 	"strings"
 	"sync"
@@ -8,8 +9,9 @@ import (
 
 // CommandInjectionDetector 命令注入检测器
 type CommandInjectionDetector struct {
-	patterns []*regexp.Regexp
-	mu       sync.RWMutex
+	patterns     []*regexp.Regexp
+	patternDescs []string
+	mu           sync.RWMutex
 }
 
 // NewCommandInjectionDetector 创建命令注入检测器
@@ -22,26 +24,15 @@ func NewCommandInjectionDetector() *CommandInjectionDetector {
 // compilePatterns 预编译命令注入检测规则
 func (d *CommandInjectionDetector) compilePatterns() {
 	patternStrs := []string{
-		// 管道符
 		`\|.*\|`,
 		`\|\s*\w+`,
-		
-		// 分号执行多条命令
 		`;\s*\w+`,
 		`;\s*/`,
-		
-		// 反引号执行
 		"`.*`",
-		
-		// $()执行
 		`\$\([^)]+\)`,
-		
-		// 重定向
 		`>\s*/`,
 		`>>\s*/`,
 		`<\s*/`,
-		
-		// 常见危险命令
 		`(?i)\bcat\s+`,
 		`(?i)\bls\s+`,
 		`(?i)\bdir\s+`,
@@ -104,8 +95,6 @@ func (d *CommandInjectionDetector) compilePatterns() {
 		`(?i)\bsource\s+`,
 		`(?i)\bexec\s+`,
 		`(?i)\beval\s+`,
-		
-		// Windows命令
 		`(?i)\bcmd\.exe`,
 		`(?i)\bpowershell\.exe`,
 		`(?i)\bpowershell\s+`,
@@ -208,40 +197,58 @@ func (d *CommandInjectionDetector) compilePatterns() {
 		`(?i)\bhelp\.exe`,
 	}
 
+	patternDescMap := map[string]string{
+		`\|.*\|`: "管道符注入", `\|\s*\w+`: "管道符命令",
+		`;\s*\w+`: "分号命令", `;\s*/`: "分号路径",
+		"`.*`": "反引号执行", `\$\([^)]+\)`: "美元括号执行",
+		`>\s*/`: "重定向写入", `>>\s*/`: "重定向追加", `<\s*/`: "重定向读取",
+		`(?i)\bcmd\.exe`: "Windows CMD", `(?i)\bpowershell\.exe`: "Windows PowerShell", `(?i)\bpowershell\s+`: "PowerShell命令",
+	}
+
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	d.patterns = make([]*regexp.Regexp, 0, len(patternStrs))
+	d.patternDescs = make([]string, 0, len(patternStrs))
 	for _, pattern := range patternStrs {
 		re, err := regexp.Compile(pattern)
 		if err == nil {
 			d.patterns = append(d.patterns, re)
+			if desc, ok := patternDescMap[pattern]; ok {
+				d.patternDescs = append(d.patternDescs, desc)
+			} else {
+				d.patternDescs = append(d.patternDescs, "命令注入规则")
+			}
+		} else {
+			log.Printf("[WARN] CommandInjection: 正则编译失败 %q: %v", pattern, err)
 		}
 	}
 }
 
 // Detect 检测命令注入
-func (d *CommandInjectionDetector) Detect(input string) (bool, string) {
+func (d *CommandInjectionDetector) Detect(input string) (bool, string, int, string) {
 	if input == "" {
-		return false, ""
+		return false, "", 0, ""
 	}
 
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
-	// 检测每个模式
-	for _, pattern := range d.patterns {
+	for i, pattern := range d.patterns {
 		if pattern.MatchString(input) {
-			return true, pattern.String()
+			desc := ""
+			if i < len(d.patternDescs) {
+				desc = d.patternDescs[i]
+			}
+			return true, pattern.String(), i + 1, desc
 		}
 	}
 
-	// 启发式检测
 	if d.heuristicCheck(input) {
-		return true, "heuristic_detection"
+		return true, "heuristic_detection", 0, "启发式检测"
 	}
 
-	return false, ""
+	return false, "", 0, ""
 }
 
 // heuristicCheck 启发式检测
@@ -270,25 +277,19 @@ func (d *CommandInjectionDetector) heuristicCheck(input string) bool {
 }
 
 // DetectRequest 检测HTTP请求中的命令注入
-func (d *CommandInjectionDetector) DetectRequest(method, path, query, body string, headers map[string][]string) (bool, string, string) {
-	// 检测URL路径
-	if detected, pattern := d.Detect(path); detected {
-		return true, pattern, "path"
+func (d *CommandInjectionDetector) DetectRequest(method, path, query, body string, headers map[string][]string) (bool, string, string, int, string) {
+	if detected, pattern, ruleID, desc := d.Detect(path); detected {
+		return true, pattern, "path", ruleID, desc
 	}
-
-	// 检测查询参数
-	if detected, pattern := d.Detect(query); detected {
-		return true, pattern, "query"
+	if detected, pattern, ruleID, desc := d.Detect(query); detected {
+		return true, pattern, "query", ruleID, desc
 	}
-
-	// 检测请求体
 	if method == "POST" || method == "PUT" || method == "PATCH" {
-		if detected, pattern := d.Detect(body); detected {
-			return true, pattern, "body"
+		if detected, pattern, ruleID, desc := d.Detect(body); detected {
+			return true, pattern, "body", ruleID, desc
 		}
 	}
-
-	return false, "", ""
+	return false, "", "", 0, ""
 }
 
 // GetPatternCount 获取规则数量

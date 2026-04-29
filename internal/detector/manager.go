@@ -12,6 +12,8 @@ type DetectionResult struct {
 	Pattern    string
 	Location   string
 	Input      string
+	RuleID     int
+	RuleDesc   string
 }
 
 type Manager struct {
@@ -83,7 +85,7 @@ func (m *Manager) detectWithDetectors(method, path, query, body string, headers 
 		decodedQuery = sb.String()
 	}
 
-	type detectorFunc func(string, string, string, string, map[string][]string) (bool, string, string)
+	type detectorFunc func(string, string, string, string, map[string][]string) (bool, string, string, int, string)
 	type detectorInfo struct {
 		name       string
 		fn         detectorFunc
@@ -94,13 +96,13 @@ func (m *Manager) detectWithDetectors(method, path, query, body string, headers 
 		{"sql_injection", m.sqlDetector.DetectRequest, quickRejectSQL},
 		{"xss", m.xssDetector.DetectRequest, quickRejectXSS},
 		{"command_injection", m.cmdDetector.DetectRequest, quickRejectCMD},
-		{"path_traversal", func(method, path, query, body string, h map[string][]string) (bool, string, string) {
+		{"path_traversal", func(method, path, query, body string, h map[string][]string) (bool, string, string, int, string) {
 			return m.pathDetector.DetectRequest(method, path, query, body, http.Header(h))
 		}, quickRejectPath},
-		{"header_injection", func(method, path, query, body string, h map[string][]string) (bool, string, string) {
+		{"header_injection", func(method, path, query, body string, h map[string][]string) (bool, string, string, int, string) {
 			return m.headerDetector.DetectRequest(method, path, query, body, http.Header(h))
 		}, quickRejectHeader},
-		{"sensitive_data", func(method, path, query, body string, h map[string][]string) (bool, string, string) {
+		{"sensitive_data", func(method, path, query, body string, h map[string][]string) (bool, string, string, int, string) {
 			return m.sensitiveDetector.DetectRequest(method, path, query, body, http.Header(h))
 		}, false},
 	}
@@ -113,22 +115,26 @@ func (m *Manager) detectWithDetectors(method, path, query, body string, headers 
 		if det.quickSkip {
 			continue
 		}
-		if detected, pattern, location := det.fn(method, path, query, body, hdrMap); detected {
+		if detected, pattern, location, ruleID, ruleDesc := det.fn(method, path, query, body, hdrMap); detected {
 			results = append(results, DetectionResult{
 				Detected:   true,
 				AttackType: det.name,
 				Pattern:    pattern,
 				Location:   location,
+				RuleID:     ruleID,
+				RuleDesc:   ruleDesc,
 			})
 			return results
 		}
 		if decodedQuery != "" {
-			if detected, pattern, location := det.fn(method, path, decodedQuery, body, hdrMap); detected {
+			if detected, pattern, location, ruleID, ruleDesc := det.fn(method, path, decodedQuery, body, hdrMap); detected {
 				results = append(results, DetectionResult{
 					Detected:   true,
 					AttackType: det.name,
 					Pattern:    pattern,
 					Location:   location + "_decoded",
+					RuleID:     ruleID,
+					RuleDesc:   ruleDesc,
 				})
 				return results
 			}
@@ -153,7 +159,7 @@ func (m *Manager) DetectRequestWithBody(r *http.Request, body string) []Detectio
 func (m *Manager) DetectString(input string) []DetectionResult {
 	results := make([]DetectionResult, 0)
 
-	type strDetectorFunc func(string) (bool, string)
+	type strDetectorFunc func(string) (bool, string, int, string)
 	type strDetectorInfo struct {
 		name string
 		fn   strDetectorFunc
@@ -165,19 +171,20 @@ func (m *Manager) DetectString(input string) []DetectionResult {
 		{"command_injection", m.cmdDetector.Detect},
 		{"path_traversal", m.pathDetector.Detect},
 		{"header_injection", m.headerDetector.Detect},
-		{"sensitive_data", m.sensitiveDetector.Detect},
 	}
 
 	for _, det := range detectors {
 		if !m.IsDetectorEnabled(det.name) {
 			continue
 		}
-		if detected, pattern := det.fn(input); detected {
+		if detected, pattern, ruleID, ruleDesc := det.fn(input); detected {
 			results = append(results, DetectionResult{
 				Detected:   true,
 				AttackType: det.name,
 				Pattern:    pattern,
 				Location:   "input",
+				RuleID:     ruleID,
+				RuleDesc:   ruleDesc,
 			})
 		}
 	}

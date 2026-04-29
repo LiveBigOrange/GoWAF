@@ -38,6 +38,7 @@ type AccessLog struct {
 
 	// ===== 地理位置信息 =====
 	GeoCountry string `json:"geo_country,omitempty"` // 国家/地区名称
+	GeoCity    string `json:"geo_city,omitempty"`    // 城市名称
 	GeoFlag    string `json:"geo_flag,omitempty"`    // 国旗emoji
 
 	// ===== 拦截详情（仅拦截日志使用）=====
@@ -208,6 +209,36 @@ func (l *AccessLog) SetProtocol(protocol string) *AccessLog {
 // SetScheme 设置请求协议
 func (l *AccessLog) SetScheme(scheme string) *AccessLog {
 	l.Scheme = scheme
+	return l
+}
+
+// SetMatchDetail 设置匹配模式详情（拦截日志专用）
+func (l *AccessLog) SetMatchDetail(detail string) *AccessLog {
+	l.MatchDetail = detail
+	return l
+}
+
+// SetMatchLocation 设置检测位置（拦截日志专用）
+func (l *AccessLog) SetMatchLocation(location string) *AccessLog {
+	l.MatchLocation = location
+	return l
+}
+
+// SetGeoCountry 设置地理位置国家
+func (l *AccessLog) SetGeoCountry(country string) *AccessLog {
+	l.GeoCountry = country
+	return l
+}
+
+// SetGeoCity 设置城市名称
+func (l *AccessLog) SetGeoCity(city string) *AccessLog {
+	l.GeoCity = city
+	return l
+}
+
+// SetGeoFlag 设置国旗emoji
+func (l *AccessLog) SetGeoFlag(flag string) *AccessLog {
+	l.GeoFlag = flag
 	return l
 }
 

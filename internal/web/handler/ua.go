@@ -16,7 +16,7 @@ func UAPage(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(`{"success": false, "error": "Failed to parse form data"}`))
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Failed to parse form data"})
 			return
 		}
 		
@@ -30,14 +30,14 @@ func UAPage(w http.ResponseWriter, r *http.Request) {
 			if pattern == "" {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(`{"success": false, "error": "Pattern is required"}`))
+				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Pattern is required"})
 				return
 			}
 			
 			if RuleEngine == nil {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(`{"success": false, "error": "RuleEngine not initialized"}`))
+				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "RuleEngine not initialized"})
 				return
 			}
 			
@@ -45,13 +45,13 @@ func UAPage(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(`{"success": false, "error": "` + err.Error() + `"}`))
+				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
 				return
 			}
 			
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"success": true}`))
+			json.NewEncoder(w).Encode(map[string]bool{"success": true})
 			return
 		}
 		
@@ -65,7 +65,7 @@ func UAPage(w http.ResponseWriter, r *http.Request) {
 			if RuleEngine == nil {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(`{"success": false, "error": "RuleEngine not initialized"}`))
+				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "RuleEngine not initialized"})
 				return
 			}
 			
@@ -73,7 +73,7 @@ func UAPage(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(`{"success": false, "error": "` + err.Error() + `"}`))
+				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
 				return
 			}
 		}
@@ -81,16 +81,7 @@ func UAPage(w http.ResponseWriter, r *http.Request) {
 		// 返回JSON成功响应
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"success": true}`))
-		return
-	}
-
-	// 处理删除请求（兼容旧的 GET 方式）
-	if r.Method == "GET" && r.URL.Query().Get("action") == "delete" {
-		ruleType := r.URL.Query().Get("type")
-		pattern := r.URL.Query().Get("pattern")
-		RuleEngine.RemoveUARule(ruleType, pattern)
-		http.Redirect(w, r, "/ua", http.StatusFound)
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
 		return
 	}
 

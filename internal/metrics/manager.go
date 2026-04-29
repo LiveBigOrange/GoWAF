@@ -48,6 +48,7 @@ type InterceptEvent struct {
 	RequestID     string    `json:"request_id"`
 	LatencyMs     float64   `json:"latency_ms,omitempty"`
 	GeoCountry    string    `json:"geo_country,omitempty"`
+	GeoCity       string    `json:"geo_city,omitempty"`
 	GeoFlag       string    `json:"geo_flag,omitempty"`
 	MatchDetail   string    `json:"match_detail,omitempty"`
 	MatchLocation string    `json:"match_location,omitempty"`
@@ -96,6 +97,7 @@ type TopStatItem struct {
 	RiskLevel     string            `json:"risk_level,omitempty"`
 	RuleType      string            `json:"rule_type,omitempty"`
 	GeoCountry    string            `json:"geo_country,omitempty"`
+	GeoCity       string            `json:"geo_city,omitempty"`
 	GeoFlag       string            `json:"geo_flag,omitempty"`
 }
 
@@ -633,6 +635,12 @@ func (m *Manager) createTables() error {
 		log.Printf("添加 geo_country 列失败: %v", err)
 	}
 
+	// 添加 geo_city 列
+	_, err = m.db.Exec(`ALTER TABLE intercept_events ADD COLUMN geo_city TEXT`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		log.Printf("添加 geo_city 列失败: %v", err)
+	}
+
 	// 添加 geo_flag 列
 	_, err = m.db.Exec(`ALTER TABLE intercept_events ADD COLUMN geo_flag TEXT`)
 	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
@@ -765,6 +773,9 @@ func (m *Manager) createTables() error {
 		m.db.Exec(`ALTER TABLE intercept_events ADD COLUMN upstream_latency_ms REAL`)
 		m.db.Exec(`ALTER TABLE intercept_events ADD COLUMN request_size INTEGER`)
 		m.db.Exec(`ALTER TABLE intercept_events ADD COLUMN error_message TEXT`)
+		m.db.Exec(`ALTER TABLE intercept_events ADD COLUMN geo_country TEXT`)
+		m.db.Exec(`ALTER TABLE intercept_events ADD COLUMN geo_city TEXT`)
+		m.db.Exec(`ALTER TABLE intercept_events ADD COLUMN geo_flag TEXT`)
 
 		log.Println("表结构迁移完成")
 	}
@@ -840,12 +851,19 @@ func (m *Manager) createTables() error {
 }
 
 // SaveEvent 保存拦截事件（增强版）
-func (m *Manager) SaveEvent(clientIP, host, path, query, method, userAgent, referer, contentType, rule string, status int, requestID string, latencyMs float64, geoCountry, geoFlag, matchDetail, matchLocation, action, upstreamAddr, protocol, scheme string, requestSize int64) error {
+func (m *Manager) SaveEvent(clientIP, host, path, query, method, userAgent, referer, contentType, rule string, status int, requestID string, latencyMs float64, geoCountry, geoCity, geoFlag, matchDetail, matchLocation, action, upstreamAddr, protocol, scheme string, requestSize int64) error {
 	now := time.Now().UTC().Format("2006-01-02 15:04:05.999999")
-	_, err := m.db.Exec(`
-		INSERT INTO intercept_events (time, client_ip, host, path, query, method, user_agent, referer, content_type, rule, status, request_id, latency_ms, geo_country, geo_flag, match_detail, match_location, action, upstream_addr, protocol, scheme, request_size)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, now, clientIP, host, path, query, method, userAgent, referer, contentType, rule, status, requestID, latencyMs, geoCountry, geoFlag, matchDetail, matchLocation, action, upstreamAddr, protocol, scheme, requestSize)
+	result, err := m.db.Exec(`
+		INSERT INTO intercept_events (time, client_ip, host, path, query, method, user_agent, referer, content_type, rule, status, request_id, latency_ms, geo_country, geo_city, geo_flag, match_detail, match_location, action, upstream_addr, protocol, scheme, request_size)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, now, clientIP, host, path, query, method, userAgent, referer, contentType, rule, status, requestID, latencyMs, geoCountry, geoCity, geoFlag, matchDetail, matchLocation, action, upstreamAddr, protocol, scheme, requestSize)
+	if err != nil {
+		log.Printf("SaveEvent写入失败: %v, data: ip=%s path=%s rule=%s", err, clientIP, path, rule)
+	} else {
+		if rows, _ := result.RowsAffected(); rows > 0 {
+			log.Printf("SaveEvent成功: id affected, ip=%s path=%s rule=%s", clientIP, path, rule)
+		}
+	}
 	return err
 }
 
@@ -853,7 +871,7 @@ func (m *Manager) SaveEvent(clientIP, host, path, query, method, userAgent, refe
 func (m *Manager) GetEvents(startTime, endTime time.Time, offset, limit int) ([]InterceptEvent, error) {
 	// 由于数据库中存储的时间格式不一致，直接按ID倒序获取最近的记录
 	rows, err := m.db.Query(`
-		SELECT id, time, client_ip, host, path, query, method, user_agent, referer, content_type, rule, status, request_id, latency_ms, geo_country, geo_flag, match_detail, match_location, action, upstream_addr, protocol, scheme, upstream_latency_ms, request_size, error_message
+		SELECT id, time, client_ip, host, path, query, method, user_agent, referer, content_type, rule, status, request_id, latency_ms, geo_country, geo_city, geo_flag, match_detail, match_location, action, upstream_addr, protocol, scheme, upstream_latency_ms, request_size, error_message
 		FROM intercept_events
 		ORDER BY id DESC
 		LIMIT ? OFFSET ?
@@ -870,9 +888,9 @@ func (m *Manager) GetEvents(startTime, endTime time.Time, offset, limit int) ([]
 		var timeStr string
 		var latencyMs, upstreamLatencyMs sql.NullFloat64
 		var requestSize sql.NullInt64
-		var host, query, userAgent, referer, contentType, geoCountry, geoFlag, matchDetail, matchLocation, action, upstreamAddr, protocol, scheme, errorMessage sql.NullString
+		var host, query, userAgent, referer, contentType, geoCountry, geoCity, geoFlag, matchDetail, matchLocation, action, upstreamAddr, protocol, scheme, errorMessage sql.NullString
 		if err := rows.Scan(&e.ID, &timeStr, &e.ClientIP, &host, &e.Path, &query, &e.Method,
-			&userAgent, &referer, &contentType, &e.Rule, &e.Status, &e.RequestID, &latencyMs, &geoCountry, &geoFlag, &matchDetail, &matchLocation, &action, &upstreamAddr, &protocol, &scheme, &upstreamLatencyMs, &requestSize, &errorMessage); err == nil {
+			&userAgent, &referer, &contentType, &e.Rule, &e.Status, &e.RequestID, &latencyMs, &geoCountry, &geoCity, &geoFlag, &matchDetail, &matchLocation, &action, &upstreamAddr, &protocol, &scheme, &upstreamLatencyMs, &requestSize, &errorMessage); err == nil {
 			pt, _ := timeutil.ParseTime(timeStr)
 			e.Time = timeutil.FromTime(pt)
 			if host.Valid { e.Host = host.String }
@@ -882,6 +900,7 @@ func (m *Manager) GetEvents(startTime, endTime time.Time, offset, limit int) ([]
 			if contentType.Valid { e.ContentType = contentType.String }
 			if latencyMs.Valid { e.LatencyMs = latencyMs.Float64 }
 			if geoCountry.Valid { e.GeoCountry = geoCountry.String }
+			if geoCity.Valid { e.GeoCity = geoCity.String }
 			if geoFlag.Valid { e.GeoFlag = geoFlag.String }
 			if matchDetail.Valid { e.MatchDetail = matchDetail.String }
 			if matchLocation.Valid { e.MatchLocation = matchLocation.String }
@@ -892,9 +911,12 @@ func (m *Manager) GetEvents(startTime, endTime time.Time, offset, limit int) ([]
 			if upstreamLatencyMs.Valid { e.UpstreamLatencyMs = upstreamLatencyMs.Float64 }
 			if requestSize.Valid { e.RequestSize = requestSize.Int64 }
 			if errorMessage.Valid { e.ErrorMessage = errorMessage.String }
-			geo := m.getGeoLocation(e.ClientIP)
-			e.GeoCountry = geo.Country
-			e.GeoFlag = geo.Flag
+			if e.GeoCountry == "" {
+				geo := m.getGeoLocation(e.ClientIP)
+				e.GeoCountry = geo.Country
+				e.GeoCity = geo.City
+				e.GeoFlag = geo.Flag
+			}
 			events = append(events, e)
 		} else {
 			log.Printf("GetEvents Scan行失败: %v", err)

@@ -46,6 +46,11 @@ func (c *QueryCache) Get(key string) (interface{}, bool) {
 
 	// 检查是否过期
 	if time.Since(entry.createdAt) > c.ttl {
+		c.mu.RUnlock()
+		c.mu.Lock()
+		delete(c.entries, key)
+		c.mu.Unlock()
+		c.mu.RLock()
 		return nil, false
 	}
 

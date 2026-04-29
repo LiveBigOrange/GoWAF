@@ -100,9 +100,21 @@ func checkAPIRateLimit(ip string) bool {
 	apiRequests[ip] = validRequests
 
 	if len(apiRequests) > 10000 {
+		cutoff := now.Add(-24 * time.Hour)
 		for k, v := range apiRequests {
 			if len(v) == 0 {
 				delete(apiRequests, k)
+			} else {
+				allExpired := true
+				for _, t := range v {
+					if t.After(cutoff) {
+						allExpired = false
+						break
+					}
+				}
+				if allExpired {
+					delete(apiRequests, k)
+				}
 			}
 		}
 	}

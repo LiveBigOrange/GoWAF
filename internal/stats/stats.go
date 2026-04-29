@@ -26,14 +26,55 @@ var (
 
 // TOP 统计相关
 var (
-	topMutex         sync.RWMutex
-	blockedIPs       = make(map[string]int)
-	blockedPaths     = make(map[string]int)
-	ruleHits         = make(map[string]int)
-	blockedIPsTime   = make(map[string]time.Time)   // IP最后拦截时间
-	blockedPathsTime = make(map[string]time.Time)   // 路径最后攻击时间
-	ruleHitsTime     = make(map[string]time.Time)   // 规则最后命中时间
+	topMutex          sync.RWMutex
+	blockedIPs        = make(map[string]int)
+	blockedPaths      = make(map[string]int)
+	ruleHits          = make(map[string]int)
+	blockedIPsTime    = make(map[string]time.Time)
+	blockedPathsTime  = make(map[string]time.Time)
+	ruleHitsTime      = make(map[string]time.Time)
+	blockedIPsRules   = make(map[string]map[string]int)
+	blockedPathsMethods = make(map[string]map[string]int)
+	blockedPathsIPs    = make(map[string]map[string]int)
 )
+
+const maxTopEntries = 10000
+
+// CleanupTopStats 清理 TOP 统计 map 中过旧的条目，防止内存无限增长
+func CleanupTopStats() {
+	topMutex.Lock()
+	defer topMutex.Unlock()
+
+	cleanupMap := func(m map[string]int, timeMap map[string]time.Time, extraMaps ...map[string]map[string]int) {
+		if len(m) <= maxTopEntries {
+			return
+		}
+		type kv struct {
+			key string
+			t   time.Time
+		}
+		entries := make([]kv, 0, len(m))
+		for k := range m {
+			entries = append(entries, kv{k, timeMap[k]})
+		}
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].t.After(entries[j].t)
+		})
+		keep := maxTopEntries / 2
+		for i := keep; i < len(entries); i++ {
+			key := entries[i].key
+			delete(m, key)
+			delete(timeMap, key)
+			for _, em := range extraMaps {
+				delete(em, key)
+			}
+		}
+	}
+
+	cleanupMap(blockedIPs, blockedIPsTime, blockedIPsRules)
+	cleanupMap(blockedPaths, blockedPathsTime, blockedPathsMethods, blockedPathsIPs)
+	cleanupMap(ruleHits, ruleHitsTime)
+}
 
 func IncTotal() {
 	atomic.AddUint64(&totalRequests, 1)
@@ -51,18 +92,36 @@ func IncBlocked() {
 }
 
 // IncBlockedIP 增加被拦截 IP 的计数
-func IncBlockedIP(ip string) {
+func IncBlockedIP(ip string, rule string) {
 	topMutex.Lock()
 	blockedIPs[ip]++
 	blockedIPsTime[ip] = time.Now().UTC()
+	if rule != "" {
+		if blockedIPsRules[ip] == nil {
+			blockedIPsRules[ip] = make(map[string]int)
+		}
+		blockedIPsRules[ip][rule]++
+	}
 	topMutex.Unlock()
 }
 
 // IncBlockedPath 增加被攻击路径的计数
-func IncBlockedPath(path string) {
+func IncBlockedPath(path string, method string, clientIP string) {
 	topMutex.Lock()
 	blockedPaths[path]++
 	blockedPathsTime[path] = time.Now().UTC()
+	if method != "" {
+		if blockedPathsMethods[path] == nil {
+			blockedPathsMethods[path] = make(map[string]int)
+		}
+		blockedPathsMethods[path][method]++
+	}
+	if clientIP != "" {
+		if blockedPathsIPs[path] == nil {
+			blockedPathsIPs[path] = make(map[string]int)
+		}
+		blockedPathsIPs[path][clientIP]++
+	}
 	topMutex.Unlock()
 }
 
@@ -203,11 +262,23 @@ func GetTopBlockedIPs(n int) []TopItem {
 
 	items := make([]TopItem, 0, len(blockedIPs))
 	for ip, count := range blockedIPs {
-		items = append(items, TopItem{
-			Name:     ip,
-			Count:    count,
-			LastSeen: timeutil.FromTime(blockedIPsTime[ip]),
-		})
+		item := TopItem{
+			Name:      ip,
+			Count:     count,
+			LastSeen:  timeutil.FromTime(blockedIPsTime[ip]),
+			RuleTypes: blockedIPsRules[ip],
+		}
+		if len(item.RuleTypes) > 0 {
+			maxRule, maxCnt := "", 0
+			for r, c := range item.RuleTypes {
+				if c > maxCnt {
+					maxRule = r
+					maxCnt = c
+				}
+			}
+			item.RuleType = maxRule
+		}
+		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].Count > items[j].Count
@@ -225,11 +296,14 @@ func GetTopBlockedPaths(n int) []TopItem {
 
 	items := make([]TopItem, 0, len(blockedPaths))
 	for path, count := range blockedPaths {
-		items = append(items, TopItem{
-			Name:     path,
-			Count:    count,
-			LastSeen: timeutil.FromTime(blockedPathsTime[path]),
-		})
+		item := TopItem{
+			Name:          path,
+			Count:         count,
+			LastSeen:      timeutil.FromTime(blockedPathsTime[path]),
+			Methods:       blockedPathsMethods[path],
+			SourceIPCount: len(blockedPathsIPs[path]),
+		}
+		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].Count > items[j].Count

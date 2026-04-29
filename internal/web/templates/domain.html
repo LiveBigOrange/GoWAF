@@ -46,6 +46,7 @@
                     <li>如果没有"default"配置，IP访问将使用后端服务列表中的第一个可用后端</li>
                 </ul>
             </div>
+            <div class="list-container">
             <table>
                 <thead><tr><th>域名</th><th>代理端口</th><th>后端服务</th><th>证书</th><th>强制HTTPS</th><th>状态</th><th>操作</th></tr></thead>
                 <tbody id="domainList"></tbody>
@@ -64,6 +65,7 @@
                     <button class="pagination-btn" id="prevBtn" onclick="prevPage()">上一页</button>
                     <button class="pagination-btn" id="nextBtn" onclick="nextPage()">下一页</button>
                 </div>
+            </div>
             </div>
         </div>
     </div>
@@ -263,10 +265,6 @@
                 
                 tbody.innerHTML = '';
                 pageData.forEach(item => {
-                    // 调试信息
-                    console.log('Domain item:', item.domain, 'proxy_ids:', item.proxy_ids);
-                    console.log('Available proxies:', proxies);
-                    
                     var proxyNames = '-';
                     if (item.proxy_ids && item.proxy_ids.length > 0) {
                         var names = [];
@@ -281,8 +279,6 @@
                             }
                             if (p) {
                                 names.push(p.listen_addr + '(' + p.protocol.toUpperCase() + ')');
-                            } else {
-                                console.log('Proxy not found for id:', id);
                             }
                         }
                         if (names.length > 0) {

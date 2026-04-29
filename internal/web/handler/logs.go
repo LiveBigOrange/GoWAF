@@ -871,7 +871,7 @@ func exportLogsCSV(w http.ResponseWriter, entries []LogEntry) {
 	writer := csv.NewWriter(w)
 	defer writer.Flush()
 
-	header := []string{"Timestamp", "Client IP", "Host", "Method", "Path", "Query", "Status", "Action", "Rule ID", "Latency(ms)", "Request ID"}
+	header := []string{"Timestamp", "Client IP", "Host", "Method", "Path", "Query", "Status", "Action", "Rule ID", "Match Detail", "Match Location", "Latency(ms)", "Request ID"}
 	writer.Write(header)
 
 	for _, entry := range entries {
@@ -885,6 +885,8 @@ func exportLogsCSV(w http.ResponseWriter, entries []LogEntry) {
 			strconv.Itoa(entry.Status),
 			entry.Action,
 			entry.RuleID,
+			entry.MatchDetail,
+			entry.MatchLocation,
 			fmt.Sprintf("%.2f", entry.LatencyMs),
 			entry.RequestID,
 		}

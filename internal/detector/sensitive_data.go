@@ -32,30 +32,30 @@ func NewSensitiveDataDetector() *SensitiveDataDetector {
 	return d
 }
 
-func (d *SensitiveDataDetector) Detect(body string) (bool, string) {
+func (d *SensitiveDataDetector) Detect(body string) (bool, string, int, string) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	for _, p := range d.patterns {
+	for i, p := range d.patterns {
 		if !p.enabled {
 			continue
 		}
 		if p.regex.MatchString(body) {
-			return true, p.name
+			return true, p.name, i + 1, "敏感数据检测:" + p.name
 		}
 	}
-	return false, ""
+	return false, "", 0, ""
 }
 
-func (d *SensitiveDataDetector) DetectRequest(method, path, query, body string, headers http.Header) (bool, string, string) {
-	detected, name := d.Detect(body)
+func (d *SensitiveDataDetector) DetectRequest(method, path, query, body string, headers http.Header) (bool, string, string, int, string) {
+	detected, name, ruleID, desc := d.Detect(body)
 	if detected {
-		return true, name, "body"
+		return true, name, "body", ruleID, desc
 	}
-	detected, name = d.Detect(query)
+	detected, name, ruleID, desc = d.Detect(query)
 	if detected {
-		return true, name, "query"
+		return true, name, "query", ruleID, desc
 	}
-	return false, "", ""
+	return false, "", "", 0, ""
 }
 
 func (d *SensitiveDataDetector) GetPatternCount() int {

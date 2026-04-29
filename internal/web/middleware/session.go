@@ -75,7 +75,7 @@ func loadSessionsFromDB() error {
 func GenerateSessionToken() string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		return hex.EncodeToString(b)
+		panic("failed to generate random session token: " + err.Error())
 	}
 	return hex.EncodeToString(b)
 }

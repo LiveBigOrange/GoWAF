@@ -185,10 +185,45 @@ body {
 /* 主内容区 */
 .main {
     flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     padding: 30px 40px;
     min-width: 0;
+    min-height: 0;
+}
+/* 非list-container的直接子元素不压缩，确保内容可见 */
+.main > *:not(.list-container) {
+    flex-shrink: 0;
+}
+/* 需要整页滚动的页面（仪表盘等非列表页面），.main自身滚动 */
+.main.scroll-page {
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+/* 列表页面内容容器：表格区域自适应填充，分页固定底部 */
+.list-container {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+    padding: 0;
+}
+.list-container .log-table,
+.list-container .group-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+/* 固定表头：thead置顶 */
+.list-container .log-table thead,
+.list-container .group-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: #f8f9fa;
 }
 
 .page-title {
@@ -338,16 +373,20 @@ tbody tr:hover {
 
 .btn-save:hover { background: #66b1ff; }
 
-/* 分页样式 */
+/* 分页样式 - 固定在列表底部 */
 .pagination {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-top: 20px;
-    padding-top: 16px;
-    border-top: 1px solid #eee;
+    margin-top: 8px;
+    padding: 10px 16px;
+    border-top: none;
     flex-wrap: wrap;
     gap: 8px;
+    flex-shrink: 0;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.04);
 }
 
 .pagination-info {
@@ -824,7 +863,6 @@ tbody tr:hover {
     
     .main {
         padding: 15px 20px;
-        overflow-y: auto;
     }
     
     .page-title {

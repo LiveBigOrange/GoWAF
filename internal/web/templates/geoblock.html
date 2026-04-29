@@ -8,7 +8,7 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/common.css">
     <style>
-        .filter-bar { display: flex; gap: 15px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
+        .filter-bar { display: flex; gap: 15px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; flex-shrink: 0; }
         .modal.show { display: flex; }
         .info-box { background: #f8f9fa; border-left: 4px solid #409eff; padding: 15px; margin-bottom: 20px; border-radius: 4px; font-size: 13px; color: #596275; line-height: 1.8; }
         .info-box strong { color: #2c3e50; }
@@ -16,7 +16,7 @@
 </head>
 <body>
     {{template "sidebar" .}}
-    <div class="main">
+    <div class="main scroll-page">
         <div class="card">
             <div class="info-box">
                 <strong>说明：</strong>ISO 3166-1 地区代码中，<strong>CN</strong> 仅代表中国大陆，不包含台湾（<strong>TW</strong>）、香港（<strong>HK</strong>）和澳门（<strong>MO</strong>）。如需覆盖完整的中国地区范围，请同时添加 CN、TW、HK、MO 四个地区代码。
@@ -74,7 +74,7 @@
             if(filter) rules=rules.filter(r=>r.mode===filter);
             var tbody=document.getElementById('ruleList');
             if(!rules.length){tbody.innerHTML='<tr><td colspan="4" style="text-align:center;color:#95a5a6;">暂无规则</td></tr>';return;}
-            tbody.innerHTML=rules.map(r=>'<tr><td><span class="badge '+(r.mode==='blacklist'?'blacklist':'whitelist')+'">'+(r.mode==='blacklist'?'黑名单':'白名单')+'</span></td><td><b>'+escapeHtml(r.country_code)+'</b></td><td>'+(r.enabled?'<span style="color:#27ae60">启用</span>':'<span style="color:#95a5a6">禁用</span>')+'</td><td><button class="delete-btn" onclick="delRule('+r.id+')">删除</button></td></tr>').join('');
+            tbody.innerHTML=rules.map(r=>'<tr><td><span class="badge '+(r.mode==='blacklist'?'blacklist':'whitelist')+'">'+(r.mode==='blacklist'?'黑名单':'白名单')+'</span></td><td><b>'+escapeHtml(r.country_code)+'</b></td><td>'+(r.enabled?'<span style="color:#27ae60">启用</span>':'<span style="color:#95a5a6">禁用</span>')+'</td><td><button class="delete-btn" data-id="'+r.id+'">删除</button></td></tr>').join('');
         }).catch(e=>showToast('error','加载规则失败'));
     }
     function openModal(){document.getElementById('addModal').classList.add('show');}
@@ -94,6 +94,10 @@
             if(d.success){showToast('success','删除成功');loadRules();}else showToast('error',d.message||'删除失败');
         }).catch(e=>showToast('error','删除失败: '+e.message));
     }
+    document.querySelector('table tbody').addEventListener('click', function(e) {
+        var btn = e.target.closest('.delete-btn');
+        if (btn) delRule(parseInt(btn.dataset.id));
+    });
     loadRules();
     </script>
 </body>

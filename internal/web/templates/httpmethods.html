@@ -8,7 +8,7 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/common.css">
     <style>
-        .filter-bar { display: flex; gap: 15px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
+        .filter-bar { display: flex; gap: 15px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; flex-shrink: 0; }
         .method-tag { display: inline-block; padding: 4px 12px; border-radius: 4px; font-weight: 600; font-size: 13px; background: #ecf0f1; color: #2c3e50; }
         .info-box { background: #f8f9fa; border-left: 4px solid #409eff; padding: 15px; margin-bottom: 20px; border-radius: 4px; font-size: 13px; color: #596275; }
         .modal.show { display: flex; }
@@ -16,7 +16,7 @@
 </head>
 <body>
     {{template "sidebar" .}}
-    <div class="main">
+    <div class="main scroll-page">
         <div class="card">
             <div class="info-box">仅允许列出的HTTP方法访问，未列出的方法将被拒绝（405）。留空则允许所有方法。</div>
             <div class="filter-bar">

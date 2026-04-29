@@ -19,22 +19,28 @@ type LogDB struct {
 
 // AccessLogRecord 访问日志记录
 type AccessLogRecord struct {
-	ID          int64
-	Timestamp   string
-	ClientIP    string
-	Method      string
-	Host        string
-	Path        string
-	Query       string
-	Status      int
-	Action      string
-	RequestID   string
-	UserAgent   string
-	Referer     string
-	ContentType string
-	BodySize    int64
-	LatencyMs   float64
-	UpstreamAddr string
+	ID            int64
+	Timestamp     string
+	ClientIP      string
+	Method        string
+	Host          string
+	Path          string
+	Query         string
+	Status        int
+	Action        string
+	RequestID     string
+	UserAgent     string
+	Referer       string
+	ContentType   string
+	BodySize      int64
+	LatencyMs     float64
+	UpstreamAddr  string
+	RuleID        string
+	MatchDetail   string
+	MatchLocation string
+	GeoCountry    string
+	GeoCity       string
+	GeoFlag       string
 }
 
 // NewLogDB 创建日志数据库管理器
@@ -108,11 +114,29 @@ func (l *LogDB) initTables() error {
 		body_size INTEGER,
 		latency_ms REAL,
 		upstream_addr TEXT,
+		rule_id TEXT DEFAULT '',
+		match_detail TEXT DEFAULT '',
+		match_location TEXT DEFAULT '',
+		geo_country TEXT DEFAULT '',
+		geo_city TEXT DEFAULT '',
+		geo_flag TEXT DEFAULT '',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);`
 
 	if _, err := l.db.Exec(createTableSQL); err != nil {
 		return err
+	}
+
+	migrations := []string{
+		"ALTER TABLE access_logs ADD COLUMN rule_id TEXT DEFAULT ''",
+		"ALTER TABLE access_logs ADD COLUMN match_detail TEXT DEFAULT ''",
+		"ALTER TABLE access_logs ADD COLUMN match_location TEXT DEFAULT ''",
+		"ALTER TABLE access_logs ADD COLUMN geo_country TEXT DEFAULT ''",
+		"ALTER TABLE access_logs ADD COLUMN geo_city TEXT DEFAULT ''",
+		"ALTER TABLE access_logs ADD COLUMN geo_flag TEXT DEFAULT ''",
+	}
+	for _, m := range migrations {
+		l.db.Exec(m)
 	}
 
 	// 创建索引（提升查询性能）
@@ -145,13 +169,15 @@ func (l *LogDB) InsertLog(log *AccessLogRecord) error {
 	INSERT INTO access_logs (
 		timestamp, client_ip, method, host, path, query, 
 		status, action, request_id, user_agent, referer, 
-		content_type, body_size, latency_ms, upstream_addr
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
+		content_type, body_size, latency_ms, upstream_addr,
+		rule_id, match_detail, match_location, geo_country, geo_city, geo_flag
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
 
 	_, err := l.db.Exec(insertSQL,
 		log.Timestamp, log.ClientIP, log.Method, log.Host, log.Path, log.Query,
 		log.Status, log.Action, log.RequestID, log.UserAgent, log.Referer,
 		log.ContentType, log.BodySize, log.LatencyMs, log.UpstreamAddr,
+		log.RuleID, log.MatchDetail, log.MatchLocation, log.GeoCountry, log.GeoCity, log.GeoFlag,
 	)
 
 	return err
@@ -173,8 +199,9 @@ func (l *LogDB) BatchInsertLogs(logs []*AccessLogRecord) error {
 	INSERT INTO access_logs (
 		timestamp, client_ip, method, host, path, query, 
 		status, action, request_id, user_agent, referer, 
-		content_type, body_size, latency_ms, upstream_addr
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
+		content_type, body_size, latency_ms, upstream_addr,
+		rule_id, match_detail, match_location, geo_country, geo_city, geo_flag
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
 
 	stmt, err := tx.Prepare(insertSQL)
 	if err != nil {
@@ -187,6 +214,7 @@ func (l *LogDB) BatchInsertLogs(logs []*AccessLogRecord) error {
 			log.Timestamp, log.ClientIP, log.Method, log.Host, log.Path, log.Query,
 			log.Status, log.Action, log.RequestID, log.UserAgent, log.Referer,
 			log.ContentType, log.BodySize, log.LatencyMs, log.UpstreamAddr,
+			log.RuleID, log.MatchDetail, log.MatchLocation, log.GeoCountry, log.GeoCity, log.GeoFlag,
 		)
 		if err != nil {
 			return err

@@ -27,47 +27,57 @@ func SetConfigDB(db interface {
 
 // ConfigHandler 配置页面处理器
 func ConfigHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" {
-		templates.ConfigTmpl.ExecuteTemplate(w, "config.html", map[string]interface{}{
-			"Active": "config",
-		})
+	if r.Method != "GET" {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
 	}
+	templates.ConfigTmpl.ExecuteTemplate(w, "config.html", map[string]interface{}{
+		"Active": "config",
+	})
 }
 
 // ConfigSecurityHandler 安全配置页面处理器
 func ConfigSecurityHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" {
-		templates.ConfigSecurityTmpl.ExecuteTemplate(w, "config-security.html", map[string]interface{}{
-			"Active": "config-security",
-		})
+	if r.Method != "GET" {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
 	}
+	templates.ConfigSecurityTmpl.ExecuteTemplate(w, "config-security.html", map[string]interface{}{
+		"Active": "config-security",
+	})
 }
 
 // ConfigPerformanceHandler 性能配置页面处理器
 func ConfigPerformanceHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" {
-		templates.ConfigPerformanceTmpl.ExecuteTemplate(w, "config-performance.html", map[string]interface{}{
-			"Active": "config-performance",
-		})
+	if r.Method != "GET" {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
 	}
+	templates.ConfigPerformanceTmpl.ExecuteTemplate(w, "config-performance.html", map[string]interface{}{
+		"Active": "config-performance",
+	})
 }
 
 // ConfigSchedulerHandler 定时任务配置页面处理器
 func ConfigSchedulerHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" {
-		templates.ConfigSchedulerTmpl.ExecuteTemplate(w, "config-scheduler.html", map[string]interface{}{
-			"Active": "config-scheduler",
-		})
+	if r.Method != "GET" {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
 	}
+	templates.ConfigSchedulerTmpl.ExecuteTemplate(w, "config-scheduler.html", map[string]interface{}{
+		"Active": "config-scheduler",
+	})
 }
 
 // ConfigWebSocketHandler WebSocket配置页面处理器
 func ConfigWebSocketHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" {
-		templates.ConfigWebSocketTmpl.ExecuteTemplate(w, "config-websocket.html", map[string]interface{}{
-			"Active": "config-websocket",
-		})
+	if r.Method != "GET" {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
 	}
+	templates.ConfigWebSocketTmpl.ExecuteTemplate(w, "config-websocket.html", map[string]interface{}{
+		"Active": "config-websocket",
+	})
 }
 
 // GetBasicConfigAPI 获取基础配置API（只读）

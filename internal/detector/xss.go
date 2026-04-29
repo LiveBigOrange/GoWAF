@@ -2,6 +2,7 @@ package detector
 
 import (
 	"html"
+	"log"
 	"regexp"
 	"strings"
 	"sync"
@@ -9,8 +10,9 @@ import (
 
 // XSSDetector XSS攻击检测器
 type XSSDetector struct {
-	patterns []*regexp.Regexp
-	mu       sync.RWMutex
+	patterns     []*regexp.Regexp
+	patternDescs []string
+	mu           sync.RWMutex
 }
 
 // NewXSSDetector 创建XSS检测器
@@ -22,125 +24,113 @@ func NewXSSDetector() *XSSDetector {
 
 // compilePatterns 预编译XSS检测规则
 func (d *XSSDetector) compilePatterns() {
-	patternStrs := []string{
-		// Script标签
-		`(?i)<script[^>]*>.*?</script>`,
-		`(?i)<script[^>]*>`,
-		`(?i)</script>`,
-		
-		// 事件处理器
-		`(?i)\bon\w+\s*=`,
-		`(?i)onclick\s*=`,
-		`(?i)onerror\s*=`,
-		`(?i)onload\s*=`,
-		`(?i)onmouseover\s*=`,
-		`(?i)onfocus\s*=`,
-		`(?i)onblur\s*=`,
-		`(?i)onsubmit\s*=`,
-		`(?i)onkeyup\s*=`,
-		`(?i)onkeydown\s*=`,
-		`(?i)onkeypress\s*=`,
-		
-		// JavaScript协议
-		`(?i)javascript\s*:`,
-		`(?i)vbscript\s*:`,
-		`(?i)data\s*:`,
-		
-		// 表单注入
-		`(?i)<form[^>]*>`,
-		`(?i)<input[^>]*>`,
-		`(?i)<button[^>]*>`,
-		
-		// iframe注入
-		`(?i)<iframe[^>]*>`,
-		`(?i)<frame[^>]*>`,
-		
-		// 对象嵌入
-		`(?i)<object[^>]*>`,
-		`(?i)<embed[^>]*>`,
-		`(?i)<applet[^>]*>`,
-		
-		// SVG XSS
-		`(?i)<svg[^>]*>`,
-		`(?i)<math[^>]*>`,
-		
-		// 样式注入
-		`(?i)<style[^>]*>`,
-		`(?i)expression\s*\(`,
-		`(?i)behavior\s*:`,
-		`(?i)-moz-binding\s*:`,
-		
-		// HTML实体编码绕过
-		`(?i)&#\d+;`,
-		`(?i)&#x[0-9a-f]+;`,
-		
-		// 危险标签属性
-		`(?i)src\s*=\s*["']?javascript:`,
-		`(?i)href\s*=\s*["']?javascript:`,
-		`(?i)action\s*=\s*["']?javascript:`,
-		
-		// DOM操作
-		`(?i)document\s*\.\s*cookie`,
-		`(?i)document\s*\.\s*location`,
-		`(?i)document\s*\.\s*write`,
-		`(?i)window\s*\.\s*location`,
-		`(?i)eval\s*\(`,
-		`(?i)setTimeout\s*\(`,
-		`(?i)setInterval\s*\(`,
-		
-		// 编码绕过
-		`(?i)String\s*\.\s*fromCharCode`,
-		`(?i)atob\s*\(`,
-		`(?i)btoa\s*\(`,
-		`(?i)unescape\s*\(`,
-		`(?i)decodeURI\s*\(`,
-		`(?i)decodeURIComponent\s*\(`,
+	patternEntries := []struct {
+		pattern     string
+		description string
+	}{
+		{`(?i)<script[^>]*>.*?</script>`, "Script标签"},
+		{`(?i)<script[^>]*>`, "Script标签开始"},
+		{`(?i)</script>`, "Script标签结束"},
+		{`(?i)\bon\w+\s*=`, "事件处理器通用"},
+		{`(?i)onclick\s*=`, "事件onclick"},
+		{`(?i)onerror\s*=`, "事件onerror"},
+		{`(?i)onload\s*=`, "事件onload"},
+		{`(?i)onmouseover\s*=`, "事件onmouseover"},
+		{`(?i)onfocus\s*=`, "事件onfocus"},
+		{`(?i)onblur\s*=`, "事件onblur"},
+		{`(?i)onsubmit\s*=`, "事件onsubmit"},
+		{`(?i)onkeyup\s*=`, "事件onkeyup"},
+		{`(?i)onkeydown\s*=`, "事件onkeydown"},
+		{`(?i)onkeypress\s*=`, "事件onkeypress"},
+		{`(?i)javascript\s*:`, "JavaScript协议"},
+		{`(?i)vbscript\s*:`, "VBScript协议"},
+		{`(?i)data\s*:`, "Data协议"},
+		{`(?i)<form[^>]*>`, "Form表单"},
+		{`(?i)<input[^>]*>`, "Input输入框"},
+		{`(?i)<button[^>]*>`, "Button按钮"},
+		{`(?i)<iframe[^>]*>`, "Iframe框架"},
+		{`(?i)<frame[^>]*>`, "Frame框架"},
+		{`(?i)<object[^>]*>`, "Object对象"},
+		{`(?i)<embed[^>]*>`, "Embed嵌入"},
+		{`(?i)<applet[^>]*>`, "Applet小程序"},
+		{`(?i)<svg[^>]*>`, "SVG矢量图"},
+		{`(?i)<math[^>]*>`, "Math数学"},
+		{`(?i)<style[^>]*>`, "Style样式"},
+		{`(?i)expression\s*\(`, "CSS表达式"},
+		{`(?i)behavior\s*:`, "CSS行为"},
+		{`(?i)-moz-binding\s*:`, "Mozilla绑定"},
+		{`(?i)&#\d+;`, "HTML实体数字"},
+		{`(?i)&#x[0-9a-f]+;`, "HTML实体十六进制"},
+		{`(?i)src\s*=\s*["']?javascript:`, "Src JavaScript"},
+		{`(?i)href\s*=\s*["']?javascript:`, "Href JavaScript"},
+		{`(?i)action\s*=\s*["']?javascript:`, "Action JavaScript"},
+		{`(?i)document\s*\.\s*cookie`, "Document Cookie"},
+		{`(?i)document\s*\.\s*location`, "Document Location"},
+		{`(?i)document\s*\.\s*write`, "Document Write"},
+		{`(?i)window\s*\.\s*location`, "Window Location"},
+		{`(?i)eval\s*\(`, "Eval函数"},
+		{`(?i)setTimeout\s*\(`, "SetTimeout"},
+		{`(?i)setInterval\s*\(`, "SetInterval"},
+		{`(?i)String\s*\.\s*fromCharCode`, "FromCharCode"},
+		{`(?i)atob\s*\(`, "Atob解码"},
+		{`(?i)btoa\s*\(`, "Btoa编码"},
+		{`(?i)unescape\s*\(`, "Unescape"},
+		{`(?i)decodeURI\s*\(`, "DecodeURI"},
+		{`(?i)decodeURIComponent\s*\(`, "DecodeURIComponent"},
 	}
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	d.patterns = make([]*regexp.Regexp, 0, len(patternStrs))
-	for _, pattern := range patternStrs {
-		re, err := regexp.Compile(pattern)
+	d.patterns = make([]*regexp.Regexp, 0, len(patternEntries))
+	d.patternDescs = make([]string, 0, len(patternEntries))
+	for _, entry := range patternEntries {
+		re, err := regexp.Compile(entry.pattern)
 		if err == nil {
 			d.patterns = append(d.patterns, re)
+			d.patternDescs = append(d.patternDescs, entry.description)
+		} else {
+			log.Printf("[WARN] XSS: 正则编译失败 %q: %v", entry.pattern, err)
 		}
 	}
 }
 
 // Detect 检测XSS攻击
-func (d *XSSDetector) Detect(input string) (bool, string) {
+func (d *XSSDetector) Detect(input string) (bool, string, int, string) {
 	if input == "" {
-		return false, ""
+		return false, "", 0, ""
 	}
 
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
-	// 解码HTML实体
 	decoded := html.UnescapeString(input)
 
-	// 检测原始输入
-	for _, pattern := range d.patterns {
+	for i, pattern := range d.patterns {
 		if pattern.MatchString(input) {
-			return true, pattern.String()
+			desc := ""
+			if i < len(d.patternDescs) {
+				desc = d.patternDescs[i]
+			}
+			return true, pattern.String(), i + 1, desc
 		}
 	}
 
-	// 检测解码后的输入
-	for _, pattern := range d.patterns {
+	for i, pattern := range d.patterns {
 		if pattern.MatchString(decoded) {
-			return true, pattern.String() + " (decoded)"
+			desc := ""
+			if i < len(d.patternDescs) {
+				desc = d.patternDescs[i]
+			}
+			return true, pattern.String() + " (decoded)", i + 1, desc
 		}
 	}
 
-	// 检测编码绕过尝试
 	if d.encodingBypassCheck(input) {
-		return true, "encoding_bypass"
+		return true, "encoding_bypass", 0, "编码绕过检测"
 	}
 
-	return false, ""
+	return false, "", 0, ""
 }
 
 // encodingBypassCheck 检测编码绕过尝试
@@ -167,34 +157,26 @@ func (d *XSSDetector) encodingBypassCheck(input string) bool {
 }
 
 // DetectRequest 检测HTTP请求中的XSS
-func (d *XSSDetector) DetectRequest(method, path, query, body string, headers map[string][]string) (bool, string, string) {
-	// 检测URL路径
-	if detected, pattern := d.Detect(path); detected {
-		return true, pattern, "path"
+func (d *XSSDetector) DetectRequest(method, path, query, body string, headers map[string][]string) (bool, string, string, int, string) {
+	if detected, pattern, ruleID, desc := d.Detect(path); detected {
+		return true, pattern, "path", ruleID, desc
 	}
-
-	// 检测查询参数
-	if detected, pattern := d.Detect(query); detected {
-		return true, pattern, "query"
+	if detected, pattern, ruleID, desc := d.Detect(query); detected {
+		return true, pattern, "query", ruleID, desc
 	}
-
-	// 检测请求体
 	if method == "POST" || method == "PUT" || method == "PATCH" {
-		if detected, pattern := d.Detect(body); detected {
-			return true, pattern, "body"
+		if detected, pattern, ruleID, desc := d.Detect(body); detected {
+			return true, pattern, "body", ruleID, desc
 		}
 	}
-
-	// 检测Referer头
 	if referer, ok := headers["Referer"]; ok {
 		for _, r := range referer {
-			if detected, pattern := d.Detect(r); detected {
-				return true, pattern, "header:Referer"
+			if detected, pattern, ruleID, desc := d.Detect(r); detected {
+				return true, pattern, "header:Referer", ruleID, desc
 			}
 		}
 	}
-
-	return false, "", ""
+	return false, "", "", 0, ""
 }
 
 // GetPatternCount 获取规则数量

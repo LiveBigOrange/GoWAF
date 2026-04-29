@@ -15,6 +15,7 @@
             margin-bottom: 20px;
             align-items: center;
             flex-wrap: wrap;
+            flex-shrink: 0;
         }
         .filter-bar select {
             padding: 8px 30px 8px 12px;
@@ -125,6 +126,7 @@
             </div>
 
             <!-- 规则列表 -->
+            <div class="list-container">
             <table>
                 <thead>
                     <tr><th>类型</th><th>IP地址</th><th>操作</th></tr>
@@ -146,6 +148,7 @@
                     <button class="pagination-btn" id="prevBtn" onclick="prevPage()">上一页</button>
                     <button class="pagination-btn" id="nextBtn" onclick="nextPage()">下一页</button>
                 </div>
+            </div>
             </div>
         </div>
     </div>

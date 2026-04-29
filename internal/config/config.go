@@ -172,7 +172,9 @@ func Load(path string) (*Config, error) {
 	}
 	
 	// 保存配置文件路径
+	configMu.Lock()
 	configPath = path
+	configMu.Unlock()
 	
 	// 设置默认值
 	if cfg.Log.Format.TimeFormat == "" {

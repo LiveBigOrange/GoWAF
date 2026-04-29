@@ -17,6 +17,14 @@ type ipEntry struct {
 	isCIDR   bool
 }
 
+type RuleMatchResult struct {
+	Matched   bool
+	RuleType  string
+	Pattern   string
+	MatchType string
+	Detail    string
+}
+
 type Engine struct {
 	db *sql.DB
 
@@ -286,25 +294,37 @@ func (e *Engine) loadIPRules() {
 	e.loadIPRulesLocked()
 }
 
-func (e *Engine) IsIPBlocked(ipStr string) bool {
+func (e *Engine) IsIPBlocked(ipStr string) RuleMatchResult {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
-		return false
+		return RuleMatchResult{}
 	}
 	e.ipMu.RLock()
 	defer e.ipMu.RUnlock()
 	for _, entry := range e.blackIPs {
 		if entry.isCIDR {
 			if entry.cidr.Contains(ip) {
-				return true
+				return RuleMatchResult{
+					Matched:   true,
+					RuleType:  "ip_blacklist",
+					Pattern:   entry.original,
+					MatchType: "cidr",
+					Detail:    "IP黑名单匹配: " + entry.original,
+				}
 			}
 		} else {
 			if entry.original == ipStr {
-				return true
+				return RuleMatchResult{
+					Matched:   true,
+					RuleType:  "ip_blacklist",
+					Pattern:   entry.original,
+					MatchType: "exact",
+					Detail:    "IP黑名单匹配: " + entry.original,
+				}
 			}
 		}
 	}
-	return false
+	return RuleMatchResult{}
 }
 
 // IPRuleRow IP规则行
@@ -403,7 +423,7 @@ func (e *Engine) loadUARules() {
 	e.loadUARulesLocked()
 }
 
-func (e *Engine) CheckUA(userAgent string) bool {
+func (e *Engine) CheckUA(userAgent string) RuleMatchResult {
 	e.uaMu.RLock()
 	defer e.uaMu.RUnlock()
 
@@ -423,15 +443,21 @@ func (e *Engine) CheckUA(userAgent string) bool {
 
 	for _, rule := range e.uaWhitelist {
 		if matchRule(rule, userAgent) {
-			return false
+			return RuleMatchResult{}
 		}
 	}
 	for _, rule := range e.uaBlacklist {
 		if matchRule(rule, userAgent) {
-			return true
+			return RuleMatchResult{
+				Matched:   true,
+				RuleType:  "ua_blacklist",
+				Pattern:   rule.Pattern,
+				MatchType: rule.MatchType,
+				Detail:    "UA黑名单匹配[" + rule.MatchType + "]: " + rule.Pattern,
+			}
 		}
 	}
-	return false
+	return RuleMatchResult{}
 }
 
 func (e *Engine) AddUARule(ruleType, matchType, pattern, description string) error {
@@ -526,23 +552,27 @@ func matchPath(path string, rule pathRule) bool {
 	}
 }
 
-func (e *Engine) CheckPath(path string) bool {
+func (e *Engine) CheckPath(path string) RuleMatchResult {
 	e.pathMu.RLock()
 	defer e.pathMu.RUnlock()
 
-	// 先检查白名单
 	for _, rule := range e.pathWhitelist {
 		if matchPath(path, rule) {
-			return false
+			return RuleMatchResult{}
 		}
 	}
-	// 再检查黑名单
 	for _, rule := range e.pathBlacklist {
 		if matchPath(path, rule) {
-			return true
+			return RuleMatchResult{
+				Matched:   true,
+				RuleType:  "path_blacklist",
+				Pattern:   rule.Pattern,
+				MatchType: rule.MatchType,
+				Detail:    "路径黑名单匹配[" + rule.MatchType + "]: " + rule.Pattern,
+			}
 		}
 	}
-	return false
+	return RuleMatchResult{}
 }
 
 func (e *Engine) loadGeoRulesLocked() {
@@ -576,21 +606,39 @@ func (e *Engine) loadGeoRulesLocked() {
 	e.geoMode = mode
 }
 
-func (e *Engine) IsGeoBlocked(countryCode string) bool {
+func (e *Engine) IsGeoBlocked(countryCode string) RuleMatchResult {
 	e.geoMu.RLock()
 	defer e.geoMu.RUnlock()
 
 	if len(e.geoBlockCountries) == 0 {
-		return false
+		return RuleMatchResult{}
 	}
 
 	code := strings.ToUpper(countryCode)
 	if e.geoMode == "whitelist" {
 		_, ok := e.geoBlockCountries[code]
-		return !ok
+		if !ok {
+			return RuleMatchResult{
+				Matched:   true,
+				RuleType:  "geo_whitelist",
+				Pattern:   code,
+				MatchType: "whitelist",
+				Detail:    "GeoIP白名单阻断: " + code,
+			}
+		}
+		return RuleMatchResult{}
 	}
 	_, ok := e.geoBlockCountries[code]
-	return ok
+	if ok {
+		return RuleMatchResult{
+			Matched:   true,
+			RuleType:  "geo_blacklist",
+			Pattern:   code,
+			MatchType: "blacklist",
+			Detail:    "GeoIP黑名单阻断: " + code,
+		}
+	}
+	return RuleMatchResult{}
 }
 
 func (e *Engine) SetAllowedMethods(methods []string) {
@@ -602,13 +650,22 @@ func (e *Engine) SetAllowedMethods(methods []string) {
 	}
 }
 
-func (e *Engine) IsMethodAllowed(method string) bool {
+func (e *Engine) IsMethodAllowed(method string) RuleMatchResult {
 	e.methodMu.RLock()
 	defer e.methodMu.RUnlock()
 	if len(e.allowedMethods) == 0 {
-		return true
+		return RuleMatchResult{Matched: false}
 	}
-	return e.allowedMethods[strings.ToUpper(method)]
+	if e.allowedMethods[strings.ToUpper(method)] {
+		return RuleMatchResult{Matched: false}
+	}
+	return RuleMatchResult{
+		Matched:   true,
+		RuleType:  "method_blocked",
+		Pattern:   method,
+		MatchType: "exact",
+		Detail:    "HTTP方法限制: " + strings.ToUpper(method),
+	}
 }
 
 func (e *Engine) AddPathRule(ruleType, matchType, pattern, description string) error {

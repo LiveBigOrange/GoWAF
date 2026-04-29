@@ -8,7 +8,7 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/common.css">
     <style>
-        .filter-bar { display: flex; gap: 15px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
+        .filter-bar { display: flex; gap: 15px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; flex-shrink: 0; }
         .path-pattern { font-family: monospace; background: #f0f4ff; padding: 2px 8px; border-radius: 4px; }
         .info-box { background: #f8f9fa; border-left: 4px solid #409eff; padding: 15px; margin-bottom: 20px; border-radius: 4px; font-size: 13px; color: #596275; }
         .modal.show { display: flex; }
@@ -18,7 +18,7 @@
 </head>
 <body>
     {{template "sidebar" .}}
-    <div class="main">
+    <div class="main scroll-page">
         <div class="card">
             <div class="info-box">对匹配路径正则的请求进行独立限流，每个路径模式拥有独立的令牌桶。路径模式使用Go正则语法。</div>
             <div class="filter-bar">
@@ -66,7 +66,7 @@
             if(!d.success) return;
             var tbody=document.getElementById('limitList');
             if(!d.data||!d.data.length){tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:#95a5a6;">暂无规则</td></tr>';return;}
-            tbody.innerHTML=d.data.map(r=>'<tr><td><span class="path-pattern">'+escapeHtml(r.path_pattern)+'</span></td><td>'+r.rate+'</td><td>'+r.burst+'</td><td>'+(r.enabled?'<span style="color:#27ae60">启用</span>':'<span style="color:#95a5a6">禁用</span>')+'</td><td><button class="delete-btn" onclick="delRule('+r.id+')">删除</button></td></tr>').join('');
+            tbody.innerHTML=d.data.map(r=>'<tr><td><span class="path-pattern">'+escapeHtml(r.path_pattern)+'</span></td><td>'+r.rate+'</td><td>'+r.burst+'</td><td>'+(r.enabled?'<span style="color:#27ae60">启用</span>':'<span style="color:#95a5a6">禁用</span>')+'</td><td><button class="delete-btn" data-id="'+r.id+'">删除</button></td></tr>').join('');
         }).catch(e=>showToast('error','加载规则失败'));
     }
     function openModal(){document.getElementById('addModal').classList.add('show');}
@@ -87,6 +87,10 @@
             if(d.success){showToast('success','删除成功');loadRules();}else showToast('error',d.message||'删除失败');
         }).catch(e=>showToast('error','删除失败: '+e.message));
     }
+    document.querySelector('table tbody').addEventListener('click', function(e) {
+        var btn = e.target.closest('.delete-btn');
+        if (btn) delRule(parseInt(btn.dataset.id));
+    });
     loadRules();
     </script>
 </body>

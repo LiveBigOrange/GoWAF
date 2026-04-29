@@ -30,6 +30,7 @@
             margin-bottom: 20px;
             align-items: center;
             flex-wrap: wrap;
+            flex-shrink: 0;
         }
         .filter-bar input[type="text"],
         .filter-bar select,
@@ -74,10 +75,6 @@
         .log-table {
             width: 100%;
             border-collapse: collapse;
-            background: white;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 2px 12px rgba(0,0,0,0.04);
         }
         .log-table th {
             background: #f8f9fa;
@@ -157,12 +154,83 @@
             color: #95a5a6;
             font-size: 14px;
         }
+
+        /* 视图模式切换按钮组 */
+        .view-mode-group {
+            display: inline-flex;
+            border: 1px solid #dcdfe6;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .view-mode-btn {
+            padding: 6px 14px;
+            font-size: 12px;
+            cursor: pointer;
+            border: none;
+            background: white;
+            color: #606266;
+            transition: all 0.2s;
+        }
+        .view-mode-btn:not(:last-child) {
+            border-right: 1px solid #dcdfe6;
+        }
+        .view-mode-btn.active {
+            background: #409eff;
+            color: white;
+        }
+        .view-mode-btn:hover:not(.active) {
+            background: #ecf5ff;
+            color: #409eff;
+        }
+
+        /* 分组视图表格 */
+        .group-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .group-table th {
+            background: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-weight: 500;
+            color: #2c3e50;
+            font-size: 13px;
+            border-bottom: 1px solid #e8e9ed;
+        }
+        .group-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 13px;
+        }
+        .group-table tr:hover {
+            background: #f8f9fa;
+        }
+        .group-table tr:last-child td {
+            border-bottom: none;
+        }
+        .group-table .count-bar {
+            display: inline-block;
+            height: 6px;
+            border-radius: 3px;
+            background: #409eff;
+            vertical-align: middle;
+            margin-left: 6px;
+        }
+        .group-drill-btn {
+            color: #409eff;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 12px;
+        }
+        .group-drill-btn:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
     {{template "sidebar" .}}
     <div class="main">
-        <h2 style="margin-bottom: 20px; font-size: 20px; color: #2c3e50;">🛡️ 拦截数据</h2>
+        <h2 style="margin-bottom: 20px; font-size: 20px; color: #2c3e50; flex-shrink: 0;">🛡️ 拦截数据</h2>
 
         <div class="filter-bar">
                 <input type="text" id="searchInput" placeholder="搜索IP、路径或规则类型..." onkeyup="filterTable()">
@@ -182,6 +250,12 @@
                     <option value="header_injection">头部注入</option>
                     <option value="sensitive_data">敏感数据</option>
                 </select>
+                <div class="view-mode-group" id="viewModeGroup">
+                    <button class="view-mode-btn active" data-mode="detail" onclick="switchViewMode('detail')">明细视图</button>
+                    <button class="view-mode-btn" data-mode="ip" onclick="switchViewMode('ip')">按IP</button>
+                    <button class="view-mode-btn" data-mode="path" onclick="switchViewMode('path')">按路径</button>
+                    <button class="view-mode-btn" data-mode="rule" onclick="switchViewMode('rule')">按规则</button>
+                </div>
                 <div class="time-filter">
                     <span>时间：</span>
                     <input type="date" id="startDate" onchange="filterTable()">
@@ -190,7 +264,8 @@
                 </div>
                 <button onclick="clearFilters()">清除筛选</button>
             </div>
-            <table class="log-table">
+            <div class="list-container">
+            <table class="log-table" id="detailTable">
                 <thead>
                     <tr>
                         <th>时间</th>
@@ -206,11 +281,18 @@
                 <tbody id="tableBody">
                 </tbody>
             </table>
+            <div id="groupViewContainer" style="display:none;">
+                <table class="group-table">
+                    <thead id="groupThead"></thead>
+                    <tbody id="groupBody"></tbody>
+                </table>
+            </div>
+            </div>
             <div class="pagination" id="pagination" style="display:none;">
                 <div class="pagination-info">
                     <span id="pageInfo">第1 页 / 第1 页</span>
                     <select class="page-size-select" id="pageSize" onchange="changePageSize()">
-                        <option value="10" selected>10 条</option>
+                        <option value="10" selected>10 条/页</option>
                         <option value="20">20 条</option>
                         <option value="50">50 条</option>
                         <option value="100">100 条</option>
@@ -228,6 +310,7 @@
             var filteredData = [];
             var currentPage = 1;
             var pageSize = 10;
+            var currentViewMode = 'detail';
 
             function escapeHtml(text) {
                 if (text == null) return '';
@@ -272,8 +355,12 @@
             function initFilters() {
                 var type = getUrlParam('type');
                 if (type) {
-                    var typeFilter = document.getElementById('typeFilter');
-                    typeFilter.value = type;
+                    if (type === 'ip' || type === 'path' || type === 'rule') {
+                        switchViewMode(type);
+                    } else {
+                        var typeFilter = document.getElementById('typeFilter');
+                        typeFilter.value = type;
+                    }
                 }
             }
 
@@ -286,12 +373,15 @@
                         return r.json();
                     })
                     .then(d => {
-                        if (d && d.data) {
-                            allData = d.data || [];
+                        if (d && Array.isArray(d.data)) {
+                            allData = d.data;
                             serverTotal = d.total || 0;
-                        } else {
-                            allData = d || [];
+                        } else if (Array.isArray(d)) {
+                            allData = d;
                             serverTotal = allData.length;
+                        } else {
+                            allData = [];
+                            serverTotal = 0;
                         }
                         filteredData = allData;
                         filterTable();
@@ -358,7 +448,11 @@
                 });
 
                 currentPage = 1;
-                renderData();
+                if (currentViewMode === 'detail') {
+                    renderData();
+                } else {
+                    renderGroupView();
+                }
             };
 
             window.clearFilters = function() {
@@ -368,7 +462,11 @@
                 document.getElementById('endDate').value = '';
                 filteredData = allData;
                 currentPage = 1;
-                renderData();
+                if (currentViewMode === 'detail') {
+                    renderData();
+                } else {
+                    renderGroupView();
+                }
             };
 
             function renderData() {
@@ -410,6 +508,9 @@
                     var geoText = '-';
                     if (item.geo_country) {
                         geoText = escapeHtml(item.geo_flag || '') + ' ' + escapeHtml(item.geo_country);
+                        if (item.geo_city && item.geo_city !== item.geo_country) {
+                            geoText += ' ' + escapeHtml(item.geo_city);
+                        }
                     }
 
                     tr.innerHTML = '<td>' + escapeHtml(timeStr) + '</td>' +
@@ -431,7 +532,11 @@
                     detailHtml += '<div class="detail-item"><span class="detail-label">拦截时间：</span><span class="detail-value">' + escapeHtml(timeStr) + '</span></div>';
                     detailHtml += '<div class="detail-item"><span class="detail-label">客户端IP：</span><span class="detail-value"><code>' + escapedIP + '</code></span></div>';
                     if (item.geo_country) {
-                        detailHtml += '<div class="detail-item"><span class="detail-label">地理位置：</span><span class="detail-value">' + escapeHtml(item.geo_flag || '') + ' ' + escapeHtml(item.geo_country) + '</span></div>';
+                        var detailGeo = escapeHtml(item.geo_flag || '') + ' ' + escapeHtml(item.geo_country);
+                        if (item.geo_city && item.geo_city !== item.geo_country) {
+                            detailGeo += ' ' + escapeHtml(item.geo_city);
+                        }
+                        detailHtml += '<div class="detail-item"><span class="detail-label">地理位置：</span><span class="detail-value">' + detailGeo + '</span></div>';
                     }
                     detailHtml += '<div class="detail-item"><span class="detail-label">请求Host：</span><span class="detail-value"><code>' + escapeHtml(item.host || '-') + '</code></span></div>';
                     detailHtml += '<div class="detail-item"><span class="detail-label">请求方法：</span><span class="detail-value"><code>' + escapedMethod + '</code></span></div>';
@@ -456,7 +561,14 @@
                     }
                     detailHtml += '<div class="detail-item"><span class="detail-label">拦截规则：</span><span class="detail-value"><span class="badge ' + ruleClass + '">' + ruleTypeText + '</span></span></div>';
                     if (item.match_detail) {
-                        detailHtml += '<div class="detail-item"><span class="detail-label">匹配模式：</span><span class="detail-value"><code>' + escapeHtml(item.match_detail) + '</code></span></div>';
+                        var matchDetailHtml = escapeHtml(item.match_detail);
+                        matchDetailHtml = matchDetailHtml.replace(/\[Rule#(\d+)\|([^\]]+)\]/g, '<span style="background:#e8f5e9;color:#2e7d32;padding:1px 6px;border-radius:3px;font-size:11px;margin:0 2px;">规则#$1 [$2]</span>');
+                        matchDetailHtml = matchDetailHtml.replace(/\[Rule#(\d+)\]/g, '<span style="background:#e8f5e9;color:#2e7d32;padding:1px 6px;border-radius:3px;font-size:11px;margin:0 2px;">规则#$1</span>');
+                        matchDetailHtml = matchDetailHtml.replace(/\[([^\]]+)\]/g, function(m, content) {
+                            if (content.indexOf('Rule#') === -1) return '<span style="background:#fff3e0;color:#e65100;padding:1px 6px;border-radius:3px;font-size:11px;margin:0 2px;">' + escapeHtml(content) + '</span>';
+                            return m;
+                        });
+                        detailHtml += '<div class="detail-item"><span class="detail-label">触发子规则：</span><span class="detail-value" style="line-height:1.8;">' + matchDetailHtml + '</span></div>';
                     }
                     if (item.match_location) {
                         detailHtml += '<div class="detail-item"><span class="detail-label">检测位置：</span><span class="detail-value"><code>' + escapeHtml(item.match_location) + '</code></span></div>';
@@ -501,6 +613,139 @@
                     detailRow.classList.add('show');
                     btn.textContent = '收起详情';
                 }
+            };
+
+            window.switchViewMode = function(mode) {
+                currentViewMode = mode;
+                var btns = document.querySelectorAll('.view-mode-btn');
+                btns.forEach(function(btn) {
+                    btn.classList.toggle('active', btn.getAttribute('data-mode') === mode);
+                });
+                var detailTable = document.getElementById('detailTable');
+                var groupContainer = document.getElementById('groupViewContainer');
+                var pagination = document.getElementById('pagination');
+                if (mode === 'detail') {
+                    detailTable.style.display = '';
+                    groupContainer.style.display = 'none';
+                    pagination.style.display = 'flex';
+                    renderData();
+                } else {
+                    detailTable.style.display = 'none';
+                    groupContainer.style.display = '';
+                    pagination.style.display = 'none';
+                    renderGroupView();
+                }
+            };
+
+            function renderGroupView() {
+                var thead = document.getElementById('groupThead');
+                var tbody = document.getElementById('groupBody');
+                if (!filteredData || filteredData.length === 0) {
+                    thead.innerHTML = '';
+                    tbody.innerHTML = '<tr><td colspan="5" class="empty-message">暂无拦截数据</td></tr>';
+                    return;
+                }
+
+                var groups = {};
+                var getKey, getLabel, getExtraInfo;
+                if (currentViewMode === 'ip') {
+                    thead.innerHTML = '<tr><th>排名</th><th>IP地址</th><th>地理位置</th><th>拦截次数</th><th>涉及规则</th><th>最近拦截</th><th>操作</th></tr>';
+                    filteredData.forEach(function(item) {
+                        var key = item.client_ip || 'unknown';
+                        if (!groups[key]) groups[key] = { key: key, count: 0, lastTime: '', geo: '', rules: {} };
+                        groups[key].count++;
+                        var t = item.timestamp || item.time || '';
+                        if (!groups[key].lastTime || t > groups[key].lastTime) groups[key].lastTime = t;
+                        if (!groups[key].geo && item.geo_country) {
+                            groups[key].geo = (item.geo_flag || '') + ' ' + item.geo_country;
+                            if (item.geo_city && item.geo_city !== item.geo_country) groups[key].geo += ' ' + item.geo_city;
+                        }
+                        var rule = item.rule_id || 'unknown';
+                        groups[key].rules[rule] = (groups[key].rules[rule] || 0) + 1;
+                    });
+                } else if (currentViewMode === 'path') {
+                    thead.innerHTML = '<tr><th>排名</th><th>请求路径</th><th>请求方式</th><th>拦截次数</th><th>涉及IP数</th><th>最近拦截</th><th>操作</th></tr>';
+                    filteredData.forEach(function(item) {
+                        var key = item.path || 'unknown';
+                        if (!groups[key]) groups[key] = { key: key, count: 0, lastTime: '', methods: {}, ips: {} };
+                        groups[key].count++;
+                        var t = item.timestamp || item.time || '';
+                        if (!groups[key].lastTime || t > groups[key].lastTime) groups[key].lastTime = t;
+                        var m = item.method || 'GET';
+                        groups[key].methods[m] = true;
+                        var ip = item.client_ip || '';
+                        if (ip) groups[key].ips[ip] = true;
+                    });
+                } else if (currentViewMode === 'rule') {
+                    thead.innerHTML = '<tr><th>排名</th><th>规则名称</th><th>命中次数</th><th>涉及IP数</th><th>最近命中</th><th>操作</th></tr>';
+                    filteredData.forEach(function(item) {
+                        var key = item.rule_id || 'unknown';
+                        if (!groups[key]) groups[key] = { key: key, count: 0, lastTime: '', ips: {} };
+                        groups[key].count++;
+                        var t = item.timestamp || item.time || '';
+                        if (!groups[key].lastTime || t > groups[key].lastTime) groups[key].lastTime = t;
+                        var ip = item.client_ip || '';
+                        if (ip) groups[key].ips[ip] = true;
+                    });
+                }
+
+                var arr = Object.values(groups);
+                arr.sort(function(a, b) { return b.count - a.count; });
+                var maxCount = arr.length > 0 ? arr[0].count : 1;
+
+                tbody.innerHTML = '';
+                arr.forEach(function(group, idx) {
+                    var tr = document.createElement('tr');
+                    var rank = idx + 1;
+                    var barWidth = Math.max(8, Math.round((group.count / maxCount) * 100));
+                    var lastTime = formatTime(group.lastTime);
+
+                    if (currentViewMode === 'ip') {
+                        var ruleArr = [];
+                        for (var r in group.rules) { ruleArr.push(escapeHtml(r) + '(' + group.rules[r] + ')'); }
+                        var ruleStr = ruleArr.length > 3 ? ruleArr.slice(0, 3).join(', ') + '...' : ruleArr.join(', ');
+                        tr.innerHTML = '<td>' + rank + '</td>' +
+                            '<td><code>' + escapeHtml(group.key) + '</code></td>' +
+                            '<td>' + (group.geo || '-') + '</td>' +
+                            '<td>' + group.count + ' <span class="count-bar" style="width:' + barWidth + 'px;"></span></td>' +
+                            '<td style="font-size:12px;">' + ruleStr + '</td>' +
+                            '<td>' + escapeHtml(lastTime) + '</td>' +
+                            '<td><a class="group-drill-btn" onclick="drillDown(\'ip\',\'' + escapeHtml(group.key) + '\')">查看明细</a></td>';
+                    } else if (currentViewMode === 'path') {
+                        var methodArr = [];
+                        for (var m in group.methods) { methodArr.push(escapeHtml(m)); }
+                        var ipCount = Object.keys(group.ips).length;
+                        tr.innerHTML = '<td>' + rank + '</td>' +
+                            '<td><code>' + escapeHtml(group.key) + '</code></td>' +
+                            '<td>' + methodArr.join('/') + '</td>' +
+                            '<td>' + group.count + ' <span class="count-bar" style="width:' + barWidth + 'px;"></span></td>' +
+                            '<td>' + ipCount + '-IP</td>' +
+                            '<td>' + escapeHtml(lastTime) + '</td>' +
+                            '<td><a class="group-drill-btn" onclick="drillDown(\'path\',\'' + escapeHtml(group.key).replace(/'/g, "\\'") + '\')">查看明细</a></td>';
+                    } else if (currentViewMode === 'rule') {
+                        var ipCount = Object.keys(group.ips).length;
+                        tr.innerHTML = '<td>' + rank + '</td>' +
+                            '<td>' + escapeHtml(group.key) + '</td>' +
+                            '<td>' + group.count + ' <span class="count-bar" style="width:' + barWidth + 'px;"></span></td>' +
+                            '<td>' + ipCount + '-IP</td>' +
+                            '<td>' + escapeHtml(lastTime) + '</td>' +
+                            '<td><a class="group-drill-btn" onclick="drillDown(\'rule\',\'' + escapeHtml(group.key).replace(/'/g, "\\'") + '\')">查看明细</a></td>';
+                    }
+                    tbody.appendChild(tr);
+                });
+            }
+
+            window.drillDown = function(field, value) {
+                currentViewMode = 'detail';
+                var btns = document.querySelectorAll('.view-mode-btn');
+                btns.forEach(function(btn) {
+                    btn.classList.toggle('active', btn.getAttribute('data-mode') === 'detail');
+                });
+                document.getElementById('detailTable').style.display = '';
+                document.getElementById('groupViewContainer').style.display = 'none';
+                document.getElementById('pagination').style.display = 'flex';
+                document.getElementById('searchInput').value = value;
+                filterTable();
             };
 
             initFilters();

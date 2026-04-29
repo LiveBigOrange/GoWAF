@@ -81,6 +81,16 @@ func (h *DashboardHub) Run() {
 			h.mutex.Unlock()
 			go h.writePump(client)
 			log.Printf("仪表盘 WebSocket 客户端连接，当前连接数: %d", len(h.clients))
+			go func(c *dashboardClient) {
+				data := h.collectDashboardData()
+				msg, err := json.Marshal(data)
+				if err == nil {
+					select {
+					case c.send <- msg:
+					default:
+					}
+				}
+			}(client)
 
 		case client := <-h.unregister:
 			h.mutex.Lock()
@@ -179,6 +189,7 @@ func (h *DashboardHub) collectDashboardData() map[string]interface{} {
 					RequestID:         e.RequestID,
 					LatencyMs:         e.LatencyMs,
 					GeoCountry:        e.GeoCountry,
+					GeoCity:           e.GeoCity,
 					GeoFlag:           e.GeoFlag,
 					MatchDetail:       e.MatchDetail,
 					MatchLocation:     e.MatchLocation,
@@ -203,6 +214,7 @@ func (h *DashboardHub) collectDashboardData() map[string]interface{} {
 			}
 		}
 	}
+	log.Printf("仪表盘: 拦截事件数量=%d", len(events))
 
 	// 收集 TOP 数据 — 优先从数据库获取，降级到内存（与 HTTP API 保持一致）
 	var topIPs []stats.TopItem

@@ -1,4 +1,4 @@
-﻿{{define "dashboard"}}
+{{define "dashboard"}}
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -173,23 +173,23 @@
         .event-grid .col--number { text-align: right; }
         .event-grid .col--center { text-align: center; }
         .event-grid .col--mono { font-family: 'Consolas', 'Monaco', monospace; }
-        /* 最近拦截事件：8列等分 */
+        /* 最近拦截事件：按比例分配确保上下行对齐 */
         .event-grid--events {
-            grid-template-columns: repeat(8, 1fr);
+            grid-template-columns: 1.4fr 0.5fr 1fr 1fr 3fr 1.2fr 0.5fr 0.6fr;
         }
         /* TOP IP：排名 / IP / 规则类型 / 风险标签 / 地理标签 / 次数 / 最后时间 */
         .event-grid--ip {
             grid-template-columns: 1.2fr 1fr auto auto 65px 80px;
             gap: 8px;
         }
-        /* TOP 路径：排名 / 路径 / 次数 / 补充信息 / 最后时间 */
+        /* TOP 路径：路径 / 请求方式 / IP·次数 / 最后时间 */
         .event-grid--path {
-            grid-template-columns: 3fr 80px 1fr 90px;
+            grid-template-columns: 3fr 0.8fr 1.2fr 1fr;
             gap: 8px;
         }
-        /* 规则命中：规则名 / 次数 / 百分比 / 影响IP / 最后时间 */
+        /* 规则命中：按比例分配确保上下行对齐 */
         .event-grid--rule {
-            grid-template-columns: 2fr 60px 55px 60px 80px;
+            grid-template-columns: 3fr 1.2fr 1fr 1fr;
             gap: 8px;
         }
         /* 小屏纵向堆叠并显示字段标签 */
@@ -224,7 +224,7 @@
 </head>
 <body>
     {{template "sidebar" .}}
-    <div class="main">
+    <div class="main scroll-page">
         <!-- 系统状态栏 -->
         <div class="status-bar" id="statusBar" style="gap: 15px; padding: 12px 20px;">
             <div><span style="color: #7f8c8d; font-size: 13px;">代理端口</span><br><strong id="proxyPorts" style="font-size: 16px;">-</strong></div>
@@ -389,7 +389,7 @@
             </div>
             <div class="events-panel" style="padding:15px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #eee;">
-                    <h2 style="margin:0;font-size:15px;font-weight:600;color:#2c3e50;">📊 规则命中分布</h2>
+                    <h2 style="margin:0;font-size:15px;font-weight:600;color:#2c3e50;">📊 TOP5规则命中分布</h2>
                     <a href="/intercepts?type=rule" style="color:#409eff;text-decoration:none;font-size:12px;padding:4px 8px;background:#ecf0f1;border-radius:4px;">查看更多</a>
                 </div>
                 <ul class="event-list" id="ruleHits">
@@ -402,7 +402,7 @@
         <div style="margin-bottom:20px;">
             <div class="events-panel" style="padding:15px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #eee;">
-                    <h2 style="margin:0;font-size:15px;font-weight:600;color:#2c3e50;">⚡ 最近拦截事件</h2>
+                    <h2 style="margin:0;font-size:15px;font-weight:600;color:#2c3e50;">⚡ TOP5最近拦截事件</h2>
                     <a href="/intercepts" style="color:#409eff;text-decoration:none;font-size:12px;padding:4px 8px;background:#ecf0f1;border-radius:4px;">查看更多</a>
                 </div>
                 <ul class="event-list" id="events">
@@ -810,10 +810,11 @@
                                     if (qpsEl) qpsEl.innerText = typeof data.stats.qps === 'number' ? data.stats.qps.toFixed(2) : (data.stats.qps || 0);
                                 }
                                 
+                                try {
                                 if (data.system) {
                                     var d = data.system;
                                     var cpuEl = document.getElementById('cpuUsage');
-                                    if (cpuEl) cpuEl.innerText = d.cpu_usage.toFixed(1) + '%';
+                                    if (cpuEl && typeof d.cpu_usage === 'number') cpuEl.innerText = d.cpu_usage.toFixed(1) + '%';
                                     
                                     var memEl = document.getElementById('memUsage');
                                     var memPercentEl = document.getElementById('memPercent');
@@ -822,8 +823,8 @@
                                             if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(1) + ' GB';
                                             return (bytes / 1048576).toFixed(1) + ' MB';
                                         };
-                                        memEl.innerText = fmtMem(d.mem_used);
-                                        memPercentEl.innerText = d.mem_percent.toFixed(1) + '% / ' + fmtMem(d.mem_total);
+                                        memEl.innerText = fmtMem(d.mem_used || 0);
+                                        memPercentEl.innerText = (typeof d.mem_percent === 'number' ? d.mem_percent.toFixed(1) : '0') + '% / ' + fmtMem(d.mem_total || 0);
                                     }
                                     
                                     var goroutinesEl = document.getElementById('goroutines');
@@ -832,10 +833,10 @@
                                     var diskEl = document.getElementById('diskUsage');
                                     var diskPercentEl = document.getElementById('diskPercent');
                                     if (diskEl && diskPercentEl) {
-                                        var diskGB = (d.disk_used / 1024 / 1024 / 1024).toFixed(1);
-                                        var diskTotalGB = (d.disk_total / 1024 / 1024 / 1024).toFixed(1);
+                                        var diskGB = ((d.disk_used || 0) / 1024 / 1024 / 1024).toFixed(1);
+                                        var diskTotalGB = ((d.disk_total || 0) / 1024 / 1024 / 1024).toFixed(1);
                                         diskEl.innerText = diskGB + ' GB';
-                                        diskPercentEl.innerText = d.disk_percent.toFixed(1) + '% / ' + diskTotalGB + ' GB';
+                                        diskPercentEl.innerText = (typeof d.disk_percent === 'number' ? d.disk_percent.toFixed(1) : '0') + '% / ' + diskTotalGB + ' GB';
                                     }
                                     
                                     var numGCEl = document.getElementById('numGC');
@@ -845,13 +846,13 @@
                                     if (gcPauseEl) gcPauseEl.innerText = d.gc_pause_avg ? d.gc_pause_avg.toFixed(2) + ' ms' : '0 ms';
                                     
                                     var heapMemEl = document.getElementById('heapMem');
-                                    if (heapMemEl) heapMemEl.innerText = (d.heap_alloc / 1024 / 1024).toFixed(1) + ' MB';
+                                    if (heapMemEl) heapMemEl.innerText = ((d.heap_alloc || 0) / 1024 / 1024).toFixed(1) + ' MB';
                                     
                                     var heapObjectsEl = document.getElementById('heapObjects');
                                     if (heapObjectsEl) heapObjectsEl.innerText = d.heap_objects || 0;
                                     
                                     var stackMemEl = document.getElementById('stackMem');
-                                    if (stackMemEl) stackMemEl.innerText = (d.stack_inuse / 1024 / 1024).toFixed(1) + ' MB';
+                                    if (stackMemEl) stackMemEl.innerText = ((d.stack_inuse || 0) / 1024 / 1024).toFixed(1) + ' MB';
                                     
                                     var numThreadEl = document.getElementById('numThread');
                                     if (numThreadEl) numThreadEl.innerText = d.num_thread || 0;
@@ -869,7 +870,9 @@
                                     }
                                     updateUptime();
                                 }
+                                } catch(sysErr) { console.error('system数据渲染异常:', sysErr); }
                                 
+                                try {
                                 if (data.business) {
                                     var b = data.business;
                                     var errorRateEl = document.getElementById('errorRate');
@@ -891,8 +894,9 @@
                                         networkIOEl.innerText = '↓' + inKB + ' ↑' + outKB + ' KB';
                                     }
                                 }
+                                } catch(bizErr) { console.error('business数据渲染异常:', bizErr); }
                                 
-                                // 更新拦截事件（8列等分网格）
+                                // 更新拦截事件（自适应网格）
                                 var eventList = document.getElementById('events');
                                 if (eventList) {
                                     if (data.events && data.events.length > 0) {
@@ -905,17 +909,22 @@
                                             var method = e.method || '-';
                                             var status = e.status || 403;
                                             var latency = e.latency_ms ? e.latency_ms.toFixed(1) + 'ms' : '-';
-                                            var geoText = '-';
+                                            var countryText = '-';
                                             if (e.geo_country && e.geo_country !== '局域网' && e.geo_country !== '未知') {
-                                                geoText = (e.geo_flag || '') + ' ' + e.geo_country;
+                                                countryText = (e.geo_flag || '') + ' ' + e.geo_country;
                                             } else if (e.geo_country && (e.geo_country === '局域网' || e.geo_country === '未知')) {
-                                                geoText = e.geo_country;
+                                                countryText = e.geo_country;
                                             }
+                                            var cityText = '';
+                                            if (e.geo_city && e.geo_city !== e.geo_country) {
+                                                cityText = '-' + e.geo_city;
+                                            }
+                                            var geoDisplay = countryText + cityText;
                                             li.innerHTML = 
                                                 '<span class="col" data-label="时间">' + escapeHtml(timeStr) + '</span>' +
                                                 '<span class="col col--center" data-label="方法">' + escapeHtml(method) + '</span>' +
                                                 '<span class="col" data-label="来源IP">' + escapeHtml(e.client_ip || '-') + '</span>' +
-                                                '<span class="col" data-label="地理位置">' + escapeHtml(geoText) + '</span>' +
+                                                '<span class="col" data-label="国家-城市">' + escapeHtml(geoDisplay) + '</span>' +
                                                 '<span class="col" data-label="路径" title="' + escapeHtml(e.path || '-') + '">' + escapeHtml(e.path || '-') + '</span>' +
                                                 '<span class="col" data-label="规则">' + escapeHtml(e.rule_id || '-') + '</span>' +
                                                 '<span class="col col--number" data-label="状态码">' + status + '</span>' +
@@ -979,17 +988,15 @@
                                             var li = document.createElement('li');
                                             li.className = 'event-grid event-grid--path';
                                             var lastSeen = item.last_seen ? formatTimeAgo(item.last_seen) : '';
-                                            var extraInfo = '';
+                                            var methodsStr = '-';
                                             if (item.methods && Object.keys(item.methods).length > 0) {
-                                                extraInfo = Object.keys(item.methods).map(function(k){return escapeHtml(k);}).join('/');
+                                                methodsStr = Object.keys(item.methods).map(function(k){return escapeHtml(k);}).join('/');
                                             }
-                                            if (item.source_ip_count > 0) {
-                                                extraInfo += (extraInfo ? ' · ' : '') + item.source_ip_count + 'IP';
-                                            }
-                                            li.innerHTML = 
+                                            var ipInfo = item.source_ip_count > 0 ? '-IP' : '';
+                                            li.innerHTML =
                                                 '<span class="col" data-label="路径" title="' + escapeHtml(item.name) + '">' + escapeHtml(item.name) + '</span>' +
-                                                '<span class="col col--number" data-label="次数">' + item.count + ' 次</span>' +
-                                                '<span class="col" data-label="补充">' + (extraInfo || '-') + '</span>' +
+                                                '<span class="col col--center" data-label="方式">' + methodsStr + '</span>' +
+                                                '<span class="col col--number" data-label="次数">' + item.count + (ipInfo ? ' ' + ipInfo : '') + '</span>' +
                                                 '<span class="col col--number" data-label="最近">' + (lastSeen || '-') + '</span>';
                                             topPathList.appendChild(li);
                                         });
@@ -1016,13 +1023,12 @@
                                                 var sevText = item.risk_level === 'high' ? '高危' : (item.risk_level === 'medium' ? '中危' : '低危');
                                                 severityBadge = ' <span style="color:' + sevColor + ';font-weight:600;font-size:11px;">' + sevText + '</span>';
                                             }
-                                            var ipInfo = item.source_ip_count > 0 ? item.source_ip_count + 'IP' : '';
-                                            li.innerHTML = 
+                                            var ipInfo = item.source_ip_count > 0 ? '-IP' : '';
+                                            li.innerHTML =
                                                 '<span class="col" data-label="规则">' + escapeHtml(item.name) + severityBadge + '</span>' +
-                                                '<span class="col col--number" data-label="次数">' + item.count + '次</span>' +
+                                                '<span class="col col--number" data-label="次数">' + item.count + (ipInfo ? ' ' + ipInfo : '') + '</span>' +
                                                 '<span class="col col--number" data-label="占比">' + percentage + '%</span>' +
-                                                '<span class="col" data-label="影响IP">' + (ipInfo || '-') + '</span>' +
-                                                '<span class="col col--number" data-label="最近">' + (lastSeen || '-') + '</span>';
+                                                '<span class="col col--number" data-label="最近" style="overflow:visible;">' + (lastSeen || '-') + '</span>';
                                             ruleHitList.appendChild(li);
                                         });
                                         if (data.rule_hits.length > 5) {

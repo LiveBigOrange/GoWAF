@@ -18,7 +18,7 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
 		if origin == "" {
-			return true
+			return false
 		}
 		host := r.Host
 		return origin == "http://"+host || origin == "https://"+host
@@ -194,16 +194,8 @@ func StartLogHub() {
 }
 
 func GetLogHub() *LogHub {
-	logHubMu.RLock()
-	defer logHubMu.RUnlock()
-	if logHub == nil {
-		logHubMu.RUnlock()
-		logHubMu.Lock()
-		if logHub == nil {
-			logHub = NewLogHub(1024, 1000)
-		}
-		logHubMu.Unlock()
-		logHubMu.RLock()
-	}
+	logHubOnce.Do(func() {
+		logHub = NewLogHub(1024, 1000)
+	})
 	return logHub
 }
