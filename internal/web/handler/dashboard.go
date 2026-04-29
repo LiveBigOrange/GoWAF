@@ -153,6 +153,7 @@ func APIEvents(w http.ResponseWriter, r *http.Request) {
 					RequestID:         e.RequestID,
 					LatencyMs:         e.LatencyMs,
 					GeoCountry:        e.GeoCountry,
+					GeoCity:           e.GeoCity,
 					GeoFlag:           e.GeoFlag,
 					MatchDetail:       e.MatchDetail,
 					MatchLocation:     e.MatchLocation,

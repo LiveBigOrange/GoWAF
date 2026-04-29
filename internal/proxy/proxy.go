@@ -454,7 +454,7 @@ func (p *WAFProxy) recordBlock(clientIP, path, method, userAgent, rule string, s
 	if p.metricsManager != nil {
 		p.metricsManager.IncBlockedRequest() // 增加拦截计数
 		p.metricsManager.SaveEvent(clientIP, r.Host, path, r.URL.RawQuery, method, userAgent, 
-			r.Header.Get("Referer"), r.Header.Get("Content-Type"), rule, statusCode, requestID, latencyMs, geoCountry, geoCity, geoFlag, matchDetail, matchLocation, "block", "", r.Proto, getScheme(r), int64(estimateRequestSize(r)))
+			r.Header.Get("Referer"), r.Header.Get("Content-Type"), rule, statusCode, requestID, latencyMs, geoCountry, geoCity, geoFlag, matchDetail, matchLocation, "block", "", r.Proto, getScheme(r), int64(estimateRequestSize(r)), 0, "")
 		p.metricsManager.IncTopStat("blocked_ip", clientIP)
 		p.metricsManager.IncTopStat("attacked_path", path)
 		p.metricsManager.IncRuleHit(rule)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gowaf-demo/internal/timeutil"
+	"gowaf-demo/internal/web/model"
 )
 
 // --- 管理端口访问日志 ---
@@ -19,20 +20,6 @@ var (
 	adminLogMu   sync.Mutex
 	adminLogPath string
 )
-
-// AdminLogEntry 管理端口日志条目
-type AdminLogEntry struct {
-	Timestamp string `json:"timestamp"`
-	ClientIP  string `json:"client_ip"`
-	Method    string `json:"method"`
-	Path      string `json:"path"`
-	Status    int    `json:"status"`
-	UserAgent string `json:"user_agent,omitempty"`
-	Referer   string `json:"referer,omitempty"`
-	LatencyMs int64  `json:"latency_ms"`
-	Action    string `json:"action,omitempty"` // login_success, login_fail, logout, api_call, page_view
-	Username  string `json:"username,omitempty"`
-}
 
 // InitAdminLog 初始化管理端口日志
 func InitAdminLog(filePath string) error {
@@ -53,7 +40,7 @@ func CloseAdminLog() {
 }
 
 // writeAdminLog 写入管理端口日志
-func writeAdminLog(entry AdminLogEntry) {
+func writeAdminLog(entry model.AdminLogEntry) {
 	if adminLogFile == nil {
 		return
 	}
@@ -68,11 +55,14 @@ func writeAdminLog(entry AdminLogEntry) {
 // LogAdminAction 记录管理端口关键操作（供handler调用）
 func LogAdminAction(r *http.Request, action, username string) {
 	clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
-	entry := AdminLogEntry{
+	entry := model.AdminLogEntry{
 		Timestamp: timeutil.FormatRFC3339(time.Now()),
 		ClientIP:  clientIP,
 		Method:    r.Method,
 		Path:      r.URL.Path,
+		Host:      r.Host,
+		Query:     r.URL.RawQuery,
+		Status:    http.StatusOK,
 		UserAgent: r.UserAgent(),
 		Referer:   r.Referer(),
 		Action:    action,
@@ -118,16 +108,25 @@ func AdminAccessLog(next http.Handler) http.Handler {
 			action = "forbidden"
 		}
 
-		entry := AdminLogEntry{
+		// 从session获取username
+		var username string
+		if sessionCookie, err := r.Cookie("session"); err == nil {
+			username = GetSessionUsername(sessionCookie.Value)
+		}
+
+		entry := model.AdminLogEntry{
 			Timestamp: timeutil.FormatRFC3339(time.Now()),
 			ClientIP:  clientIP,
 			Method:    r.Method,
 			Path:      path,
+			Host:      r.Host,
+			Query:     r.URL.RawQuery,
 			Status:    rw.statusCode,
 			UserAgent: r.UserAgent(),
 			Referer:   r.Referer(),
 			LatencyMs: latency,
 			Action:    action,
+			Username:  username,
 		}
 		writeAdminLog(entry)
 	})

@@ -46,7 +46,7 @@
             border-bottom: 1px solid #f0f0f0;
             font-size: 13px;
         }
-        .log-table tr:hover {
+        .log-table tr:not(.detail-row):hover {
             background: #f8f9fa;
         }
         .log-table tr:last-child td {
@@ -65,8 +65,122 @@
         .action-badge.api_call { background: #e3f2fd; color: #1976d2; }
         .action-badge.page_view { background: #f5f5f5; color: #666; }
         .action-badge.captcha { background: #fff3e0; color: #f57c00; }
+        .action-badge.login_page { background: #e8eaf6; color: #283593; }
         .action-badge.unauthorized { background: #ffebee; color: #c62828; }
         .action-badge.forbidden { background: #fce4ec; color: #880e4f; }
+        .view-btn {
+            background: none;
+            border: 1px solid #409eff;
+            color: #409eff;
+            padding: 3px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        .view-btn:hover {
+            background: #409eff;
+            color: white;
+        }
+        .detail-row td {
+            padding: 0 !important;
+            border-bottom: 1px solid #e8e9ed !important;
+            background: #fafbfc;
+        }
+        .detail-content {
+            padding: 16px 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px 24px;
+        }
+        .detail-item {
+            min-width: 200px;
+            flex: 1;
+        }
+        .detail-label {
+            font-size: 12px;
+            color: #95a5a6;
+            margin-bottom: 4px;
+        }
+        .detail-value {
+            font-size: 13px;
+            color: #2c3e50;
+            word-break: break-all;
+        }
+        .detail-value code {
+            background: #f0f2f5;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 12px;
+            color: #333;
+        }
+        .view-mode-group {
+            display: inline-flex;
+            border: 1px solid #dcdfe6;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .view-mode-btn {
+            padding: 6px 14px;
+            font-size: 12px;
+            cursor: pointer;
+            border: none;
+            background: white;
+            color: #606266;
+            transition: all 0.2s;
+        }
+        .view-mode-btn:not(:last-child) {
+            border-right: 1px solid #dcdfe6;
+        }
+        .view-mode-btn.active {
+            background: #409eff;
+            color: white;
+        }
+        .view-mode-btn:hover:not(.active) {
+            background: #ecf5ff;
+            color: #409eff;
+        }
+        .group-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .group-table th {
+            background: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-weight: 500;
+            color: #2c3e50;
+            font-size: 13px;
+            border-bottom: 1px solid #e8e9ed;
+        }
+        .group-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 13px;
+        }
+        .group-table tr:hover {
+            background: #f8f9fa;
+        }
+        .group-table tr:last-child td {
+            border-bottom: none;
+        }
+        .group-table .count-bar {
+            display: inline-block;
+            height: 6px;
+            border-radius: 3px;
+            background: #409eff;
+            vertical-align: middle;
+            margin-left: 6px;
+        }
+        .group-drill-btn {
+            color: #409eff;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 12px;
+        }
+        .group-drill-btn:hover {
+            text-decoration: underline;
+        }
         .status-badge {
             display: inline-block;
             padding: 2px 6px;
@@ -147,6 +261,7 @@
             </select>
             <select id="filterAction" onchange="applyFilters()">
                 <option value="">所有操作</option>
+                <option value="login_page">登录页面</option>
                 <option value="login_success">登录成功</option>
                 <option value="login_fail">登录失败</option>
                 <option value="logout">登出</option>
@@ -167,11 +282,17 @@
             <input type="text" id="filterPath" placeholder="筛选路径" oninput="applyFilters()" style="width: 200px; max-width: 100%;">
             <button class="btn btn-primary" onclick="loadLogs()" style="padding: 8px 16px; background: #409eff; color: white; border: none; border-radius: 4px; cursor: pointer;">刷新</button>
             <button class="btn" onclick="exportLogs()" style="padding: 8px 16px; background: #67c23a; color: white; border: none; border-radius: 4px; cursor: pointer;">导出</button>
+            <div class="view-mode-group" id="viewModeGroup">
+                <button class="view-mode-btn active" data-mode="detail" onclick="switchViewMode('detail')">明细视图</button>
+                <button class="view-mode-btn" data-mode="ip" onclick="switchViewMode('ip')">按IP</button>
+                <button class="view-mode-btn" data-mode="action" onclick="switchViewMode('action')">按操作</button>
+                <button class="view-mode-btn" data-mode="status" onclick="switchViewMode('status')">按状态码</button>
+            </div>
         </div>
         
         <!-- 日志表格 -->
         <div class="list-container">
-        <table class="log-table">
+        <table class="log-table" id="detailTable">
             <thead>
                 <tr>
                     <th>时间</th>
@@ -182,15 +303,29 @@
                     <th>状态码</th>
                     <th>操作类型</th>
                     <th>耗时</th>
+                    <th>操作</th>
                 </tr>
             </thead>
             <tbody id="logBody">
-                <tr><td colspan="8" class="empty-message">加载中...</td></tr>
+                <tr><td colspan="9" class="empty-message">加载中...</td></tr>
             </tbody>
         </table>
+        <div id="groupViewContainer" style="display:none;">
+            <table class="group-table">
+                <thead id="groupThead"></thead>
+                <tbody id="groupBody"></tbody>
+            </table>
         </div>
-        
-        <!-- 分页 -->
+        <div class="pagination" id="groupPagination" style="display:none;">
+            <div class="pagination-info">
+                <span id="groupPageInfo">第1 页 / 第1 页</span>
+            </div>
+            <div class="pagination-btns">
+                <button class="pagination-btn" id="groupPrevBtn" onclick="groupPrevPage()">上一页</button>
+                <button class="pagination-btn" id="groupNextBtn" onclick="groupNextPage()">下一页</button>
+            </div>
+        </div>
+        </div>
         <div class="pagination" id="pagination" style="display:none;">
             <div class="pagination-info">
                 <span id="pageInfo">第1 页 / 第1 页</span>
@@ -214,6 +349,45 @@
             var filteredLogs = [];
             var currentPage = 1;
             var pageSize = 50;
+            var currentViewMode = 'detail';
+            var urlRestored = false;
+            var groupCurrentPage = 1;
+            var groupPageSize = 20;
+
+            function syncURL() {
+                var params = new URLSearchParams();
+                params.set('view', currentViewMode);
+                var action = document.getElementById('filterAction').value;
+                var status = document.getElementById('filterStatus').value;
+                var ip = document.getElementById('filterIP').value;
+                var path = document.getElementById('filterPath').value;
+                if (action) params.set('action', action);
+                if (status) params.set('status', status);
+                if (ip) params.set('ip', ip);
+                if (path) params.set('path', path);
+                if (currentPage > 1) params.set('page', currentPage);
+                if (pageSize !== 50) params.set('size', pageSize);
+                if (groupCurrentPage > 1) params.set('gpage', groupCurrentPage);
+                history.replaceState(null, '', '?' + params.toString());
+            }
+
+            function restoreFromURL() {
+                var params = new URLSearchParams(location.search);
+                if (params.get('view')) currentViewMode = params.get('view');
+                if (params.get('action')) document.getElementById('filterAction').value = params.get('action');
+                if (params.get('status')) document.getElementById('filterStatus').value = params.get('status');
+                if (params.get('ip')) document.getElementById('filterIP').value = params.get('ip');
+                if (params.get('path')) document.getElementById('filterPath').value = params.get('path');
+                var urlPage = parseInt(params.get('page')) || 1;
+                if (urlPage > 1) currentPage = urlPage;
+                var gpage = parseInt(params.get('gpage')) || 1;
+                if (gpage > 1) groupCurrentPage = gpage;
+                if (params.get('size')) {
+                    var s = parseInt(params.get('size'));
+                    if (s > 0) { pageSize = s; document.getElementById('pageSize').value = String(s); }
+                }
+                urlRestored = true;
+            }
             var geoCache = {};
             var geoQueue = [];
             
@@ -246,13 +420,19 @@
                 fetch('/api/adminlog/list?limit=' + limit)
                     .then(r => r.json())
                     .then(data => {
-                        allLogs = data || [];
+                        allLogs = Array.isArray(data) ? data : [];
                         applyFilters();
                         updateStats();
+                        if (currentViewMode !== 'detail') {
+                            document.getElementById('detailTable').style.display = 'none';
+                            document.getElementById('groupViewContainer').style.display = '';
+                            document.getElementById('pagination').style.display = 'none';
+                            renderGroupView();
+                        }
                     })
                     .catch(err => {
                         console.error('加载日志失败:', err);
-                        document.getElementById('logBody').innerHTML = '<tr><td colspan="8" class="empty-message">加载失败</td></tr>';
+                        document.getElementById('logBody').innerHTML = '<tr><td colspan="9" class="empty-message">加载失败</td></tr>';
                     });
             }
             
@@ -279,8 +459,10 @@
                     return true;
                 });
                 
-                currentPage = 1;
+                if (!urlRestored) currentPage = 1;
+                urlRestored = false;
                 renderLogs();
+                syncURL();
             }
             
             function updateStats() {
@@ -300,7 +482,7 @@
                 var pagination = document.getElementById('pagination');
                 
                 if (!filteredLogs || filteredLogs.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="8" class="empty-message">暂无日志记录</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="9" class="empty-message">暂无日志记录</td></tr>';
                     pagination.style.display = 'none';
                     return;
                 }
@@ -314,7 +496,7 @@
                 var pageData = filteredLogs.slice(start, end);
                 
                 tbody.innerHTML = '';
-                pageData.forEach(function(log) {
+                pageData.forEach(function(log, index) {
                     var tr = document.createElement('tr');
                     
                     var statusClass = 'success';
@@ -333,7 +515,8 @@
                         '<td style="color:#2c3e50;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(log.path) + '">' + escapeHtml(log.path) + '</td>' +
                         '<td><span class="status-badge ' + statusClass + '">' + log.status + '</span></td>' +
                         '<td><span class="action-badge ' + actionClass + '">' + escapeHtml(actionText) + '</span></td>' +
-                        '<td style="color:#95a5a6;">' + (log.latency_ms || 0) + 'ms</td>';
+                        '<td style="color:#95a5a6;">' + (log.latency_ms || 0) + 'ms</td>' +
+                        '<td><button class="view-btn" onclick="toggleDetail(' + index + ', event)">查看详情</button></td>';
                     
                     tbody.appendChild(tr);
                 });
@@ -350,6 +533,7 @@
                 if (currentPage > 1) {
                     currentPage--;
                     renderLogs();
+                    syncURL();
                 }
             };
             
@@ -358,6 +542,7 @@
                 if (currentPage < totalPages) {
                     currentPage++;
                     renderLogs();
+                    syncURL();
                 }
             };
             
@@ -365,6 +550,7 @@
                 pageSize = parseInt(document.getElementById('pageSize').value);
                 currentPage = 1;
                 renderLogs();
+                syncURL();
             };
             
             window.exportLogs = function() {
@@ -401,8 +587,8 @@
                                 if (d.data.city && d.data.city !== d.data.country) label += ' ' + d.data.city;
                                 if (!label && d.data.country_iso) label = d.data.country_iso;
                                 geoCache[ip] = label;
-                                document.querySelectorAll('.geo-cell[data-ip="' + ip + '"]').forEach(function(c) {
-                                    applyGeoToCell(c, label);
+                                document.querySelectorAll('.geo-cell[data-ip]').forEach(function(c) {
+                                    if (c.getAttribute('data-ip') === ip) applyGeoToCell(c, label);
                                 });
                             } else {
                                 geoCache[ip] = '';
@@ -417,11 +603,257 @@
                 cell.textContent = geoLabel;
             }
             
+            function getStatusClass(status) {
+                if (status >= 300 && status < 400) return 'redirect';
+                if (status >= 400 && status < 500) return 'client-error';
+                if (status >= 500) return 'server-error';
+                return 'success';
+            }
+
+            function buildAdminLogDetailHtml(log) {
+                var html = '<td colspan="9"><div class="detail-content">';
+                html += '<div class="detail-item"><span class="detail-label">时间戳：</span><span class="detail-value">' + formatTime(log.timestamp) + '</span></div>';
+                html += '<div class="detail-item"><span class="detail-label">客户端IP：</span><span class="detail-value"><code>' + escapeHtml(log.client_ip || '-') + '</code></span></div>';
+                if (log.username) {
+                    html += '<div class="detail-item"><span class="detail-label">用户名：</span><span class="detail-value"><code>' + escapeHtml(log.username) + '</code></span></div>';
+                }
+                if (log.user_agent) {
+                    html += '<div class="detail-item"><span class="detail-label">User-Agent：</span><span class="detail-value">' + escapeHtml(log.user_agent) + '</span></div>';
+                }
+                if (log.referer) {
+                    html += '<div class="detail-item"><span class="detail-label">Referer：</span><span class="detail-value">' + escapeHtml(log.referer) + '</span></div>';
+                }
+                html += '<div class="detail-item"><span class="detail-label">请求Host：</span><span class="detail-value"><code>' + escapeHtml(log.host || '-') + '</code></span></div>';
+                html += '<div class="detail-item"><span class="detail-label">请求方法：</span><span class="detail-value"><code>' + escapeHtml(log.method || '-') + '</code></span></div>';
+                html += '<div class="detail-item"><span class="detail-label">请求路径：</span><span class="detail-value"><code>' + escapeHtml(log.path || '-') + '</code></span></div>';
+                if (log.query) {
+                    html += '<div class="detail-item"><span class="detail-label">查询参数：</span><span class="detail-value"><code>' + escapeHtml(log.query) + '</code></span></div>';
+                }
+                html += '<div class="detail-item"><span class="detail-label">操作类型：</span><span class="detail-value"><span class="action-badge ' + (log.action || '') + '">' + escapeHtml(log.action || '-') + '</span></span></div>';
+                html += '<div class="detail-item"><span class="detail-label">状态码：</span><span class="detail-value"><span class="status-badge ' + getStatusClass(log.status) + '">' + log.status + '</span></span></div>';
+                html += '<div class="detail-item"><span class="detail-label">响应延迟：</span><span class="detail-value">' + (log.latency_ms || 0) + 'ms</span></div>';
+                if (log.error_message) {
+                    html += '<div class="detail-item"><span class="detail-label">错误信息：</span><span class="detail-value" style="color:#e74c3c;">' + escapeHtml(log.error_message) + '</span></div>';
+                }
+                html += '</div></td>';
+                return html;
+            }
+            
+            window.toggleDetail = function(index, event) {
+                event.stopPropagation();
+                var existingDetail = document.getElementById('detail-' + index);
+                var btn = event.target;
+                if (existingDetail) {
+                    existingDetail.parentNode.removeChild(existingDetail);
+                    btn.textContent = '查看详情';
+                    return;
+                }
+                var start = (currentPage - 1) * pageSize;
+                var log = filteredLogs[start + index];
+                if (!log) return;
+                var detailTr = document.createElement('tr');
+                detailTr.className = 'detail-row';
+                detailTr.id = 'detail-' + index;
+                detailTr.innerHTML = buildAdminLogDetailHtml(log);
+                var dataRow = btn.closest('tr');
+                if (dataRow.nextSibling) {
+                    dataRow.parentNode.insertBefore(detailTr, dataRow.nextSibling);
+                } else {
+                    dataRow.parentNode.appendChild(detailTr);
+                }
+                btn.textContent = '收起详情';
+            };
+            
+            window.switchViewMode = function(mode) {
+                currentViewMode = mode;
+                groupCurrentPage = 1;
+                var btns = document.querySelectorAll('#viewModeGroup .view-mode-btn');
+                btns.forEach(function(btn) {
+                    btn.classList.toggle('active', btn.getAttribute('data-mode') === mode);
+                });
+                var detailTable = document.getElementById('detailTable');
+                var groupContainer = document.getElementById('groupViewContainer');
+                var pagination = document.getElementById('pagination');
+                if (mode === 'detail') {
+                    detailTable.style.display = '';
+                    groupContainer.style.display = 'none';
+                    pagination.style.display = 'flex';
+                    document.getElementById('groupPagination').style.display = 'none';
+                    renderLogs();
+                } else {
+                    detailTable.style.display = 'none';
+                    groupContainer.style.display = '';
+                    pagination.style.display = 'none';
+                    renderGroupView();
+                }
+                syncURL();
+            };
+
+            function renderGroupView() {
+                var thead = document.getElementById('groupThead');
+                var tbody = document.getElementById('groupBody');
+                if (!filteredLogs || filteredLogs.length === 0) {
+                    thead.innerHTML = '';
+                    tbody.innerHTML = '<tr><td colspan="6" class="empty-message">暂无日志数据</td></tr>';
+                    return;
+                }
+                var groups = {};
+                if (currentViewMode === 'ip') {
+                    thead.innerHTML = '<tr><th>排名</th><th>IP地址</th><th>操作次数</th><th>涉及操作类型</th><th>最近活动</th><th>操作</th></tr>';
+                    filteredLogs.forEach(function(log) {
+                        var key = log.client_ip || 'unknown';
+                        if (!groups[key]) groups[key] = { key: key, count: 0, lastTime: '', actions: {} };
+                        groups[key].count++;
+                        var t = log.timestamp || '';
+                        if (!groups[key].lastTime || t > groups[key].lastTime) groups[key].lastTime = t;
+                        var a = log.action || 'unknown';
+                        groups[key].actions[a] = (groups[key].actions[a] || 0) + 1;
+                    });
+                } else if (currentViewMode === 'action') {
+                    thead.innerHTML = '<tr><th>排名</th><th>操作类型</th><th>操作次数</th><th>涉及IP数</th><th>最近活动</th><th>操作</th></tr>';
+                    filteredLogs.forEach(function(log) {
+                        var key = log.action || 'unknown';
+                        if (!groups[key]) groups[key] = { key: key, count: 0, lastTime: '', ips: {} };
+                        groups[key].count++;
+                        var t = log.timestamp || '';
+                        if (!groups[key].lastTime || t > groups[key].lastTime) groups[key].lastTime = t;
+                        var ip = log.client_ip || '';
+                        if (ip) groups[key].ips[ip] = true;
+                    });
+                } else if (currentViewMode === 'status') {
+                    thead.innerHTML = '<tr><th>排名</th><th>状态码</th><th>请求次数</th><th>涉及IP数</th><th>最近活动</th><th>操作</th></tr>';
+                    filteredLogs.forEach(function(log) {
+                        var key = String(log.status || 0);
+                        if (!groups[key]) groups[key] = { key: key, count: 0, lastTime: '', ips: {} };
+                        groups[key].count++;
+                        var t = log.timestamp || '';
+                        if (!groups[key].lastTime || t > groups[key].lastTime) groups[key].lastTime = t;
+                        var ip = log.client_ip || '';
+                        if (ip) groups[key].ips[ip] = true;
+                    });
+                }
+                var arr = Object.values(groups);
+                arr.sort(function(a, b) { return b.count - a.count; });
+                var maxCount = arr.length > 0 ? arr[0].count : 1;
+
+                var totalGroups = arr.length;
+                var groupTotalPages = Math.max(1, Math.ceil(totalGroups / groupPageSize));
+                if (groupCurrentPage > groupTotalPages) groupCurrentPage = groupTotalPages;
+                var gStart = (groupCurrentPage - 1) * groupPageSize;
+                var gEnd = Math.min(gStart + groupPageSize, totalGroups);
+                var pageArr = arr.slice(gStart, gEnd);
+
+                tbody.innerHTML = '';
+                pageArr.forEach(function(group, idx) {
+                    var rank = gStart + idx + 1;
+                    var tr = document.createElement('tr');
+                    var barWidth = Math.max(8, Math.round((group.count / maxCount) * 100));
+                    var lastTime = formatTime(group.lastTime);
+                    if (currentViewMode === 'ip') {
+                        var actionArr = [];
+                        for (var a in group.actions) { actionArr.push(escapeHtml(a) + '(' + group.actions[a] + ')'); }
+                        var actionStr = actionArr.length > 3 ? actionArr.slice(0, 3).join(', ') + '...' : actionArr.join(', ');
+                        tr.innerHTML = '<td>' + rank + '</td>' +
+                            '<td><code>' + escapeHtml(group.key) + '</code></td>' +
+                            '<td>' + group.count + ' <span class="count-bar" style="width:' + barWidth + 'px;"></span></td>' +
+                            '<td style="font-size:12px;">' + actionStr + '</td>' +
+                            '<td>' + escapeHtml(lastTime) + '</td>' +
+                            '<td><a class="group-drill-btn" onclick="drillDown(\'ip\',\'' + escapeHtml(group.key) + '\')">查看明细</a></td>';
+                    } else if (currentViewMode === 'action') {
+                        var ipCount = Object.keys(group.ips).length;
+                        tr.innerHTML = '<td>' + rank + '</td>' +
+                            '<td><span class="action-badge ' + escapeHtml(group.key) + '">' + escapeHtml(group.key) + '</span></td>' +
+                            '<td>' + group.count + ' <span class="count-bar" style="width:' + barWidth + 'px;"></span></td>' +
+                            '<td>' + ipCount + '-IP</td>' +
+                            '<td>' + escapeHtml(lastTime) + '</td>' +
+                            '<td><a class="group-drill-btn" onclick="drillDown(\'action\',\'' + escapeHtml(group.key) + '\')">查看明细</a></td>';
+                    } else if (currentViewMode === 'status') {
+                        var ipCount = Object.keys(group.ips).length;
+                        tr.innerHTML = '<td>' + rank + '</td>' +
+                            '<td><code>' + escapeHtml(group.key) + '</code></td>' +
+                            '<td>' + group.count + ' <span class="count-bar" style="width:' + barWidth + 'px;"></span></td>' +
+                            '<td>' + ipCount + '-IP</td>' +
+                            '<td>' + escapeHtml(lastTime) + '</td>' +
+                            '<td><a class="group-drill-btn" onclick="drillDown(\'status\',' + group.key + ')">查看明细</a></td>';
+                    }
+                    tbody.appendChild(tr);
+                });
+
+                var gPagination = document.getElementById('groupPagination');
+                if (totalGroups > groupPageSize) {
+                    document.getElementById('groupPageInfo').textContent = '第' + groupCurrentPage + ' 页 / 第' + groupTotalPages + ' 页（共' + totalGroups + ' 组）';
+                    document.getElementById('groupPrevBtn').disabled = groupCurrentPage <= 1;
+                    document.getElementById('groupNextBtn').disabled = groupCurrentPage >= groupTotalPages;
+                    gPagination.style.display = 'flex';
+                } else {
+                    gPagination.style.display = 'none';
+                }
+            }
+
+            window.groupPrevPage = function() {
+                if (groupCurrentPage > 1) {
+                    groupCurrentPage--;
+                    renderGroupView();
+                    syncURL();
+                }
+            };
+
+            window.groupNextPage = function() {
+                var totalGroups = Object.keys((function() {
+                    var g = {};
+                    filteredLogs.forEach(function(log) {
+                        var key = currentViewMode === 'ip' ? (log.client_ip || 'unknown') : currentViewMode === 'action' ? (log.action || 'unknown') : String(log.status || 0);
+                        g[key] = true;
+                    });
+                    return g;
+                })()).length;
+                var groupTotalPages = Math.max(1, Math.ceil(totalGroups / groupPageSize));
+                if (groupCurrentPage < groupTotalPages) {
+                    groupCurrentPage++;
+                    renderGroupView();
+                    syncURL();
+                }
+            };
+
+            window.drillDown = function(field, value) {
+                currentViewMode = 'detail';
+                var btns = document.querySelectorAll('#viewModeGroup .view-mode-btn');
+                btns.forEach(function(btn) {
+                    btn.classList.toggle('active', btn.getAttribute('data-mode') === 'detail');
+                });
+                document.getElementById('detailTable').style.display = '';
+                document.getElementById('groupViewContainer').style.display = 'none';
+                document.getElementById('pagination').style.display = 'flex';
+                if (field === 'ip') {
+                    document.getElementById('filterIP').value = value;
+                } else if (field === 'action') {
+                    document.getElementById('filterAction').value = value;
+                } else if (field === 'status') {
+                    var statusFilter = document.getElementById('filterStatus');
+                    if (value >= 200 && value < 300) statusFilter.value = '2xx';
+                    else if (value >= 300 && value < 400) statusFilter.value = '3xx';
+                    else if (value >= 400 && value < 500) statusFilter.value = '4xx';
+                    else if (value >= 500) statusFilter.value = '5xx';
+                }
+                applyFilters();
+            };
+
             // 初始加载
+            restoreFromURL();
+            if (currentViewMode !== 'detail') {
+                var btns = document.querySelectorAll('#viewModeGroup .view-mode-btn');
+                btns.forEach(function(btn) {
+                    btn.classList.toggle('active', btn.getAttribute('data-mode') === currentViewMode);
+                });
+                document.getElementById('detailTable').style.display = 'none';
+                document.getElementById('groupViewContainer').style.display = '';
+                document.getElementById('pagination').style.display = 'none';
+            }
             loadLogs();
             
             // 每30秒自动刷新
-            setInterval(loadLogs, 30000);
+            var refreshTimer = setInterval(loadLogs, 30000);
+            window.addEventListener('beforeunload', function() { clearInterval(refreshTimer); });
         })();
     </script>
 </body>

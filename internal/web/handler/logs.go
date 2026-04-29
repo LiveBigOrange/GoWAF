@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -120,6 +121,7 @@ func GetLogsList(w http.ResponseWriter, r *http.Request) {
 		for i := range entries {
 			geo := MetricsManager.GetGeoLocation(entries[i].ClientIP)
 			entries[i].GeoCountry = geo.Country
+			entries[i].GeoCity = geo.City
 			entries[i].GeoFlag = geo.Flag
 		}
 	}
@@ -481,6 +483,7 @@ func readRecentLogsFromFile(filePath string, limit int) ([]LogEntry, error) {
 	chunkSize := int64(64 * 1024)
 	var lines []string
 	var offset = fileSize
+	var partialLine string
 
 	for len(lines) < limit && offset > 0 {
 		readSize := chunkSize
@@ -495,22 +498,56 @@ func readRecentLogsFromFile(filePath string, limit int) ([]LogEntry, error) {
 		}
 
 		buf := make([]byte, readSize)
-		_, err = file.Read(buf)
+		_, err = io.ReadFull(file, buf)
 		if err != nil {
 			return nil, err
 		}
 
-		chunk := string(buf)
-		chunkLines := strings.Split(chunk, "\n")
-
-		for i := len(chunkLines) - 1; i >= 0; i-- {
-			if chunkLines[i] != "" {
-				lines = append([]string{chunkLines[i]}, lines...)
+		// 逐字节扫描按行分割
+		start := 0
+		for i := 0; i < len(buf); i++ {
+			if buf[i] == '\n' {
+				line := string(buf[start:i])
+				start = i + 1
+				if line == "" {
+					continue
+				}
+				if partialLine != "" {
+					line = partialLine + line
+					partialLine = ""
+				}
+				lines = append([]string{line}, lines...)
 				if len(lines) >= limit {
 					break
 				}
 			}
 		}
+
+		if len(lines) >= limit {
+			break
+		}
+
+		// 处理chunk尾部未换行结束的部分
+		if start < len(buf) {
+			tail := string(buf[start:])
+			if offset == 0 {
+				if tail != "" {
+					if partialLine != "" {
+						tail = partialLine + tail
+					}
+					if tail != "" {
+						lines = append([]string{tail}, lines...)
+					}
+				}
+				partialLine = ""
+			} else {
+				partialLine = tail + partialLine
+			}
+		}
+	}
+
+	if partialLine != "" {
+		lines = append([]string{partialLine}, lines...)
 	}
 
 	// 使用JSON解析器
@@ -552,6 +589,12 @@ func parseLogQuery(r *http.Request) *LogQueryRequest {
 	if pageSize := r.URL.Query().Get("page_size"); pageSize != "" {
 		if v, err := strconv.Atoi(pageSize); err == nil && v > 0 {
 			query.PageSize = v
+		}
+	}
+	if limit := r.URL.Query().Get("limit"); limit != "" {
+		if v, err := strconv.Atoi(limit); err == nil && v > 0 {
+			query.PageSize = v
+			query.Page = 1
 		}
 	}
 

@@ -583,7 +583,7 @@ func LoginPage(w http.ResponseWriter, r *http.Request) {
 	if isValid {
 		clearLoginAttempts(clientIP)
 		token := middleware.GenerateSessionToken()
-		middleware.AddSession(token)
+		middleware.AddSession(token, user)
 		secCfg := getSecurityConfig()
 		http.SetCookie(w, &http.Cookie{
 			Name:     "session",

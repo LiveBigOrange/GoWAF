@@ -12,6 +12,7 @@ import (
 
 type sessionEntry struct {
 	createdAt time.Time
+	username  string
 }
 
 var (
@@ -37,12 +38,16 @@ func InitSessionDB(db *sql.DB) error {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS sessions (
 			token TEXT PRIMARY KEY,
-			created_at INTEGER NOT NULL
+			created_at INTEGER NOT NULL,
+			username TEXT NOT NULL DEFAULT ''
 		)
 	`)
 	if err != nil {
 		return err
 	}
+
+	// 兼容旧表：添加username列（如果不存在）
+	db.Exec(`ALTER TABLE sessions ADD COLUMN username TEXT NOT NULL DEFAULT ''`)
 
 	// 从数据库加载现有session到内存
 	return loadSessionsFromDB()
@@ -50,7 +55,7 @@ func InitSessionDB(db *sql.DB) error {
 
 // loadSessionsFromDB 从数据库加载session到内存
 func loadSessionsFromDB() error {
-	rows, err := sessionDB.Query("SELECT token, created_at FROM sessions")
+	rows, err := sessionDB.Query("SELECT token, created_at, username FROM sessions")
 	if err != nil {
 		return err
 	}
@@ -62,10 +67,11 @@ func loadSessionsFromDB() error {
 	for rows.Next() {
 		var token string
 		var createdAt int64
-		if err := rows.Scan(&token, &createdAt); err != nil {
+		var username string
+		if err := rows.Scan(&token, &createdAt, &username); err != nil {
 			continue
 		}
-		sessionStore[token] = sessionEntry{createdAt: time.Unix(createdAt, 0)}
+		sessionStore[token] = sessionEntry{createdAt: time.Unix(createdAt, 0), username: username}
 	}
 
 	return rows.Err()
@@ -92,17 +98,17 @@ func IsValidSession(token string) bool {
 }
 
 // AddSession 添加 session
-func AddSession(token string) {
+func AddSession(token, username string) {
 	sessionMu.Lock()
 	defer sessionMu.Unlock()
 
 	now := time.Now()
-	sessionStore[token] = sessionEntry{createdAt: now}
+	sessionStore[token] = sessionEntry{createdAt: now, username: username}
 
 	// 持久化到数据库
 	if sessionDB != nil {
-		sessionDB.Exec("INSERT OR REPLACE INTO sessions (token, created_at) VALUES (?, ?)",
-			token, now.Unix())
+		sessionDB.Exec("INSERT OR REPLACE INTO sessions (token, created_at, username) VALUES (?, ?, ?)",
+			token, now.Unix(), username)
 	}
 }
 
@@ -124,13 +130,26 @@ func RenewSession(token string) {
 	defer sessionMu.Unlock()
 
 	now := time.Now()
-	sessionStore[token] = sessionEntry{createdAt: now}
+	entry := sessionStore[token]
+	entry.createdAt = now
+	sessionStore[token] = entry
 
 	// 更新数据库
 	if sessionDB != nil {
 		sessionDB.Exec("UPDATE sessions SET created_at = ? WHERE token = ?",
 			now.Unix(), token)
 	}
+}
+
+// GetSessionUsername 获取session关联的用户名
+func GetSessionUsername(token string) string {
+	sessionMu.RLock()
+	defer sessionMu.RUnlock()
+	entry, ok := sessionStore[token]
+	if !ok {
+		return ""
+	}
+	return entry.username
 }
 
 // CleanExpiredSessions 清理过期 session

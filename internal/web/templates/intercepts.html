@@ -287,6 +287,15 @@
                     <tbody id="groupBody"></tbody>
                 </table>
             </div>
+            <div class="pagination" id="groupPagination" style="display:none;">
+                <div class="pagination-info">
+                    <span id="groupPageInfo">第1 页 / 第1 页</span>
+                </div>
+                <div class="pagination-btns">
+                    <button class="pagination-btn" id="groupPrevBtn" onclick="groupPrevPage()">上一页</button>
+                    <button class="pagination-btn" id="groupNextBtn" onclick="groupNextPage()">下一页</button>
+                </div>
+            </div>
             </div>
             <div class="pagination" id="pagination" style="display:none;">
                 <div class="pagination-info">
@@ -311,6 +320,42 @@
             var currentPage = 1;
             var pageSize = 10;
             var currentViewMode = 'detail';
+            var groupCurrentPage = 1;
+            var groupPageSize = 20;
+
+            function syncURL() {
+                var params = new URLSearchParams();
+                params.set('view', currentViewMode);
+                var search = document.getElementById('searchInput').value;
+                var type = document.getElementById('typeFilter').value;
+                var startDate = document.getElementById('startDate').value;
+                var endDate = document.getElementById('endDate').value;
+                if (search) params.set('search', search);
+                if (type) params.set('type', type);
+                if (startDate) params.set('start', startDate);
+                if (endDate) params.set('end', endDate);
+                if (currentPage > 1) params.set('page', currentPage);
+                if (pageSize !== 10) params.set('size', pageSize);
+                if (groupCurrentPage > 1) params.set('gpage', groupCurrentPage);
+                history.replaceState(null, '', '?' + params.toString());
+            }
+
+            function restoreFromURL() {
+                var params = new URLSearchParams(location.search);
+                if (params.get('view')) currentViewMode = params.get('view');
+                if (params.get('search')) document.getElementById('searchInput').value = params.get('search');
+                if (params.get('type')) document.getElementById('typeFilter').value = params.get('type');
+                if (params.get('start')) document.getElementById('startDate').value = params.get('start');
+                if (params.get('end')) document.getElementById('endDate').value = params.get('end');
+                var urlPage = parseInt(params.get('page')) || 1;
+                if (urlPage > 1) currentPage = urlPage;
+                var gpage = parseInt(params.get('gpage')) || 1;
+                if (gpage > 1) groupCurrentPage = gpage;
+                if (params.get('size')) {
+                    var s = parseInt(params.get('size'));
+                    if (s > 0) { pageSize = s; document.getElementById('pageSize').value = String(s); }
+                }
+            }
 
             function escapeHtml(text) {
                 if (text == null) return '';
@@ -522,75 +567,6 @@
                         '<td>' + escapedStatus + '</td>' +
                         '<td><button class="view-btn" onclick="toggleDetail(' + index + ', event)">查看详情</button></td>';
                     tbody.appendChild(tr);
-                    
-                    var detailTr = document.createElement('tr');
-                    detailTr.className = 'detail-row';
-                    detailTr.id = 'detail-' + index;
-                    
-                    var detailHtml = '<td colspan="8"><div class="detail-content">';
-                    detailHtml += '<div class="detail-item"><span class="detail-label">请求ID：</span><span class="detail-value"><code>' + escapeHtml(item.request_id || '-') + '</code></span></div>';
-                    detailHtml += '<div class="detail-item"><span class="detail-label">拦截时间：</span><span class="detail-value">' + escapeHtml(timeStr) + '</span></div>';
-                    detailHtml += '<div class="detail-item"><span class="detail-label">客户端IP：</span><span class="detail-value"><code>' + escapedIP + '</code></span></div>';
-                    if (item.geo_country) {
-                        var detailGeo = escapeHtml(item.geo_flag || '') + ' ' + escapeHtml(item.geo_country);
-                        if (item.geo_city && item.geo_city !== item.geo_country) {
-                            detailGeo += ' ' + escapeHtml(item.geo_city);
-                        }
-                        detailHtml += '<div class="detail-item"><span class="detail-label">地理位置：</span><span class="detail-value">' + detailGeo + '</span></div>';
-                    }
-                    detailHtml += '<div class="detail-item"><span class="detail-label">请求Host：</span><span class="detail-value"><code>' + escapeHtml(item.host || '-') + '</code></span></div>';
-                    detailHtml += '<div class="detail-item"><span class="detail-label">请求方法：</span><span class="detail-value"><code>' + escapedMethod + '</code></span></div>';
-                    detailHtml += '<div class="detail-item"><span class="detail-label">请求路径：</span><span class="detail-value"><code>' + escapedPath + '</code></span></div>';
-                    if (item.query) {
-                        detailHtml += '<div class="detail-item"><span class="detail-label">查询参数：</span><span class="detail-value"><code>' + escapeHtml(item.query) + '</code></span></div>';
-                    }
-                    if (item.protocol) {
-                        detailHtml += '<div class="detail-item"><span class="detail-label">HTTP协议：</span><span class="detail-value"><code>' + escapeHtml(item.protocol) + '</code></span></div>';
-                    }
-                    if (item.scheme) {
-                        detailHtml += '<div class="detail-item"><span class="detail-label">请求协议：</span><span class="detail-value"><code>' + escapeHtml(item.scheme) + '</code></span></div>';
-                    }
-                    if (item.user_agent) {
-                        detailHtml += '<div class="detail-item"><span class="detail-label">User-Agent：</span><span class="detail-value">' + escapeHtml(item.user_agent) + '</span></div>';
-                    }
-                    if (item.referer) {
-                        detailHtml += '<div class="detail-item"><span class="detail-label">Referer：</span><span class="detail-value">' + escapeHtml(item.referer) + '</span></div>';
-                    }
-                    if (item.content_type) {
-                        detailHtml += '<div class="detail-item"><span class="detail-label">Content-Type：</span><span class="detail-value"><code>' + escapeHtml(item.content_type) + '</code></span></div>';
-                    }
-                    detailHtml += '<div class="detail-item"><span class="detail-label">拦截规则：</span><span class="detail-value"><span class="badge ' + ruleClass + '">' + ruleTypeText + '</span></span></div>';
-                    if (item.match_detail) {
-                        var matchDetailHtml = escapeHtml(item.match_detail);
-                        matchDetailHtml = matchDetailHtml.replace(/\[Rule#(\d+)\|([^\]]+)\]/g, '<span style="background:#e8f5e9;color:#2e7d32;padding:1px 6px;border-radius:3px;font-size:11px;margin:0 2px;">规则#$1 [$2]</span>');
-                        matchDetailHtml = matchDetailHtml.replace(/\[Rule#(\d+)\]/g, '<span style="background:#e8f5e9;color:#2e7d32;padding:1px 6px;border-radius:3px;font-size:11px;margin:0 2px;">规则#$1</span>');
-                        matchDetailHtml = matchDetailHtml.replace(/\[([^\]]+)\]/g, function(m, content) {
-                            if (content.indexOf('Rule#') === -1) return '<span style="background:#fff3e0;color:#e65100;padding:1px 6px;border-radius:3px;font-size:11px;margin:0 2px;">' + escapeHtml(content) + '</span>';
-                            return m;
-                        });
-                        detailHtml += '<div class="detail-item"><span class="detail-label">触发子规则：</span><span class="detail-value" style="line-height:1.8;">' + matchDetailHtml + '</span></div>';
-                    }
-                    if (item.match_location) {
-                        detailHtml += '<div class="detail-item"><span class="detail-label">检测位置：</span><span class="detail-value"><code>' + escapeHtml(item.match_location) + '</code></span></div>';
-                    }
-                    detailHtml += '<div class="detail-item"><span class="detail-label">状态码：</span><span class="detail-value"><code>' + escapedStatus + '</code></span></div>';
-                    detailHtml += '<div class="detail-item"><span class="detail-label">延迟时间：</span><span class="detail-value">' + (item.latency_ms ? item.latency_ms.toFixed(2) + ' ms' : '-') + '</span></div>';
-                    if (item.upstream_latency_ms) {
-                        detailHtml += '<div class="detail-item"><span class="detail-label">后端延迟：</span><span class="detail-value">' + item.upstream_latency_ms.toFixed(2) + ' ms</span></div>';
-                    }
-                    if (item.request_size) {
-                        detailHtml += '<div class="detail-item"><span class="detail-label">请求大小：</span><span class="detail-value">' + formatBytes(item.request_size) + '</span></div>';
-                    }
-                    if (item.upstream_addr) {
-                        detailHtml += '<div class="detail-item"><span class="detail-label">后端地址：</span><span class="detail-value"><code>' + escapeHtml(item.upstream_addr) + '</code></span></div>';
-                    }
-                    if (item.error_message) {
-                        detailHtml += '<div class="detail-item"><span class="detail-label">错误信息：</span><span class="detail-value" style="color:#e74c3c;">' + escapeHtml(item.error_message) + '</span></div>';
-                    }
-                    detailHtml += '</div></td>';
-                    
-                    detailTr.innerHTML = detailHtml;
-                    tbody.appendChild(detailTr);
                 });
 
                 document.getElementById('pageInfo').textContent = '第' + currentPage + ' 页 / 第' + totalPages + ' 页（共' + (serverTotal > filteredData.length ? serverTotal : filteredData.length) + ' 条）';
@@ -604,19 +580,82 @@
             window.changePageSize = function() { pageSize = parseInt(document.getElementById('pageSize').value); currentPage = 1; renderData(); };
 
             window.toggleDetail = function(index, e) {
-                var detailRow = document.getElementById('detail-' + index);
                 var btn = e.target;
-                if (detailRow.classList.contains('show')) {
-                    detailRow.classList.remove('show');
+                var row = btn.closest('tr');
+                var existingDetail = row.nextElementSibling;
+                if (existingDetail && existingDetail.classList.contains('detail-row') && existingDetail.classList.contains('show')) {
+                    existingDetail.remove();
                     btn.textContent = '查看详情';
                 } else {
-                    detailRow.classList.add('show');
+                    var start = (currentPage - 1) * pageSize;
+                    var item = filteredData[start + index];
+                    if (!item) return;
+                    var detailTr = document.createElement('tr');
+                    detailTr.className = 'detail-row show';
+                    var detailHtml = buildDetailHtml(item);
+                    detailTr.innerHTML = '<td colspan="8"><div class="detail-content">' + detailHtml + '</div></td>';
+                    row.after(detailTr);
                     btn.textContent = '收起详情';
                 }
             };
 
+            function buildDetailHtml(item) {
+                var timeStr = formatTime(item.timestamp);
+                var escapedIP = escapeHtml(item.client_ip || '');
+                var escapedPath = escapeHtml(item.path || '');
+                var escapedRule = escapeHtml(item.rule_id || '');
+                var escapedMethod = escapeHtml(item.method || 'GET');
+                var escapedStatus = escapeHtml(item.status || 403);
+                var ruleTypeText = '';
+                var ruleClass = '';
+                if (item.rule_id === 'IP黑名单') { ruleTypeText = 'IP黑名单'; ruleClass = 'ip'; }
+                else if (item.rule_id === 'UA黑名单') { ruleTypeText = 'UA黑名单'; ruleClass = 'ua'; }
+                else if (item.rule_id === '路径黑名单') { ruleTypeText = '路径黑名单'; ruleClass = 'path'; }
+                else if (item.rule_id === '限流') { ruleTypeText = '限流'; ruleClass = 'ratelimit'; }
+                else { ruleTypeText = escapedRule; ruleClass = 'other'; }
+
+                var h = '';
+                h += '<div class="detail-item"><span class="detail-label">请求ID：</span><span class="detail-value"><code>' + escapeHtml(item.request_id || '-') + '</code></span></div>';
+                h += '<div class="detail-item"><span class="detail-label">拦截时间：</span><span class="detail-value">' + escapeHtml(timeStr) + '</span></div>';
+                h += '<div class="detail-item"><span class="detail-label">客户端IP：</span><span class="detail-value"><code>' + escapedIP + '</code></span></div>';
+                if (item.geo_country) {
+                    var dg = escapeHtml(item.geo_flag || '') + ' ' + escapeHtml(item.geo_country);
+                    if (item.geo_city && item.geo_city !== item.geo_country) dg += ' ' + escapeHtml(item.geo_city);
+                    h += '<div class="detail-item"><span class="detail-label">地理位置：</span><span class="detail-value">' + dg + '</span></div>';
+                }
+                h += '<div class="detail-item"><span class="detail-label">请求Host：</span><span class="detail-value"><code>' + escapeHtml(item.host || '-') + '</code></span></div>';
+                h += '<div class="detail-item"><span class="detail-label">请求方法：</span><span class="detail-value"><code>' + escapedMethod + '</code></span></div>';
+                h += '<div class="detail-item"><span class="detail-label">请求路径：</span><span class="detail-value"><code>' + escapedPath + '</code></span></div>';
+                if (item.query) h += '<div class="detail-item"><span class="detail-label">查询参数：</span><span class="detail-value"><code>' + escapeHtml(item.query) + '</code></span></div>';
+                if (item.protocol) h += '<div class="detail-item"><span class="detail-label">HTTP协议：</span><span class="detail-value"><code>' + escapeHtml(item.protocol) + '</code></span></div>';
+                if (item.scheme) h += '<div class="detail-item"><span class="detail-label">请求协议：</span><span class="detail-value"><code>' + escapeHtml(item.scheme) + '</code></span></div>';
+                if (item.user_agent) h += '<div class="detail-item"><span class="detail-label">User-Agent：</span><span class="detail-value">' + escapeHtml(item.user_agent) + '</span></div>';
+                if (item.referer) h += '<div class="detail-item"><span class="detail-label">Referer：</span><span class="detail-value">' + escapeHtml(item.referer) + '</span></div>';
+                if (item.content_type) h += '<div class="detail-item"><span class="detail-label">Content-Type：</span><span class="detail-value"><code>' + escapeHtml(item.content_type) + '</code></span></div>';
+                h += '<div class="detail-item"><span class="detail-label">拦截规则：</span><span class="detail-value"><span class="badge ' + ruleClass + '">' + ruleTypeText + '</span></span></div>';
+                if (item.match_detail) {
+                    var mdh = escapeHtml(item.match_detail);
+                    mdh = mdh.replace(/\[Rule#(\d+)\|([^\]]+)\]/g, '<span style="background:#e8f5e9;color:#2e7d32;padding:1px 6px;border-radius:3px;font-size:11px;margin:0 2px;">规则#$1 [$2]</span>');
+                    mdh = mdh.replace(/\[Rule#(\d+)\]/g, '<span style="background:#e8f5e9;color:#2e7d32;padding:1px 6px;border-radius:3px;font-size:11px;margin:0 2px;">规则#$1</span>');
+                    mdh = mdh.replace(/\[([^\]]+)\]/g, function(m, content) {
+                        if (content.indexOf('Rule#') === -1) return '<span style="background:#fff3e0;color:#e65100;padding:1px 6px;border-radius:3px;font-size:11px;margin:0 2px;">' + escapeHtml(content) + '</span>';
+                        return m;
+                    });
+                    h += '<div class="detail-item"><span class="detail-label">触发子规则：</span><span class="detail-value" style="line-height:1.8;">' + mdh + '</span></div>';
+                }
+                if (item.match_location) h += '<div class="detail-item"><span class="detail-label">检测位置：</span><span class="detail-value"><code>' + escapeHtml(item.match_location) + '</code></span></div>';
+                h += '<div class="detail-item"><span class="detail-label">状态码：</span><span class="detail-value"><code>' + escapedStatus + '</code></span></div>';
+                h += '<div class="detail-item"><span class="detail-label">延迟时间：</span><span class="detail-value">' + (item.latency_ms ? item.latency_ms.toFixed(2) + ' ms' : '-') + '</span></div>';
+                if (item.upstream_latency_ms) h += '<div class="detail-item"><span class="detail-label">后端延迟：</span><span class="detail-value">' + item.upstream_latency_ms.toFixed(2) + ' ms</span></div>';
+                if (item.request_size) h += '<div class="detail-item"><span class="detail-label">请求大小：</span><span class="detail-value">' + formatBytes(item.request_size) + '</span></div>';
+                if (item.upstream_addr) h += '<div class="detail-item"><span class="detail-label">后端地址：</span><span class="detail-value"><code>' + escapeHtml(item.upstream_addr) + '</code></span></div>';
+                if (item.error_message) h += '<div class="detail-item"><span class="detail-label">错误信息：</span><span class="detail-value" style="color:#e74c3c;">' + escapeHtml(item.error_message) + '</span></div>';
+                return h;
+            }
+
             window.switchViewMode = function(mode) {
                 currentViewMode = mode;
+                groupCurrentPage = 1;
                 var btns = document.querySelectorAll('.view-mode-btn');
                 btns.forEach(function(btn) {
                     btn.classList.toggle('active', btn.getAttribute('data-mode') === mode);
@@ -628,6 +667,7 @@
                     detailTable.style.display = '';
                     groupContainer.style.display = 'none';
                     pagination.style.display = 'flex';
+                    document.getElementById('groupPagination').style.display = 'none';
                     renderData();
                 } else {
                     detailTable.style.display = 'none';
@@ -635,6 +675,7 @@
                     pagination.style.display = 'none';
                     renderGroupView();
                 }
+                syncURL();
             };
 
             function renderGroupView() {
@@ -642,7 +683,7 @@
                 var tbody = document.getElementById('groupBody');
                 if (!filteredData || filteredData.length === 0) {
                     thead.innerHTML = '';
-                    tbody.innerHTML = '<tr><td colspan="5" class="empty-message">暂无拦截数据</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="7" class="empty-message">暂无拦截数据</td></tr>';
                     return;
                 }
 
@@ -693,10 +734,17 @@
                 arr.sort(function(a, b) { return b.count - a.count; });
                 var maxCount = arr.length > 0 ? arr[0].count : 1;
 
+                var totalGroups = arr.length;
+                var groupTotalPages = Math.max(1, Math.ceil(totalGroups / groupPageSize));
+                if (groupCurrentPage > groupTotalPages) groupCurrentPage = groupTotalPages;
+                var gStart = (groupCurrentPage - 1) * groupPageSize;
+                var gEnd = Math.min(gStart + groupPageSize, totalGroups);
+                var pageArr = arr.slice(gStart, gEnd);
+
                 tbody.innerHTML = '';
-                arr.forEach(function(group, idx) {
+                pageArr.forEach(function(group, idx) {
                     var tr = document.createElement('tr');
-                    var rank = idx + 1;
+                    var rank = gStart + idx + 1;
                     var barWidth = Math.max(8, Math.round((group.count / maxCount) * 100));
                     var lastTime = formatTime(group.lastTime);
 
@@ -733,7 +781,42 @@
                     }
                     tbody.appendChild(tr);
                 });
+
+                var gPagination = document.getElementById('groupPagination');
+                if (totalGroups > groupPageSize) {
+                    document.getElementById('groupPageInfo').textContent = '第' + groupCurrentPage + ' 页 / 第' + groupTotalPages + ' 页（共' + totalGroups + ' 组）';
+                    document.getElementById('groupPrevBtn').disabled = groupCurrentPage <= 1;
+                    document.getElementById('groupNextBtn').disabled = groupCurrentPage >= groupTotalPages;
+                    gPagination.style.display = 'flex';
+                } else {
+                    gPagination.style.display = 'none';
+                }
             }
+
+            window.groupPrevPage = function() {
+                if (groupCurrentPage > 1) {
+                    groupCurrentPage--;
+                    renderGroupView();
+                    syncURL();
+                }
+            };
+
+            window.groupNextPage = function() {
+                var totalGroups = Object.keys((function() {
+                    var g = {};
+                    filteredData.forEach(function(item) {
+                        var key = currentViewMode === 'ip' ? (item.client_ip || 'unknown') : currentViewMode === 'path' ? (item.path || 'unknown') : (item.rule_id || 'unknown');
+                        g[key] = true;
+                    });
+                    return g;
+                })()).length;
+                var groupTotalPages = Math.max(1, Math.ceil(totalGroups / groupPageSize));
+                if (groupCurrentPage < groupTotalPages) {
+                    groupCurrentPage++;
+                    renderGroupView();
+                    syncURL();
+                }
+            };
 
             window.drillDown = function(field, value) {
                 currentViewMode = 'detail';
@@ -744,10 +827,22 @@
                 document.getElementById('detailTable').style.display = '';
                 document.getElementById('groupViewContainer').style.display = 'none';
                 document.getElementById('pagination').style.display = 'flex';
+                document.getElementById('groupPagination').style.display = 'none';
                 document.getElementById('searchInput').value = value;
                 filterTable();
+                syncURL();
             };
 
+            restoreFromURL();
+            if (currentViewMode !== 'detail') {
+                var btns = document.querySelectorAll('.view-mode-btn');
+                btns.forEach(function(btn) {
+                    btn.classList.toggle('active', btn.getAttribute('data-mode') === currentViewMode);
+                });
+                document.getElementById('detailTable').style.display = 'none';
+                document.getElementById('groupViewContainer').style.display = '';
+                document.getElementById('pagination').style.display = 'none';
+            }
             initFilters();
             loadData();
         })();
