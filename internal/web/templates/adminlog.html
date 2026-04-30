@@ -277,6 +277,17 @@
                 <option value="3xx">3xx 重定向</option>
                 <option value="4xx">4xx 客户端错误</option>
                 <option value="5xx">5xx 服务器错误</option>
+                <option value="200">200</option>
+                <option value="301">301</option>
+                <option value="302">302</option>
+                <option value="304">304</option>
+                <option value="400">400</option>
+                <option value="401">401</option>
+                <option value="403">403</option>
+                <option value="404">404</option>
+                <option value="500">500</option>
+                <option value="502">502</option>
+                <option value="503">503</option>
             </select>
             <input type="text" id="filterIP" placeholder="筛选IP地址" oninput="applyFilters()" style="width: 150px; max-width: 100%;">
             <input type="text" id="filterPath" placeholder="筛选路径" oninput="applyFilters()" style="width: 200px; max-width: 100%;">
@@ -448,9 +459,10 @@
                     if (statusFilter) {
                         var status = log.status;
                         if (statusFilter === '2xx' && (status < 200 || status >= 300)) return false;
-                        if (statusFilter === '3xx' && (status < 300 || status >= 400)) return false;
-                        if (statusFilter === '4xx' && (status < 400 || status >= 500)) return false;
-                        if (statusFilter === '5xx' && status < 500) return false;
+                        else if (statusFilter === '3xx' && (status < 300 || status >= 400)) return false;
+                        else if (statusFilter === '4xx' && (status < 400 || status >= 500)) return false;
+                        else if (statusFilter === '5xx' && status < 500) return false;
+                        else if (!isNaN(statusFilter) && status !== parseInt(statusFilter)) return false;
                     }
                     
                     if (ipFilter && log.client_ip && log.client_ip.toLowerCase().indexOf(ipFilter) === -1) return false;
@@ -829,11 +841,13 @@
                 } else if (field === 'action') {
                     document.getElementById('filterAction').value = value;
                 } else if (field === 'status') {
-                    var statusFilter = document.getElementById('filterStatus');
-                    if (value >= 200 && value < 300) statusFilter.value = '2xx';
-                    else if (value >= 300 && value < 400) statusFilter.value = '3xx';
-                    else if (value >= 400 && value < 500) statusFilter.value = '4xx';
-                    else if (value >= 500) statusFilter.value = '5xx';
+                    document.getElementById('filterStatus').value = String(value);
+                    if (!document.getElementById('filterStatus').querySelector('option[value="' + value + '"]')) {
+                        var opt = document.createElement('option');
+                        opt.value = String(value);
+                        opt.textContent = String(value);
+                        document.getElementById('filterStatus').appendChild(opt);
+                    }
                 }
                 applyFilters();
             };

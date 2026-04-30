@@ -73,4 +73,7 @@ func (s *Scheduler) cleanup() {
 	if err := s.manager.CleanupOldData(s.retention); err != nil {
 		log.Printf("[WARN] 数据清理失败: %v", err)
 	}
+	if err := s.manager.CleanupMinuteStats(); err != nil {
+		log.Printf("[WARN] 分钟数据清理失败: %v", err)
+	}
 }

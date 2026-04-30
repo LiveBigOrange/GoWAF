@@ -4,8 +4,48 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 )
+
+type trendCacheEntry struct {
+	data      interface{}
+	timestamp time.Time
+	key       string
+}
+
+var (
+	trendCacheMu sync.RWMutex
+	trendCache   = make(map[string]trendCacheEntry)
+	trendCacheTTL = 2 * time.Second
+)
+
+func getTrendCache(key string) (interface{}, bool) {
+	trendCacheMu.RLock()
+	defer trendCacheMu.RUnlock()
+	entry, ok := trendCache[key]
+	if !ok || time.Since(entry.timestamp) > trendCacheTTL {
+		return nil, false
+	}
+	return entry.data, true
+}
+
+func setTrendCache(key string, data interface{}) {
+	trendCacheMu.Lock()
+	defer trendCacheMu.Unlock()
+	trendCache[key] = trendCacheEntry{data: data, timestamp: time.Now(), key: key}
+	if len(trendCache) > 20 {
+		var oldest string
+		var oldestTime time.Time
+		for k, v := range trendCache {
+			if oldest == "" || v.timestamp.Before(oldestTime) {
+				oldest = k
+				oldestTime = v.timestamp
+			}
+		}
+		delete(trendCache, oldest)
+	}
+}
 
 // MetricsHistoryRequest 历史查询请求
 type MetricsHistoryRequest struct {
@@ -89,7 +129,6 @@ func GetMetricsMinuteStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 支持 start/end (ISO格式) 和 start_time/end_time (日期格式)
 	startStr := r.URL.Query().Get("start")
 	endStr := r.URL.Query().Get("end")
 	if startStr == "" {
@@ -125,12 +164,20 @@ func GetMetricsMinuteStats(w http.ResponseWriter, r *http.Request) {
 		end = time.Now().UTC()
 	}
 
+	cacheKey := "minute:" + start.Format(time.RFC3339) + ":" + end.Format(time.RFC3339)
+	if cached, ok := getTrendCache(cacheKey); ok {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(cached)
+		return
+	}
+
 	stats, err := MetricsManager.GetMinuteStats(start, end)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	setTrendCache(cacheKey, stats)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(stats)
 }
@@ -142,7 +189,6 @@ func GetMetricsHourlyStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 支持 start/end (ISO格式) 和 start_time/end_time (日期格式)
 	startStr := r.URL.Query().Get("start")
 	endStr := r.URL.Query().Get("end")
 	if startStr == "" {
@@ -155,11 +201,9 @@ func GetMetricsHourlyStats(w http.ResponseWriter, r *http.Request) {
 	var start, end time.Time
 	var err error
 
-	// 尝试解析 ISO 格式（前端发送UTC，数据库存UTC，直接用UTC查询）
 	if startStr != "" {
 		start, err = time.Parse(time.RFC3339, startStr)
 		if err != nil {
-			// 尝试日期格式
 			start, err = time.Parse("2006-01-02", startStr)
 		}
 	}
@@ -180,12 +224,20 @@ func GetMetricsHourlyStats(w http.ResponseWriter, r *http.Request) {
 		end = time.Now().UTC()
 	}
 
+	cacheKey := "hourly:" + start.Format(time.RFC3339) + ":" + end.Format(time.RFC3339)
+	if cached, ok := getTrendCache(cacheKey); ok {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(cached)
+		return
+	}
+
 	stats, err := MetricsManager.GetHourlyStats(start, end)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	setTrendCache(cacheKey, stats)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(stats)
 }

@@ -665,32 +665,6 @@ func (m *Manager) createTables() error {
 		return err
 	}
 
-	// 小时统计表
-	_, err = m.db.Exec(`
-		CREATE TABLE IF NOT EXISTS hourly_stats (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			time_hour DATETIME NOT NULL UNIQUE,
-			total_requests INTEGER DEFAULT 0,
-			blocked_requests INTEGER DEFAULT 0,
-			avg_qps FLOAT DEFAULT 0,
-			avg_latency_ms FLOAT DEFAULT 0,
-			inbound_bytes INTEGER DEFAULT 0,
-			outbound_bytes INTEGER DEFAULT 0
-		)
-	`)
-	if err != nil {
-		return err
-	}
-
-	_, err = m.db.Exec(`CREATE INDEX IF NOT EXISTS idx_hourly_time ON hourly_stats(time_hour)`)
-	if err != nil {
-		return err
-	}
-
-	// 添加流量字段的迁移
-	m.db.Exec(`ALTER TABLE hourly_stats ADD COLUMN inbound_bytes INTEGER DEFAULT 0`)
-	m.db.Exec(`ALTER TABLE hourly_stats ADD COLUMN outbound_bytes INTEGER DEFAULT 0`)
-
 	// 拦截事件表字段迁移（添加新字段）
 	m.db.Exec(`ALTER TABLE intercept_events ADD COLUMN host TEXT`)
 	m.db.Exec(`ALTER TABLE intercept_events ADD COLUMN query TEXT`)
@@ -1005,22 +979,20 @@ func (m *Manager) GetTotalStats(startTime, endTime time.Time) (total int64, bloc
 	return total, blocked, nil
 }
 
-// SaveHourlyStats 保存小时统计
-func (m *Manager) SaveHourlyStats(timeHour time.Time, total, blocked int64, avgQPS, avgLatency float64) error {
-	_, err := m.db.Exec(`
-		INSERT OR REPLACE INTO hourly_stats (time_hour, total_requests, blocked_requests, avg_qps, avg_latency_ms)
-		VALUES (?, ?, ?, ?, ?)
-	`, timeHour.Format("2006-01-02 15:04:05.999999"), total, blocked, avgQPS, avgLatency)
-	return err
-}
-
 // GetHourlyStats 获取小时统计
 func (m *Manager) GetHourlyStats(startTime, endTime time.Time) ([]HourlyStats, error) {
 	rows, err := m.db.Query(`
-		SELECT time_hour, total_requests, blocked_requests, avg_qps, avg_latency_ms,
-		       COALESCE(inbound_bytes, 0), COALESCE(outbound_bytes, 0)
-		FROM hourly_stats
-		WHERE time_hour >= ? AND time_hour <= ?
+		SELECT 
+			strftime('%Y-%m-%d %H:00:00', time_minute) as time_hour,
+			COALESCE(SUM(total_requests), 0),
+			COALESCE(SUM(blocked_requests), 0),
+			COALESCE(AVG(avg_qps), 0),
+			COALESCE(AVG(avg_latency_ms), 0),
+			COALESCE(SUM(inbound_bytes), 0),
+			COALESCE(SUM(outbound_bytes), 0)
+		FROM minute_stats
+		WHERE time_minute >= ? AND time_minute <= ?
+		GROUP BY time_hour
 		ORDER BY time_hour ASC
 	`, startTime.Format("2006-01-02 15:04:05.999999"), endTime.Format("2006-01-02 15:04:05.999999"))
 	if err != nil {
@@ -1096,79 +1068,13 @@ func (m *Manager) GetMinuteStats(startTime, endTime time.Time) ([]MinuteStats, e
 	return stats, nil
 }
 
-// RecordHourlyStats 记录小时级统计（从分钟数据汇总）
-func (m *Manager) RecordHourlyStats() error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	now := time.Now().UTC()
-	// 当前小时的开始时间
-	currentHour := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC)
-	// 上一个完整小时的开始时间
-	lastHour := currentHour.Add(-time.Hour)
-
-	// 汇总上一个完整小时的数据
-	if err := m.aggregateHourData(lastHour); err != nil {
-		return err
-	}
-
-	// 也汇总当前小时的数据（实时数据）
-	if err := m.aggregateHourData(currentHour); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// aggregateHourData 汇总指定小时的数据
-func (m *Manager) aggregateHourData(hourStart time.Time) error {
-	// 检查该小时是否已经汇总过
-	hourStartStr := hourStart.Format("2006-01-02 15:04:05.999999")
-	hourEndStr := hourStart.Add(time.Hour).Format("2006-01-02 15:04:05.999999")
-	var count int
-	err := m.db.QueryRow(`SELECT COUNT(*) FROM hourly_stats WHERE time_hour = ?`, hourStartStr).Scan(&count)
-	if err != nil {
-		return err
-	}
-	if count > 0 {
-		// 已存在，更新数据
-		_, err = m.db.Exec(`
-			UPDATE hourly_stats SET
-				total_requests = (SELECT COALESCE(SUM(total_requests), 0) FROM minute_stats WHERE time_minute >= ? AND time_minute < ?),
-				blocked_requests = (SELECT COALESCE(SUM(blocked_requests), 0) FROM minute_stats WHERE time_minute >= ? AND time_minute < ?),
-				avg_qps = (SELECT COALESCE(AVG(avg_qps), 0) FROM minute_stats WHERE time_minute >= ? AND time_minute < ?),
-				avg_latency_ms = (SELECT COALESCE(AVG(avg_latency_ms), 0) FROM minute_stats WHERE time_minute >= ? AND time_minute < ?),
-				inbound_bytes = (SELECT COALESCE(SUM(inbound_bytes), 0) FROM minute_stats WHERE time_minute >= ? AND time_minute < ?),
-				outbound_bytes = (SELECT COALESCE(SUM(outbound_bytes), 0) FROM minute_stats WHERE time_minute >= ? AND time_minute < ?)
-			WHERE time_hour = ?
-		`, hourStartStr, hourEndStr, hourStartStr, hourEndStr, hourStartStr, hourEndStr, hourStartStr, hourEndStr, hourStartStr, hourEndStr, hourStartStr, hourEndStr, hourStartStr)
-		return err
-	}
-
-	// 不存在，插入新数据
-	_, err = m.db.Exec(`
-		INSERT INTO hourly_stats (time_hour, total_requests, blocked_requests, avg_qps, avg_latency_ms, inbound_bytes, outbound_bytes)
-		SELECT 
-			? as time_hour,
-			COALESCE(SUM(total_requests), 0) as total_requests,
-			COALESCE(SUM(blocked_requests), 0) as blocked_requests,
-			COALESCE(AVG(avg_qps), 0) as avg_qps,
-			COALESCE(AVG(avg_latency_ms), 0) as avg_latency_ms,
-			COALESCE(SUM(inbound_bytes), 0) as inbound_bytes,
-			COALESCE(SUM(outbound_bytes), 0) as outbound_bytes
-		FROM minute_stats
-		WHERE time_minute >= ? AND time_minute < ?
-	`, hourStartStr, hourStartStr, hourEndStr)
-	return err
-}
-
-// CleanupMinuteStats 清理过期的分钟级数据（保留最近2小时）
+// CleanupMinuteStats 清理过期的分钟级数据（保留7天）
 func (m *Manager) CleanupMinuteStats() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// 删除2小时前的分钟级数据
-	cutoff := time.Now().UTC().Add(-2 * time.Hour).Format("2006-01-02 15:04:05.999999")
+	// 删除7天前的分钟级数据
+	cutoff := time.Now().UTC().AddDate(0, 0, -7).Format("2006-01-02 15:04:05.999999")
 	_, err := m.db.Exec(`DELETE FROM minute_stats WHERE time_minute < ?`, cutoff)
 	return err
 }
@@ -1355,12 +1261,6 @@ func (m *Manager) CleanupOldData(retentionDays int) error {
 
 	// 清理每日统计
 	_, err = m.db.Exec(`DELETE FROM daily_stats WHERE date < ?`, cutoffDate)
-	if err != nil {
-		return err
-	}
-
-	// 清理小时统计
-	_, err = m.db.Exec(`DELETE FROM hourly_stats WHERE time_hour < ?`, cutoffTimeStr)
 	if err != nil {
 		return err
 	}
