@@ -1,11 +1,14 @@
 package logger
 
 import (
+	"fmt"
 	"log"
 	"os"
+	"strings"
+	"sync/atomic"
+	"time"
 )
 
-// LogLevel 日志级别
 type LogLevel int
 
 const (
@@ -17,59 +20,129 @@ const (
 )
 
 var (
-	currentLevel = LevelInfo
-	stdLogger    = log.New(os.Stdout, "", log.LstdFlags)
+	currentLevel    atomic.Int32
+	stdLogger       = log.New(os.Stdout, "", log.LstdFlags)
+	captureWriter   = &ringCaptureWriter{}
+	inLogAndCapture int32
 )
+
+func init() {
+	currentLevel.Store(int32(LevelInfo))
+	log.SetOutput(captureWriter)
+}
+
+type ringCaptureWriter struct{}
+
+func (w *ringCaptureWriter) Write(p []byte) (int, error) {
+	line := string(p)
+	if len(line) > 0 && line[len(line)-1] == '\n' {
+		line = line[:len(line)-1]
+	}
+	if atomic.LoadInt32(&inLogAndCapture) == 0 {
+		addRingEntry(line)
+	}
+	n, err := os.Stdout.Write(p)
+	return n, err
+}
+
+func logAndCapture(prefix, format string, args ...interface{}) {
+	msg := fmt.Sprintf(prefix+format, args...)
+	atomic.StoreInt32(&inLogAndCapture, 1)
+	stdLogger.Print(msg)
+	atomic.StoreInt32(&inLogAndCapture, 0)
+	now := time.Now().Format("2006/01/02 15:04:05")
+	addRingEntry(now + " " + msg)
+}
+
+// GetLevel 获取当前日志级别
+func GetLevel() LogLevel {
+	return LogLevel(currentLevel.Load())
+}
+
+// ParseLevel 将字符串解析为LogLevel
+func ParseLevel(s string) LogLevel {
+	switch strings.ToLower(s) {
+	case "debug":
+		return LevelDebug
+	case "info":
+		return LevelInfo
+	case "warn", "warning":
+		return LevelWarn
+	case "error":
+		return LevelError
+	case "fatal":
+		return LevelFatal
+	default:
+		return LevelInfo
+	}
+}
+
+// LevelString 将LogLevel转为字符串
+func LevelString(l LogLevel) string {
+	switch l {
+	case LevelDebug:
+		return "debug"
+	case LevelInfo:
+		return "info"
+	case LevelWarn:
+		return "warn"
+	case LevelError:
+		return "error"
+	case LevelFatal:
+		return "fatal"
+	default:
+		return "info"
+	}
+}
 
 // SetLevel 设置日志级别
 func SetLevel(level LogLevel) {
-	currentLevel = level
+	currentLevel.Store(int32(level))
 }
 
-// Debug 调试日志
 func Debug(format string, args ...interface{}) {
-	if currentLevel <= LevelDebug {
-		stdLogger.Printf("[DEBUG] "+format, args...)
+	if GetLevel() <= LevelDebug {
+		logAndCapture("[DEBUG] ", format, args...)
 	}
 }
 
-// Info 信息日志
 func Info(format string, args ...interface{}) {
-	if currentLevel <= LevelInfo {
-		stdLogger.Printf("[INFO] "+format, args...)
+	if GetLevel() <= LevelInfo {
+		logAndCapture("[INFO] ", format, args...)
 	}
 }
 
-// Warn 警告日志
 func Warn(format string, args ...interface{}) {
-	if currentLevel <= LevelWarn {
-		stdLogger.Printf("[WARN] "+format, args...)
+	if GetLevel() <= LevelWarn {
+		logAndCapture("[WARN] ", format, args...)
 	}
 }
 
-// Error 错误日志
 func Error(format string, args ...interface{}) {
-	if currentLevel <= LevelError {
-		stdLogger.Printf("[ERROR] "+format, args...)
+	if GetLevel() <= LevelError {
+		logAndCapture("[ERROR] ", format, args...)
 	}
 }
 
-// Fatal 致命错误日志
 func Fatal(format string, args ...interface{}) {
-	stdLogger.Fatalf("[FATAL] "+format, args...)
+	msg := fmt.Sprintf("[FATAL] "+format, args...)
+	atomic.StoreInt32(&inLogAndCapture, 1)
+	stdLogger.Print(msg)
+	atomic.StoreInt32(&inLogAndCapture, 0)
+	now := time.Now().Format("2006/01/02 15:04:05")
+	addRingEntry(now + " " + msg)
+	os.Exit(1)
 }
 
-// Print 普通日志（兼容标准库）
 func Print(format string, args ...interface{}) {
-	Info(format, args...)
+	logAndCapture("[INFO] ", format, args...)
 }
 
-// Printf 格式化日志（兼容标准库）
 func Printf(format string, args ...interface{}) {
-	Info(format, args...)
+	logAndCapture("[INFO] ", format, args...)
 }
 
-// Println 打印日志（兼容标准库）
 func Println(args ...interface{}) {
-	stdLogger.Println(args...)
+	msg := fmt.Sprint(args...)
+	logAndCapture("[INFO] ", "%s", msg)
 }

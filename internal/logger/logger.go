@@ -1,13 +1,16 @@
 package logger
 
 import (
+	"compress/gzip"
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"gowaf-demo/internal/logdb"
+	"gowaf/internal/logdb"
 )
 
 // 注意：AccessLog 结构已移至 format.go 统一定义
@@ -21,26 +24,31 @@ type RotationConfig struct {
 }
 
 var (
-	logChan     chan AccessLog
-	logFile     *os.File
-	closeOnce   sync.Once
-	wg          sync.WaitGroup
-	fieldConfig LogFieldConfig    // 字段配置
-	logCallback func(AccessLog)   // 日志回调函数
-	callbackMu  sync.RWMutex      // 保护logCallback的读写
-	rotation    RotationConfig    // 轮转配置
-	logFilePath string            // 日志文件路径
-	currentSize int64             // 当前日志文件大小
-	rotationMu  sync.Mutex        // 轮转锁
-	logDB       *logdb.LogDB      // 日志数据库
-	useDB       bool              // 是否使用数据库存储
+	logChan      chan AccessLog
+	callbackChan chan AccessLog
+	logFile      *os.File
+	closeOnce    sync.Once
+	wg           sync.WaitGroup
+	fieldConfig  LogFieldConfig  // 字段配置
+	fieldMu      sync.RWMutex    // 保护fieldConfig的读写
+	logCallback  func(AccessLog) // 日志回调函数
+	callbackMu   sync.RWMutex    // 保护logCallback的读写
+	dropCount    uint64          // 日志丢弃计数
+	rotation     RotationConfig  // 轮转配置
+	logFilePath  string          // 日志文件路径
+	currentSize  int64           // 当前日志文件大小
+	rotationMu   sync.Mutex      // 轮转锁
+	logDB        *logdb.LogDB    // 日志数据库
+	useDB        bool            // 是否使用数据库存储
+	stopChan     chan struct{}   // 停止信号，用于终止cleanup goroutine
 )
 
 // 移除硬编码常量,改用配置变量
 var (
-	channelSize   = 10000           // 日志通道大小
-	batchSize     = 100             // 批量大小
-	flushInterval = 2 * time.Second // 刷新间隔
+	channelSize   = 10000                  // 日志通道大小
+	batchSize     = 100                    // 批量大小
+	flushInterval = 2 * time.Second        // 刷新间隔
+	writeDBSem    = make(chan struct{}, 4) // 并发写入DB上限
 )
 
 // SetLogConfig 设置日志系统配置
@@ -90,7 +98,11 @@ func InitWithRotationAndDB(filePath string, config LogFieldConfig, rotConfig Rot
 	logFile = f
 	logFilePath = filePath
 	logChan = make(chan AccessLog, channelSize)
+	callbackChan = make(chan AccessLog, channelSize)
+	stopChan = make(chan struct{})
+	fieldMu.Lock()
 	fieldConfig = config
+	fieldMu.Unlock()
 	rotation = rotConfig
 	currentSize = stat.Size()
 	logDB = db
@@ -124,14 +136,41 @@ func InitWithRotationAndDB(filePath string, config LogFieldConfig, rotConfig Rot
 		}
 	}()
 
-	// 启动定期清理任务
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case entry, ok := <-callbackChan:
+				if !ok {
+					return
+				}
+				callbackMu.RLock()
+				cb := logCallback
+				callbackMu.RUnlock()
+				if cb != nil {
+					cb(entry)
+				}
+			case <-stopChan:
+				return
+			}
+		}
+	}()
+
 	if rotation.MaxAge > 0 {
-		go cleanupOldLogs()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cleanupOldLogs()
+		}()
 	}
 
-	// 启动数据库清理任务
 	if useDB && rotation.MaxAge > 0 {
-		go cleanupOldDBLogs()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cleanupOldDBLogs()
+		}()
 	}
 
 	return nil
@@ -145,7 +184,10 @@ func flushBatch(batch []AccessLog) {
 	// 写入文件
 	var data []byte
 	for _, entry := range batch {
-		jsonData, _ := json.Marshal(entry)
+		jsonData, err := json.Marshal(entry)
+		if err != nil {
+			jsonData = []byte(`{"error":"json_marshal_failed"}`)
+		}
 		data = append(data, jsonData...)
 		data = append(data, '\n')
 	}
@@ -166,7 +208,15 @@ func flushBatch(batch []AccessLog) {
 
 	// 写入数据库
 	if useDB && logDB != nil {
-		go writeToDB(batch)
+		select {
+		case writeDBSem <- struct{}{}:
+			go func() {
+				defer func() { <-writeDBSem }()
+				writeToDB(batch)
+			}()
+		default:
+			writeToDB(batch)
+		}
 	}
 }
 
@@ -207,12 +257,17 @@ func writeToDB(batch []AccessLog) {
 
 // cleanupOldDBLogs 清理数据库中的旧日志
 func cleanupOldDBLogs() {
-	ticker := time.NewTicker(24 * time.Hour) // 每天检查一次
+	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		if logDB != nil && rotation.MaxAge > 0 {
-			logDB.CleanOldLogs(rotation.MaxAge)
+	for {
+		select {
+		case <-ticker.C:
+			if logDB != nil && rotation.MaxAge > 0 {
+				logDB.CleanOldLogs(rotation.MaxAge)
+			}
+		case <-stopChan:
+			return
 		}
 	}
 }
@@ -269,9 +324,31 @@ func rotateLog() {
 
 // compressFile 压缩日志文件
 func compressFile(filePath string) {
-	// 简单实现：使用gzip压缩
-	// 这里暂时跳过压缩实现，避免引入额外依赖
-	// 实际生产环境建议使用lumberjack库
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		log.Printf("compress read %s: %v", filePath, err)
+		return
+	}
+
+	gzPath := filePath + ".gz"
+	f, err := os.Create(gzPath)
+	if err != nil {
+		log.Printf("compress create %s: %v", gzPath, err)
+		return
+	}
+	defer f.Close()
+
+	w := gzip.NewWriter(f)
+	if _, err := w.Write(data); err != nil {
+		log.Printf("compress write %s: %v", gzPath, err)
+		return
+	}
+	if err := w.Close(); err != nil {
+		log.Printf("compress close %s: %v", gzPath, err)
+		return
+	}
+	os.Remove(filePath)
+	log.Printf("compressed %s -> %s", filePath, gzPath)
 }
 
 // cleanOldBackups 清理旧的备份文件
@@ -320,25 +397,30 @@ func cleanOldBackups() {
 
 // cleanupOldLogs 定期清理过期日志
 func cleanupOldLogs() {
-	ticker := time.NewTicker(24 * time.Hour) // 每天检查一次
+	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		if rotation.MaxAge <= 0 {
-			continue
-		}
-
-		base := filepath.Dir(logFilePath)
-		name := filepath.Base(logFilePath)
-		pattern := filepath.Join(base, name+".*")
-		matches, _ := filepath.Glob(pattern)
-
-		cutoff := time.Now().AddDate(0, 0, -rotation.MaxAge)
-		for _, m := range matches {
-			stat, err := os.Stat(m)
-			if err == nil && stat.ModTime().Before(cutoff) {
-				os.Remove(m)
+	for {
+		select {
+		case <-ticker.C:
+			if rotation.MaxAge <= 0 {
+				continue
 			}
+
+			base := filepath.Dir(logFilePath)
+			name := filepath.Base(logFilePath)
+			pattern := filepath.Join(base, name+".*")
+			matches, _ := filepath.Glob(pattern)
+
+			cutoff := time.Now().AddDate(0, 0, -rotation.MaxAge)
+			for _, m := range matches {
+				stat, err := os.Stat(m)
+				if err == nil && stat.ModTime().Before(cutoff) {
+					os.Remove(m)
+				}
+			}
+		case <-stopChan:
+			return
 		}
 	}
 }
@@ -352,21 +434,25 @@ func SetLogCallback(callback func(AccessLog)) {
 
 // Write 写入日志（应用字段配置）
 func Write(entry AccessLog) {
-	// 应用字段配置，清理不需要的字段
-	entry.ApplyFieldConfig(fieldConfig)
+	fieldMu.RLock()
+	fc := fieldConfig
+	fieldMu.RUnlock()
+	entry.ApplyFieldConfig(fc)
 
-	// 安全读取并调用回调函数（用于WebSocket广播）
 	callbackMu.RLock()
-	cb := logCallback
+	hasCallback := logCallback != nil
 	callbackMu.RUnlock()
-	if cb != nil {
-		go cb(entry)
+	if hasCallback {
+		select {
+		case callbackChan <- entry:
+		default:
+		}
 	}
 
 	select {
 	case logChan <- entry:
 	default:
-		// channel 满则丢弃，避免阻塞
+		atomic.AddUint64(&dropCount, 1)
 	}
 }
 
@@ -375,14 +461,21 @@ func WriteRaw(entry AccessLog) {
 	select {
 	case logChan <- entry:
 	default:
-		// channel 满则丢弃，避免阻塞
+		atomic.AddUint64(&dropCount, 1)
 	}
+}
+
+// GetDropCount 获取日志丢弃计数
+func GetDropCount() uint64 {
+	return atomic.LoadUint64(&dropCount)
 }
 
 // Close 关闭日志系统
 func Close() {
 	closeOnce.Do(func() {
+		close(stopChan)
 		close(logChan)
+		close(callbackChan)
 		wg.Wait()
 		if logFile != nil {
 			logFile.Close()
@@ -392,17 +485,44 @@ func Close() {
 
 // GetFieldConfig 获取当前字段配置
 func GetFieldConfig() LogFieldConfig {
+	fieldMu.RLock()
+	defer fieldMu.RUnlock()
 	return fieldConfig
 }
 
 // SetFieldConfig 设置字段配置
 func SetFieldConfig(config LogFieldConfig) {
+	fieldMu.Lock()
+	defer fieldMu.Unlock()
 	fieldConfig = config
 }
 
 // GetLogDB 获取日志数据库实例
 func GetLogDB() *logdb.LogDB {
 	return logDB
+}
+
+// UpdateRotationConfig 运行时更新日志轮转配置
+func UpdateRotationConfig(maxSize, maxBackups, maxAge int, compress bool) {
+	rotationMu.Lock()
+	defer rotationMu.Unlock()
+	if maxSize > 0 {
+		rotation.MaxSize = maxSize
+	}
+	if maxBackups >= 0 {
+		rotation.MaxBackups = maxBackups
+	}
+	if maxAge > 0 {
+		rotation.MaxAge = maxAge
+	}
+	rotation.Compress = compress
+}
+
+// GetRotationConfig 获取当前日志轮转配置
+func GetRotationConfig() RotationConfig {
+	rotationMu.Lock()
+	defer rotationMu.Unlock()
+	return rotation
 }
 
 // IsUsingDB 是否使用数据库存储

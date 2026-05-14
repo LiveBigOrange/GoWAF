@@ -1,0 +1,265 @@
+{{define "notify"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>告警通知 - GoWAF</title>
+    <link rel="stylesheet" href="/static/common.css">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/css/notify.css">
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main scroll-page">
+        <h2 style="margin-bottom:24px;font-size:20px;color:#2c3e50;flex-shrink:0">&#128276; 告警通知</h2>
+
+        <!-- ===== 通知渠道配置 ===== -->
+        <div class="card">
+            <div class="section-header">
+                <h3>&#9881;&#65039; 通知渠道配置</h3>
+            </div>
+            <div class="section-desc">配置消息通知渠道，启用后触发告警时将自动推送到对应渠道</div>
+
+            <div class="channel-grid">
+            <div class="channel-card" id="card-dingtalk" onclick="openChannelModal('dingtalk')">
+                <div class="channel-card-inner">
+                    <div class="channel-card-icon dingtalk">D</div>
+                    <div class="channel-card-info">
+                        <div class="cn">钉钉 DingTalk</div>
+                        <div class="sub"><span class="channel-status" id="dingtalk-status"></span><span id="dingtalk-desc">点击配置</span></div>
+                    </div>
+                    <label class="toggle" title="启用/禁用" onclick="event.stopPropagation()">
+                        <input type="checkbox" id="dingtalk_enabled" onchange="onChannelToggle('dingtalk');saveChannelToggles()">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- 企业微信 -->
+            <div class="channel-card" id="card-wecom" onclick="openChannelModal('wecom')">
+                <div class="channel-card-inner">
+                    <div class="channel-card-icon wecom">W</div>
+                    <div class="channel-card-info">
+                        <div class="cn">企业微信 WeCom</div>
+                        <div class="sub"><span class="channel-status" id="wecom-status"></span><span id="wecom-desc">点击配置</span></div>
+                    </div>
+                    <label class="toggle" title="启用/禁用" onclick="event.stopPropagation()">
+                        <input type="checkbox" id="wecom_enabled" onchange="onChannelToggle('wecom');saveChannelToggles()">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Slack -->
+            <div class="channel-card" id="card-slack" onclick="openChannelModal('slack')">
+                <div class="channel-card-inner">
+                    <div class="channel-card-icon slack">S</div>
+                    <div class="channel-card-info">
+                        <div class="cn">Slack</div>
+                        <div class="sub"><span class="channel-status" id="slack-status"></span><span id="slack-desc">点击配置</span></div>
+                    </div>
+                    <label class="toggle" title="启用/禁用" onclick="event.stopPropagation()">
+                        <input type="checkbox" id="slack_enabled" onchange="onChannelToggle('slack');saveChannelToggles()">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- 电子邮件 -->
+            <div class="channel-card" id="card-email" onclick="openChannelModal('email')">
+                <div class="channel-card-inner">
+                    <div class="channel-card-icon email">@</div>
+                    <div class="channel-card-info">
+                        <div class="cn">电子邮件 Email</div>
+                        <div class="sub"><span class="channel-status" id="email-status"></span><span id="email-desc">点击配置</span></div>
+                    </div>
+                    <label class="toggle" title="启用/禁用" onclick="event.stopPropagation()">
+                        <input type="checkbox" id="email_enabled" onchange="onChannelToggle('email');saveChannelToggles()">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+            </div>
+        </div>
+
+        <div style="display:none">
+            <input type="text" id="dingtalk_webhook">
+            <input type="text" id="wecom_webhook">
+            <input type="text" id="slack_webhook">
+            <input type="text" id="email_smtp_host">
+            <input type="number" id="email_smtp_port">
+            <input type="email" id="email_from">
+            <input type="text" id="email_to">
+            <input type="password" id="email_password">
+        </div>
+
+        <!-- ===== 告警规则 ===== -->
+        <div class="card">
+            <div class="section-header">
+                <h3>&#128203; 告警规则</h3>
+                <button class="btn btn-primary" onclick="showRuleModal()">&#10133; 添加规则</button>
+            </div>
+            <div class="table-wrap">
+                <table class="rules-table" id="rules-table">
+                    <thead>
+                        <tr>
+                            <th>状态</th>
+                            <th>规则名称</th>
+                            <th>匹配条件</th>
+                            <th>级别</th>
+                            <th>触发条件</th>
+                            <th>通知</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ===== 规则编辑弹窗 ===== -->
+        <div class="modal" id="rule-modal">
+            <div class="modal-content" style="max-width:560px">
+                <div class="modal-header">
+                    <h3 id="rule-modal-title">添加告警规则</h3>
+                    <span class="close" onclick="closeRuleModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="rule-id">
+
+                    <!-- 基本信息 -->
+                    <div class="form-group">
+                        <label>规则名称 <span style="color:#e74c3c">*</span></label>
+                        <input type="text" id="rule-name" placeholder="例如: 高频 SQL 注入攻击告警">
+                    </div>
+
+                    <hr class="divider">
+
+                    <!-- 匹配条件 -->
+                    <label style="font-size:13px;font-weight:600;color:#2c3e50;display:block;margin-bottom:10px">&#127919; 匹配条件</label>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>匹配类型</label>
+                            <select id="rule-match-type" onchange="onMatchTypeChange()">
+                                <option value="attack_type">攻击类型</option>
+                                <option value="rule_id">规则 ID</option>
+                                <option value="ip">来源 IP</option>
+                            </select>
+                            <div class="form-hint" id="match-type-hint">根据拦截事件的攻击类型触发告警</div>
+                        </div>
+                        <div class="form-group">
+                            <label>匹配值 <span style="color:#e74c3c">*</span></label>
+                            <div id="match-value-select" style="display:none">
+                                <select id="rule-match-value-select" onchange="syncMatchValue()" style="width:100%">
+                                    <option value="">-- 请选择攻击类型 --</option>
+                                    <option value="sql_injection">SQL 注入 (sql_injection)</option>
+                                    <option value="xss">XSS 跨站脚本 (xss)</option>
+                                    <option value="command_injection">命令注入 (command_injection)</option>
+                                    <option value="path_traversal">路径穿越 (path_traversal)</option>
+                                    <option value="header_injection">Header 注入 (header_injection)</option>
+                                    <option value="ssrf">SSRF 服务端请求伪造 (ssrf)</option>
+                                    <option value="file_upload">文件上传攻击 (file_upload)</option>
+                                    <option value="sensitive_data">敏感数据泄露 (sensitive_data)</option>
+                                </select>
+                            </div>
+                            <div id="match-value-input">
+                                <input type="text" id="rule-match-value" placeholder="例如: sql_injection" style="width:100%">
+                            </div>
+                            <div id="ip-presets" style="display:none;margin-top:6px">
+                                <span style="font-size:11px;color:#b0b9c3;margin-right:6px">快捷填入:</span>
+                                <button type="button" onclick="setMatchValue(this.textContent)" style="font-size:11px;padding:2px 8px;border:1px solid #dcdfe6;border-radius:4px;background:#fff;cursor:pointer;margin-right:4px;color:#409eff">127.0.0.1</button>
+                                <button type="button" onclick="setMatchValue(this.textContent)" style="font-size:11px;padding:2px 8px;border:1px solid #dcdfe6;border-radius:4px;background:#fff;cursor:pointer;margin-right:4px;color:#409eff">192.168.1.1</button>
+                                <button type="button" onclick="setMatchValue(this.textContent)" style="font-size:11px;padding:2px 8px;border:1px solid #dcdfe6;border-radius:4px;background:#fff;cursor:pointer;margin-right:4px;color:#409eff">10.0.0.1</button>
+                            </div>
+                            <div class="form-hint" id="match-value-hint">输入要匹配的攻击类型名称</div>
+                        </div>
+                    </div>
+
+                    <hr class="divider">
+
+                    <!-- 触发阈值 -->
+                    <label style="font-size:13px;font-weight:600;color:#2c3e50;display:block;margin-bottom:10px">&#9202; 触发条件</label>
+                    <div class="form-grid" style="grid-template-columns:1fr 1fr 1fr">
+                        <div class="form-group">
+                            <label>级别</label>
+                            <select id="rule-level">
+                                <option value="info">&#128712; Info</option>
+                                <option value="warning" selected>&#9888;&#65039; Warning</option>
+                                <option value="critical">&#128308; Critical</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>阈值（次数）</label>
+                            <input type="number" id="rule-threshold" value="1" min="1">
+                        </div>
+                        <div class="form-group">
+                            <label>时间窗口（秒）</label>
+                            <input type="number" id="rule-window-secs" value="60" min="10">
+                        </div>
+                    </div>
+                    <div class="form-hint">在指定时间窗口内命中次数达到阈值即触发告警</div>
+
+                    <hr class="divider">
+
+                    <!-- 通知配置 -->
+                    <label style="font-size:13px;font-weight:600;color:#2c3e50;display:block;margin-bottom:10px">&#128172; 通知方式</label>
+                    <div class="form-grid" style="grid-template-columns:1fr 1fr">
+                        <div class="form-group">
+                            <label>通知渠道</label>
+                            <select id="rule-notify-type">
+                                <option value="dingtalk">钉钉</option>
+                                <option value="wecom">企业微信</option>
+                                <option value="slack">Slack</option>
+                                <option value="email">邮件</option>
+                                <!-- [封存] <option value="intel_event">情报事件</option> -->
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>冷却时间（秒）</label>
+                            <input type="number" id="rule-cooldown-secs" value="300" min="0">
+                        </div>
+                    </div>
+                    <div class="form-hint">冷却时间内重复触发不发送重复告警，设为 0 禁用冷却</div>
+
+                    <!-- 规则摘要预览 -->
+                    <div class="rule-preview" id="rule-preview">
+                        <strong>规则预览：</strong>暂无
+                    </div>
+
+                    <!-- 启用开关 -->
+                    <div style="margin-top:14px">
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                            <input type="checkbox" id="rule-enabled" checked onchange="updatePreview()">
+                            <span style="font-size:13px;font-weight:500;color:#2c3e50">启用此规则</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-cancel" onclick="closeRuleModal()">取消</button>
+                    <button class="btn btn-submit" onclick="saveRule()">&#128190; 保存规则</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== 渠道编辑弹窗 ===== -->
+        <div class="modal" id="channel-modal">
+            <div class="modal-content" style="max-width:500px">
+                <div class="modal-header">
+                    <h3 id="channel-modal-title">编辑通知渠道</h3>
+                    <span class="close" onclick="closeChannelModal()">&times;</span>
+                </div>
+                <div class="modal-body" id="channel-modal-body"></div>
+                <div class="modal-footer">
+                    <button class="btn btn-cancel" onclick="closeChannelModal()">取消</button>
+                    <button class="btn btn-default" style="float:left" onclick="channelModalTest()">&#128276; 测试</button>
+                    <button class="btn btn-submit" onclick="saveChannelFromModal()">&#128190; 保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script nonce="{{.CSPNonce}}" src="/static/js/notify_page.js"></script>
+</body>
+</html>
+{{end}}

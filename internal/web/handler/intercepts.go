@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"gowaf-demo/internal/web/templates"
+	"gowaf/internal/web/templates"
 )
 
 // InterceptsPage 拦截数据页面
@@ -15,8 +15,5 @@ func InterceptsPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 使用模板渲染
-	data := map[string]interface{}{
-		"Active": "intercepts",
-	}
-	templates.InterceptsTmpl.ExecuteTemplate(w, "intercepts", data)
+	renderPage(w, r, templates.InterceptsTmpl, "intercepts", "intercepts")
 }

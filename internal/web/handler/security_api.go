@@ -9,60 +9,59 @@ import (
 func APIGeoLookup(w http.ResponseWriter, r *http.Request) {
 	ip := r.URL.Query().Get("ip")
 	if ip == "" {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "缺少ip参数"})
+		jsonError(w, "缺少ip参数", http.StatusBadRequest)
 		return
 	}
-	if MetricsManager == nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "metrics未初始化"})
+	if !requireManager(w, deps.MetricsManager, "指标管理器") {
 		return
 	}
-	geo := MetricsManager.GetGeoLocation(ip)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": geo})
+	geo := deps.MetricsManager.GetGeoLocation(ip)
+	jsonSuccess(w, geo)
 }
 
 func APIGeoRulesList(w http.ResponseWriter, r *http.Request) {
-	geoRules, err := RuleEngine.ListGeoRules()
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": err.Error()})
+	if !requireManager(w, deps.RuleEngine, "规则引擎") {
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": geoRules})
+	geoRules, err := deps.RuleEngine.ListGeoRules()
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonSuccess(w, geoRules)
 }
 
 func APIGeoRuleAdd(w http.ResponseWriter, r *http.Request) {
+	if !requireManager(w, deps.RuleEngine, "规则引擎") {
+		return
+	}
 	var req struct {
 		Mode        string `json:"mode"`
 		CountryCode string `json:"country_code"`
 		Enabled     bool   `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "无效的请求数据"})
+		jsonError(w, "无效的请求数据", http.StatusBadRequest)
 		return
 	}
 	if req.CountryCode == "" {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "国家代码不能为空"})
+		jsonError(w, "国家代码不能为空", http.StatusBadRequest)
 		return
 	}
 	if req.Mode == "" {
 		req.Mode = "blacklist"
 	}
-	if err := RuleEngine.AddGeoRule(req.Mode, req.CountryCode, req.Enabled); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": err.Error()})
+	if err := deps.RuleEngine.AddGeoRule(req.Mode, req.CountryCode, req.Enabled); err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+	jsonSuccess(w, nil)
 }
 
 func APIGeoRuleUpdate(w http.ResponseWriter, r *http.Request) {
+	if !requireManager(w, deps.RuleEngine, "规则引擎") {
+		return
+	}
 	var req struct {
 		ID          int    `json:"id"`
 		Mode        string `json:"mode"`
@@ -70,99 +69,100 @@ func APIGeoRuleUpdate(w http.ResponseWriter, r *http.Request) {
 		Enabled     bool   `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "无效的请求数据"})
+		jsonError(w, "无效的请求数据", http.StatusBadRequest)
 		return
 	}
-	if err := RuleEngine.UpdateGeoRule(req.ID, req.Mode, req.CountryCode, req.Enabled); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": err.Error()})
+	if err := deps.RuleEngine.UpdateGeoRule(req.ID, req.Mode, req.CountryCode, req.Enabled); err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+	jsonSuccess(w, nil)
 }
 
 func APIGeoRuleDelete(w http.ResponseWriter, r *http.Request) {
+	if !requireManager(w, deps.RuleEngine, "规则引擎") {
+		return
+	}
 	idStr := r.URL.Query().Get("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "无效的ID"})
+		jsonError(w, "无效的ID", http.StatusBadRequest)
 		return
 	}
-	if err := RuleEngine.RemoveGeoRule(id); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": err.Error()})
+	if err := deps.RuleEngine.RemoveGeoRule(id); err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+	jsonSuccess(w, nil)
 }
 
 func APIAllowedMethodsList(w http.ResponseWriter, r *http.Request) {
-	methods, err := RuleEngine.ListAllowedMethods()
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": err.Error()})
+	if !requireManager(w, deps.RuleEngine, "规则引擎") {
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": methods})
+	methods, err := deps.RuleEngine.ListAllowedMethods()
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonSuccess(w, methods)
 }
 
 func APIAllowedMethodSet(w http.ResponseWriter, r *http.Request) {
+	if !requireManager(w, deps.RuleEngine, "规则引擎") {
+		return
+	}
 	var req struct {
 		Method  string `json:"method"`
 		Enabled bool   `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "无效的请求数据"})
+		jsonError(w, "无效的请求数据", http.StatusBadRequest)
 		return
 	}
 	if req.Method == "" {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "HTTP方法不能为空"})
+		jsonError(w, "HTTP方法不能为空", http.StatusBadRequest)
 		return
 	}
-	if err := RuleEngine.SetAllowedMethodDB(req.Method, req.Enabled); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": err.Error()})
+	if err := deps.RuleEngine.SetAllowedMethodDB(req.Method, req.Enabled); err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+	jsonSuccess(w, nil)
 }
 
 func APIAllowedMethodDelete(w http.ResponseWriter, r *http.Request) {
+	if !requireManager(w, deps.RuleEngine, "规则引擎") {
+		return
+	}
 	method := r.URL.Query().Get("method")
 	if method == "" {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "缺少method参数"})
+		jsonError(w, "缺少method参数", http.StatusBadRequest)
 		return
 	}
-	if err := RuleEngine.RemoveAllowedMethodDB(method); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": err.Error()})
+	if err := deps.RuleEngine.RemoveAllowedMethodDB(method); err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+	jsonSuccess(w, nil)
 }
 
 func APIPathRateLimitsList(w http.ResponseWriter, r *http.Request) {
-	limits, err := RuleEngine.ListPathRateLimits()
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": err.Error()})
+	if !requireManager(w, deps.RuleEngine, "规则引擎") {
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": limits})
+	limits, err := deps.RuleEngine.ListPathRateLimits()
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonSuccess(w, limits)
 }
 
 func APIPathRateLimitAdd(w http.ResponseWriter, r *http.Request) {
+	if !requireManager(w, deps.RuleEngine, "规则引擎") {
+		return
+	}
 	var req struct {
 		PathPattern string  `json:"path_pattern"`
 		Rate        float64 `json:"rate"`
@@ -170,13 +170,11 @@ func APIPathRateLimitAdd(w http.ResponseWriter, r *http.Request) {
 		Enabled     bool    `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "无效的请求数据"})
+		jsonError(w, "无效的请求数据", http.StatusBadRequest)
 		return
 	}
 	if req.PathPattern == "" {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "路径模式不能为空"})
+		jsonError(w, "路径模式不能为空", http.StatusBadRequest)
 		return
 	}
 	if req.Rate <= 0 {
@@ -185,16 +183,17 @@ func APIPathRateLimitAdd(w http.ResponseWriter, r *http.Request) {
 	if req.Burst <= 0 {
 		req.Burst = 20
 	}
-	if err := RuleEngine.AddPathRateLimit(req.PathPattern, req.Rate, req.Burst, req.Enabled); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": err.Error()})
+	if err := deps.RuleEngine.AddPathRateLimit(req.PathPattern, req.Rate, req.Burst, req.Enabled); err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+	jsonSuccess(w, nil)
 }
 
 func APIPathRateLimitUpdate(w http.ResponseWriter, r *http.Request) {
+	if !requireManager(w, deps.RuleEngine, "规则引擎") {
+		return
+	}
 	var req struct {
 		ID          int     `json:"id"`
 		PathPattern string  `json:"path_pattern"`
@@ -203,32 +202,29 @@ func APIPathRateLimitUpdate(w http.ResponseWriter, r *http.Request) {
 		Enabled     bool    `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "无效的请求数据"})
+		jsonError(w, "无效的请求数据", http.StatusBadRequest)
 		return
 	}
-	if err := RuleEngine.UpdatePathRateLimit(req.ID, req.PathPattern, req.Rate, req.Burst, req.Enabled); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": err.Error()})
+	if err := deps.RuleEngine.UpdatePathRateLimit(req.ID, req.PathPattern, req.Rate, req.Burst, req.Enabled); err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+	jsonSuccess(w, nil)
 }
 
 func APIPathRateLimitDelete(w http.ResponseWriter, r *http.Request) {
+	if !requireManager(w, deps.RuleEngine, "规则引擎") {
+		return
+	}
 	idStr := r.URL.Query().Get("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "无效的ID"})
+		jsonError(w, "无效的ID", http.StatusBadRequest)
 		return
 	}
-	if err := RuleEngine.RemovePathRateLimit(id); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": err.Error()})
+	if err := deps.RuleEngine.RemovePathRateLimit(id); err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+	jsonSuccess(w, nil)
 }

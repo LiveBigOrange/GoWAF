@@ -1,19 +1,22 @@
 {{define "sidebar"}}
-<div class="sidebar">
+<div class="sidebar" id="sidebar">
     <div class="sidebar-header">
-        <h2>🛡️ GoWAF</h2>
-        <small>v1.1.5</small>
+        <h2><span class="sidebar-logo">🛡️</span><span class="sidebar-title">GoWAF</span></h2>
+        <small><span class="sidebar-title">v1.1.6</span> <button class="theme-toggle" onclick="toggleTheme()" title="切换深色/浅色模式">🌙</button></small>
     </div>
     <div class="nav">
         <!-- 仪表盘 - 一级菜单 -->
         <a href="/" class="nav-item{{if eq .Active "dashboard"}} active{{end}}" data-menu-id="dashboard">
-            📊 仪表盘
+            <span class="nav-icon">📊</span><span class="nav-text">仪表盘</span>
+        </a>
+        <a href="/trend" class="nav-item{{if eq .Active "trend"}} active{{end}}" data-menu-id="trend">
+            <span class="nav-icon">📈</span><span class="nav-text">趋势分析</span>
         </a>
         
         <!-- 代理服务 - 一级菜单（可展开） -->
         <div class="nav-group{{if or (eq .Active "proxyconfig") (eq .Active "domain") (eq .Active "cert") (eq .Active "backend")}} expanded{{end}}" data-group="proxy">
             <div class="nav-group-header">
-                <span>🔌 代理服务</span>
+                <span class="nav-icon">🔌</span><span class="nav-text">代理服务</span>
                 <span class="nav-arrow">▼</span>
             </div>
             <div class="nav-group-items">
@@ -24,57 +27,95 @@
             </div>
         </div>
         
-        <!-- 安全防护 - 一级菜单（可展开） -->
-        <div class="nav-group{{if or (or (or (or (or (or (or (eq .Active "detector") (eq .Active "rules")) (eq .Active "ua")) (eq .Active "path")) (eq .Active "ratelimit")) (eq .Active "geoblock")) (eq .Active "httpmethods")) (eq .Active "pathratelimit")}} expanded{{end}}" data-group="security">
+        <!-- 防护规则 - 一级菜单（可展开） -->
+        <div class="nav-group{{if or (eq .Active "rules") (eq .Active "ua") (eq .Active "path") (eq .Active "dlp") (eq .Active "geoblock") (eq .Active "httpmethods") (eq .Active "respheader") (eq .Active "apischema")}} expanded{{end}}" data-group="rules">
             <div class="nav-group-header">
-                <span>🛡️ 安全防护</span>
+                <span class="nav-icon">🛡️</span><span class="nav-text">防护规则</span>
+                <span class="nav-arrow">▼</span>
+            </div>
+            <div class="nav-group-items">
+                <a href="/rules" class="nav-item sub-item{{if eq .Active "rules"}} active{{end}}">IP黑/白名单</a>
+                <a href="/ua" class="nav-item sub-item{{if eq .Active "ua"}} active{{end}}">UA过滤规则</a>
+                <a href="/path" class="nav-item sub-item{{if eq .Active "path"}} active{{end}}">路径过滤规则</a>
+                <a href="/dlp" class="nav-item sub-item{{if eq .Active "dlp"}} active{{end}}">DLP策略</a>
+                <div class="nav-section-label">高级设置</div>
+                <a href="/geoblock" class="nav-item sub-item{{if eq .Active "geoblock"}} active{{end}}">GeoIP区域阻断</a>
+                <a href="/httpmethods" class="nav-item sub-item{{if eq .Active "httpmethods"}} active{{end}}">HTTP方法限制</a>
+                <a href="/respheader" class="nav-item sub-item{{if eq .Active "respheader"}} active{{end}}">响应头策略</a>
+                <a href="/apischema" class="nav-item sub-item{{if eq .Active "apischema"}} active{{end}}">API Schema</a>
+            </div>
+        </div>
+        
+        <!-- 检测与响应 - 一级菜单（可展开） -->
+        <div class="nav-group{{if or (eq .Active "detector") (eq .Active "ratelimit") (eq .Active "pathratelimit") (eq .Active "smartlimit") (eq .Active "blockpage") (eq .Active "notify") (eq .Active "bot") (eq .Active "vpatch")}} expanded{{end}}" data-group="detect">
+            <div class="nav-group-header">
+                <span class="nav-icon">🎯</span><span class="nav-text">检测响应</span>
                 <span class="nav-arrow">▼</span>
             </div>
             <div class="nav-group-items">
                 <a href="/detector" class="nav-item sub-item{{if eq .Active "detector"}} active{{end}}">攻击检测</a>
-                <a href="/rules" class="nav-item sub-item{{if eq .Active "rules"}} active{{end}}">IP规则</a>
-                <a href="/ua" class="nav-item sub-item{{if eq .Active "ua"}} active{{end}}">UA规则</a>
-                <a href="/path" class="nav-item sub-item{{if eq .Active "path"}} active{{end}}">路径规则</a>
-                <a href="/geoblock" class="nav-item sub-item{{if eq .Active "geoblock"}} active{{end}}">GeoIP阻断</a>
-                <a href="/httpmethods" class="nav-item sub-item{{if eq .Active "httpmethods"}} active{{end}}">方法限制</a>
-                <a href="/pathratelimit" class="nav-item sub-item{{if eq .Active "pathratelimit"}} active{{end}}">路径限流</a>
+                <a href="/bot" class="nav-item sub-item{{if eq .Active "bot"}} active{{end}}">Bot管理</a>
                 <a href="/ratelimit" class="nav-item sub-item{{if eq .Active "ratelimit"}} active{{end}}">全局限流</a>
+                <a href="/notify" class="nav-item sub-item{{if eq .Active "notify"}} active{{end}}">告警通知</a>
+                <div class="nav-section-label">高级设置</div>
+                <a href="/vpatch" class="nav-item sub-item{{if eq .Active "vpatch"}} active{{end}}">虚拟补丁</a>
+                <a href="/pathratelimit" class="nav-item sub-item{{if eq .Active "pathratelimit"}} active{{end}}">路径限流</a>
+                <a href="/smartlimit" class="nav-item sub-item{{if eq .Active "smartlimit"}} active{{end}}">智能拦截</a>
+                <a href="/blockpage" class="nav-item sub-item{{if eq .Active "blockpage"}} active{{end}}">拦截响应页</a>
             </div>
         </div>
         
-        <!-- 日志中心 - 一级菜单（可展开） -->
-        <div class="nav-group{{if or (eq .Active "intercepts") (eq .Active "logs") (eq .Active "adminlog")}} expanded{{end}}" data-group="logs">
+        <!-- [封存] 情报中心菜单暂时隐藏
+        <div class="nav-group{{if or (eq .Active "intel-config") (eq .Active "intel-sync") (eq .Active "intel-audit")}} expanded{{end}}" data-group="intel">
             <div class="nav-group-header">
-                <span>📋 日志中心</span>
+                <span>🌐 情报中心</span>
                 <span class="nav-arrow">▼</span>
             </div>
             <div class="nav-group-items">
-                <a href="/intercepts" class="nav-item sub-item{{if eq .Active "intercepts"}} active{{end}}">拦截数据</a>
+                <a href="/intel/config" class="nav-item sub-item{{if eq .Active "intel-config"}} active{{end}}">连接配置</a>
+                <a href="/intel/sync" class="nav-item sub-item{{if eq .Active "intel-sync"}} active{{end}}">同步管理</a>
+                <a href="/intel/audit" class="nav-item sub-item{{if eq .Active "intel-audit"}} active{{end}}">上传审计</a>
+            </div>
+        </div>
+        -->
+        
+        <!-- 日志审计 - 一级菜单（可展开） -->
+        <div class="nav-group{{if or (eq .Active "intercepts") (eq .Active "logs") (eq .Active "adminlog") (eq .Active "syslog") (eq .Active "compliance")}} expanded{{end}}" data-group="logs">
+            <div class="nav-group-header">
+                <span class="nav-icon">📋</span><span class="nav-text">日志审计</span>
+                <span class="nav-arrow">▼</span>
+            </div>
+            <div class="nav-group-items">
+                <a href="/intercepts" class="nav-item sub-item{{if eq .Active "intercepts"}} active{{end}}">拦截日志</a>
                 <a href="/logs" class="nav-item sub-item{{if eq .Active "logs"}} active{{end}}">访问日志</a>
+                <div class="nav-section-label">高级设置</div>
                 <a href="/adminlog" class="nav-item sub-item{{if eq .Active "adminlog"}} active{{end}}">管理日志</a>
+                <a href="/syslog" class="nav-item sub-item{{if eq .Active "syslog"}} active{{end}}">系统日志</a>
+                <a href="/compliance" class="nav-item sub-item{{if eq .Active "compliance"}} active{{end}}">合规报告</a>
             </div>
         </div>
         
         <!-- 系统配置 - 一级菜单（可展开） -->
-        <div class="nav-group{{if or (eq .Active "config-security") (eq .Active "config-performance") (eq .Active "config-scheduler") (eq .Active "config-websocket") (eq .Active "change_password")}} expanded{{end}}" data-group="config">
+        <div class="nav-group{{if or (eq .Active "config-system") (eq .Active "config")}} expanded{{end}}" data-group="system">
             <div class="nav-group-header">
-                <span>⚙️ 系统配置</span>
+                <span class="nav-icon">⚙️</span><span class="nav-text">系统设置</span>
                 <span class="nav-arrow">▼</span>
             </div>
             <div class="nav-group-items">
-                <a href="/config-security" class="nav-item sub-item{{if eq .Active "config-security"}} active{{end}}">安全配置</a>
-                <a href="/config-performance" class="nav-item sub-item{{if eq .Active "config-performance"}} active{{end}}">性能配置</a>
-                <a href="/config-scheduler" class="nav-item sub-item{{if eq .Active "config-scheduler"}} active{{end}}">定时任务</a>
-                <a href="/config-websocket" class="nav-item sub-item{{if eq .Active "config-websocket"}} active{{end}}">WebSocket</a>
-                <a href="/change-password" class="nav-item sub-item{{if eq .Active "change_password"}} active{{end}}">修改密码</a>
+                <a href="/config-system" class="nav-item sub-item{{if eq .Active "config-system"}} active{{end}}">全部设置</a>
+                <a href="/config-system#security" class="nav-item sub-item">安全与性能</a>
+                <a href="/config-system#log" class="nav-item sub-item">日志与数据</a>
+                <a href="/config-system#proxy" class="nav-item sub-item">代理与白名单</a>
+                <a href="/config-system#apikey" class="nav-item sub-item">密钥与工具</a>
             </div>
         </div>
     </div>
     <div class="sidebar-footer">
-        <a href="/logout">🚪 退出登录</a>
+        <a href="/logout"><span class="nav-icon">🚪</span><span class="nav-text">退出登录</span></a>
     </div>
+    <button class="sidebar-collapse-btn" id="sidebarCollapseBtn" onclick="toggleSidebar()" title="收起/展开侧边栏">◀</button>
 </div>
-<script>
+<script nonce="{{.CSPNonce}}">
 (function() {
     // CSRF Token处理
     function getCSRFToken() {
@@ -86,6 +127,26 @@
             }
         }
         return '';
+    }
+    window.getCSRFToken = getCSRFToken;
+
+    window.toggleSidebar = function() {
+        var sidebar = document.getElementById('sidebar');
+        if (!sidebar) return;
+        sidebar.classList.toggle('collapsed');
+        var btn = document.getElementById('sidebarCollapseBtn');
+        if (btn) btn.textContent = sidebar.classList.contains('collapsed') ? '▶' : '◀';
+        localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed') ? '1' : '0');
+    };
+
+    var savedCollapsed = localStorage.getItem('sidebarCollapsed');
+    if (savedCollapsed === '1') {
+        var sidebar = document.getElementById('sidebar');
+        if (sidebar) {
+            sidebar.classList.add('collapsed');
+            var btn = document.getElementById('sidebarCollapseBtn');
+            if (btn) btn.textContent = '▶';
+        }
     }
 
     var originalFetch = window.fetch;
@@ -107,53 +168,57 @@
     };
 
     // 菜单展开/收起功能
-    document.querySelectorAll('.nav-group-header').forEach(function(header) {
-        header.addEventListener('click', function(e) {
+    document.addEventListener('click', function(e) {
+        var header = e.target.closest('.nav-group-header');
+        if (header) {
             e.preventDefault();
-            var group = this.parentElement;
-            var isExpanded = group.classList.contains('expanded');
-            
-            // 手风琴模式：收起其他展开的菜单
-            document.querySelectorAll('.nav-group.expanded').forEach(function(expandedGroup) {
-                if (expandedGroup !== group) {
-                    expandedGroup.classList.remove('expanded');
-                }
-            });
-            
-            // 切换当前菜单的展开状态
-            if (isExpanded) {
-                group.classList.remove('expanded');
-            } else {
-                group.classList.add('expanded');
+            var group = header.closest('.nav-group');
+            var sidebar = document.getElementById('sidebar');
+            if (sidebar && sidebar.classList.contains('collapsed')) {
+                sidebar.classList.remove('collapsed');
+                var btn = document.getElementById('sidebarCollapseBtn');
+                if (btn) btn.textContent = '◀';
+                localStorage.setItem('sidebarCollapsed', '0');
             }
-            
-            // 保存展开状态到localStorage
+            var isExpanded = group.classList.contains('expanded');
+
+            document.querySelectorAll('.nav-group.expanded').forEach(function(eg) {
+                if (eg !== group) eg.classList.remove('expanded');
+            });
+
+            if (isExpanded) { group.classList.remove('expanded'); }
+            else { group.classList.add('expanded'); }
+
             var expandedGroups = Array.from(document.querySelectorAll('.nav-group.expanded'))
                 .map(function(g) { return g.getAttribute('data-group'); });
             localStorage.setItem('expandedMenuGroups', JSON.stringify(expandedGroups));
-        });
+        }
     });
 
     // 页面加载时恢复菜单展开状态
     var savedExpandedGroups = localStorage.getItem('expandedMenuGroups');
+    var hasActiveMenu = document.querySelector('.nav-item.active');
+    
     if (savedExpandedGroups) {
         try {
             var groups = JSON.parse(savedExpandedGroups);
-            // 如果当前页面有激活的菜单，优先展开该菜单
-            var hasActiveMenu = document.querySelector('.nav-item.active');
-            if (!hasActiveMenu) {
-                // 没有激活菜单时，恢复保存的状态
-                document.querySelectorAll('.nav-group').forEach(function(group) {
-                    var groupId = group.getAttribute('data-group');
-                    if (groups.includes(groupId)) {
-                        group.classList.add('expanded');
-                    } else {
-                        group.classList.remove('expanded');
-                    }
-                });
-            }
+            document.querySelectorAll('.nav-group').forEach(function(group) {
+                var groupId = group.getAttribute('data-group');
+                if (groups.includes(groupId)) {
+                    group.classList.add('expanded');
+                } else {
+                    group.classList.remove('expanded');
+                }
+            });
         } catch (e) {
             console.error('Failed to restore menu state:', e);
+        }
+    }
+    
+    if (hasActiveMenu) {
+        var parentGroup = hasActiveMenu.closest('.nav-group');
+        if (parentGroup) {
+            parentGroup.classList.add('expanded');
         }
     }
 })();
@@ -161,12 +226,13 @@
 // Global showToast
 window.showToast = function(type, message, duration) {
     duration = duration || 3000;
-    var existing = document.querySelectorAll('.toast.show');
-    if (existing.length >= 3) {
-        existing[0].remove();
+    var existingToasts = Array.from(document.querySelectorAll('.toast.show'));
+    if (existingToasts.length >= 3) {
+        existingToasts[0].remove();
+        existingToasts.shift();
     }
     var offset = 20;
-    document.querySelectorAll('.toast.show').forEach(function(t) {
+    existingToasts.forEach(function(t) {
         t.style.top = offset + 'px';
         offset += t.offsetHeight + 8;
     });
@@ -188,6 +254,10 @@ window.showToast = function(type, message, duration) {
 // Escape key to close modals
 document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
+        var tag = document.activeElement && document.activeElement.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+            return;
+        }
         var openModal = document.querySelector('.modal.show') || document.querySelector('.modal[style*="display: block"]');
         if (openModal) {
             var closeBtn = openModal.querySelector('.close');
@@ -201,4 +271,6 @@ document.addEventListener('keydown', function(e) {
     }
 });
 </script>
+<script nonce="{{.CSPNonce}}" src="/static/common.js"></script>
+<script nonce="{{.CSPNonce}}" src="/static/crud.js"></script>
 {{end}}

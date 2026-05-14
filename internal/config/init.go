@@ -5,30 +5,27 @@ import (
 	"encoding/json"
 	"log"
 
-	"gowaf-demo/internal/logger"
-	"gowaf-demo/internal/logdb"
-	"gowaf-demo/internal/web/middleware"
+	"gowaf/internal/logdb"
+	"gowaf/internal/logger"
+	"gowaf/internal/web/middleware"
 )
 
 // InitCoreConfigs 初始化核心配置
-// 注意：现在大部分配置已从 YAML 移至数据库，此函数主要负责初始化那些仍需从 cfg 读取的基础项
 func InitCoreConfigs(cfg *Config, db *sql.DB) {
-	// 1. 尝试从数据库加载运行时配置
 	runtimeCfg := loadRuntimeConfigFromDB(db)
 	if runtimeCfg == nil {
-		// 如果数据库没有，使用默认值
 		runtimeCfg = GetDefaultRuntimeConfig()
 		log.Println("使用默认运行时配置")
 	}
 
-	// 2. 初始化 Session 配置
-	middleware.InitSessionConfig(runtimeCfg.Security.Session.TTL)
+	cfg.RuntimeConfig = *runtimeCfg
 
-	// 3. 初始化限流配置
+	middleware.InitSessionConfig(runtimeCfg.Security.Session.TTL, runtimeCfg.Security.Session.AbsoluteTTL)
+
 	middleware.InitRateLimitConfig(runtimeCfg.Security.RateLimit.APILimit, runtimeCfg.Security.RateLimit.APIWindow)
 
-	// 4. 初始化日志系统配置
 	logger.SetLogConfig(runtimeCfg.Performance.LogChannelSize, runtimeCfg.Scheduler.LogFlush)
+	logger.SetLevel(logger.ParseLevel(runtimeCfg.Log.Level))
 }
 
 // loadRuntimeConfigFromDB 从数据库加载运行时配置
@@ -46,6 +43,17 @@ func loadRuntimeConfigFromDB(db *sql.DB) *RuntimeConfig {
 	if err := json.Unmarshal([]byte(jsonStr), &rc); err != nil {
 		log.Printf("解析运行时配置失败: %v", err)
 		return nil
+	}
+	// 兼容旧版 runtime_config（缺少新增字段时回退默认值）
+	defaultCfg := GetDefaultRuntimeConfig()
+	if rc.Log.Level == "" {
+		rc.Log = defaultCfg.Log
+	}
+	if rc.Retention.LogRetentionDays == 0 {
+		rc.Retention = defaultCfg.Retention
+	}
+	if rc.SessionSafe.IPMutationThreshold == 0 {
+		rc.SessionSafe = defaultCfg.SessionSafe
 	}
 	return &rc
 }
@@ -88,4 +96,22 @@ func GetPerformanceConfig(db *sql.DB) (logChannelSize int, cacheSize int, cacheT
 		rc = GetDefaultRuntimeConfig()
 	}
 	return rc.Performance.LogChannelSize, rc.Performance.CacheSize, rc.Performance.CacheTTL, rc.Performance.MaxRequestBody, rc.Performance.ScanBuffer
+}
+
+// GetRetentionConfig 获取数据保留配置(供main.go使用)
+func GetRetentionConfig(db *sql.DB) (logRetentionDays, metricsRetentionDays, adminLogRetentionDays int) {
+	rc := loadRuntimeConfigFromDB(db)
+	if rc == nil {
+		rc = GetDefaultRuntimeConfig()
+	}
+	return rc.Retention.LogRetentionDays, rc.Retention.MetricsRetentionDays, rc.Retention.AdminLogRetentionDays
+}
+
+// GetSessionSafeFromDB 获取会话安全配置(供main.go启动时使用)
+func GetSessionSafeFromDB(db *sql.DB) *SessionSafeConfig {
+	rc := loadRuntimeConfigFromDB(db)
+	if rc == nil {
+		rc = GetDefaultRuntimeConfig()
+	}
+	return &rc.SessionSafe
 }

@@ -8,10 +8,7 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/common.css">
     <style>
-        .filter-bar { display: flex; gap: 15px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; flex-shrink: 0; }
         .method-tag { display: inline-block; padding: 4px 12px; border-radius: 4px; font-weight: 600; font-size: 13px; background: #ecf0f1; color: #2c3e50; }
-        .info-box { background: #f8f9fa; border-left: 4px solid #409eff; padding: 15px; margin-bottom: 20px; border-radius: 4px; font-size: 13px; color: #596275; }
-        .modal.show { display: flex; }
     </style>
 </head>
 <body>
@@ -55,32 +52,35 @@
             </div>
         </div>
     </div>
-    <script>
-    function escapeHtml(text){var d=document.createElement('div');d.textContent=text;return d.innerHTML;}
+    <script nonce="{{.CSPNonce}}">
     function loadMethods(){
-        fetch('/api/methods/list').then(r=>r.json()).then(d=>{
-            if(!d.success) return;
-            var tbody=document.getElementById('methodList');
-            if(!d.data||!d.data.length){tbody.innerHTML='<tr><td colspan="3" style="text-align:center;color:#95a5a6;">暂无限制（允许所有方法）</td></tr>';return;}
-            tbody.innerHTML=d.data.map(m=>'<tr><td><span class="method-tag">'+escapeHtml(m.method)+'</span></td><td>'+(m.enabled?'<span style="color:#27ae60">允许</span>':'<span style="color:#95a5a6">禁用</span>')+'</td><td><button class="delete-btn" onclick="delMethod(\''+escapeHtml(m.method)+'\')">删除</button></td></tr>').join('');
-        }).catch(e=>showToast('error','加载方法列表失败'));
+        WAF.withLoading('.card',function(){
+            return fetch('/api/methods/list').then(r=>r.json()).then(d=>{
+                if(!d.success) return;
+                var tbody=document.getElementById('methodList');
+                if(!d.data||!d.data.length){tbody.innerHTML='<tr><td colspan="3" style="text-align:center;color:#95a5a6;">暂无限制（允许所有方法）</td></tr>';return;}
+                tbody.innerHTML=d.data.map(m=>'<tr><td><span class="method-tag">'+escapeHtml(m.method)+'</span></td><td>'+WAF.renderEnabledText(m.enabled)+'</td><td><button class="delete-btn" data-method="'+escapeHtml(m.method)+'">删除</button></td></tr>').join('');
+            }).catch(e=>showToast('error','加载方法列表失败'));
+        });
     }
-    function openModal(){document.getElementById('addModal').classList.add('show');}
-    function closeModal(){document.getElementById('addModal').classList.remove('show');}
+    document.getElementById('methodList').addEventListener('click',function(e){
+        var btn=e.target.closest('.delete-btn');
+        if(!btn)return;
+        var method=btn.getAttribute('data-method');
+        if(!method)return;
+        WAF.confirmDelete('确认删除方法 '+method+'？','/api/methods/delete?method='+encodeURIComponent(method),{},loadMethods);
+    });
+    function openModal(){document.getElementById('addMethod').selectedIndex=0;WAF.Modal.open('addModal');}
+    function closeModal(){WAF.Modal.close('addModal');}
     function addMethod(){
-        var btn=document.querySelector('.btn-submit');if(btn&&btn.disabled)return;
-        var method=document.getElementById('addMethod').value;
-        if(btn)btn.disabled=true;
-        fetch('/api/methods/set',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({method:method,enabled:true})}).then(r=>r.json()).then(d=>{
-            if(d.success){showToast('success','添加成功');closeModal();loadMethods();}else showToast('error',d.message||'添加失败');
-        }).catch(e=>showToast('error','添加失败: '+e.message)).finally(()=>{if(btn)btn.disabled=false;});
+        WAF.submitWithLock('#addModal .btn-submit',function(){
+            var method=document.getElementById('addMethod').value;
+            return WAF.jsonPost('/api/methods/set',{method:method,enabled:true}).then(d=>{
+                if(d.success){showToast('success','添加成功');closeModal();loadMethods();}else showToast('error',d.error||'添加失败');
+            }).catch(e=>showToast('error','添加失败'));
+        });
     }
-    function delMethod(method){
-        if(!confirm('确认删除方法 '+method+'？'))return;
-        fetch('/api/methods/delete?method='+method,{method:'POST'}).then(r=>r.json()).then(d=>{
-            if(d.success){showToast('success','删除成功');loadMethods();}else showToast('error',d.message||'删除失败');
-        }).catch(e=>showToast('error','删除失败: '+e.message));
-    }
+    WAF.Modal.clickOutside('addModal',closeModal);
     loadMethods();
     </script>
 </body>

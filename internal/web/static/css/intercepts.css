@@ -1,0 +1,216 @@
+/* 徽章样式 - 与访问日志保持一致 */
+        .badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .badge.ip { background: #fee; color: #c0392b; }
+        .badge.ua { background: #fef3e2; color: #e67e22; }
+        .badge.path { background: #e8f5e9; color: #27ae60; }
+        .badge.ratelimit { background: #e3f2fd; color: #409eff; }
+        .badge.other { background: #f5f5f5; color: #7f8c8d; }
+
+        /* 筛选栏样式 - 与访问日志保持一致 */
+        .filter-bar {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+            flex-shrink: 0;
+        }
+        .filter-bar input[type="text"],
+        .filter-bar select,
+        .filter-bar input[type="date"] {
+            padding: 8px 12px;
+            border: 1px solid #dcdfe6;
+            border-radius: 4px;
+            font-size: 14px;
+            background: white;
+        }
+        .filter-bar input[type="text"]:focus,
+        .filter-bar select:focus,
+        .filter-bar input[type="date"]:focus {
+            outline: none;
+            border-color: #409eff;
+        }
+        .filter-bar input[type="text"] {
+            flex: 1;
+            min-width: 200px;
+        }
+        .filter-bar button {
+            padding: 8px 16px;
+            background: #409eff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 14px;
+        }
+        .filter-bar button:hover {
+            background: #66b1ff;
+        }
+        .time-filter {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+        }
+        .time-filter span { color: #7f8c8d; font-size: 14px; }
+
+        /* 表格样式 - 与访问日志保持一致 */
+        .log-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .log-table th {
+            background: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-weight: 500;
+            color: #2c3e50;
+            font-size: 13px;
+            border-bottom: 1px solid #e8e9ed;
+        }
+        .log-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 13px;
+        }
+        .log-table tr:hover {
+            background: #f8f9fa;
+        }
+        .log-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        /* 详情行样式 - 与访问日志保持一致 */
+        .detail-row {
+            display: none;
+            background: #f8f9fa;
+        }
+        .detail-row.show {
+            display: table-row;
+        }
+        .detail-content {
+            padding: 15px;
+            border-left: 3px solid #409eff;
+        }
+        .detail-item {
+            display: flex;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+        .detail-item:last-child { margin-bottom: 0; }
+        .detail-label {
+            font-weight: 500;
+            color: #596275;
+            min-width: 100px;
+        }
+        .detail-value {
+            color: #2c3e50;
+            word-break: break-all;
+        }
+        .detail-value code {
+            background: #e8e9ed;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+
+        /* 查看详情按钮 - 与访问日志保持一致 */
+        .view-btn {
+            color: #409eff;
+            text-decoration: none;
+            padding: 4px 12px;
+            border-radius: 4px;
+            transition: all 0.3s;
+            cursor: pointer;
+            border: none;
+            background: transparent;
+            font-size: 13px;
+        }
+        .view-btn:hover {
+            background-color: #409eff;
+            color: white;
+        }
+
+        .empty-message {
+            text-align: center;
+            padding: 40px;
+            color: #95a5a6;
+            font-size: 14px;
+        }
+
+        /* 视图模式切换按钮组 */
+        .view-mode-group {
+            display: inline-flex;
+            border: 1px solid #dcdfe6;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .view-mode-btn {
+            padding: 6px 14px;
+            font-size: 12px;
+            cursor: pointer;
+            border: none;
+            background: white;
+            color: #606266;
+            transition: all 0.2s;
+        }
+        .view-mode-btn:not(:last-child) {
+            border-right: 1px solid #dcdfe6;
+        }
+        .view-mode-btn.active {
+            background: #409eff;
+            color: white;
+        }
+        .view-mode-btn:hover:not(.active) {
+            background: #ecf5ff;
+            color: #409eff;
+        }
+
+        /* 分组视图表格 */
+        .group-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .group-table th {
+            background: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-weight: 500;
+            color: #2c3e50;
+            font-size: 13px;
+            border-bottom: 1px solid #e8e9ed;
+        }
+        .group-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 13px;
+        }
+        .group-table tr:hover {
+            background: #f8f9fa;
+        }
+        .group-table tr:last-child td {
+            border-bottom: none;
+        }
+        .group-table .count-bar {
+            display: inline-block;
+            height: 6px;
+            border-radius: 3px;
+            background: #409eff;
+            vertical-align: middle;
+            margin-left: 6px;
+        }
+        .group-drill-btn {
+            color: #409eff;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 12px;
+        }
+        .group-drill-btn:hover {
+            text-decoration: underline;
+        }

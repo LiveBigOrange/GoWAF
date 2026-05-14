@@ -1,0 +1,140 @@
+{{define "config-system"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>系统设置 - GoWAF</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <link rel="stylesheet" href="/static/css/config_system.css">
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main scroll-page">
+        <h2 style="margin-bottom:6px;font-size:20px;color:#2c3e50;flex-shrink:0">&#9881;&#65039; 系统设置</h2>
+        <p style="font-size:13px;color:#95a5a6;margin:0 0 24px 0;flex-shrink:0">GoWAF 运行参数集中管理，点击卡片打开设置弹窗</p>
+
+        <div id="sectionBreadcrumb" style="display:none;margin-bottom:12px;flex-shrink:0">
+            <a href="/config-system" style="color:#409eff;text-decoration:none;font-size:14px">&#8592; 全部设置</a>
+            <span id="sectionLabel" style="margin-left:8px;font-size:15px;font-weight:600;color:#2c3e50"></span>
+        </div>
+        <div class="config-grid" id="configGrid">
+            <div class="config-card" id="section-security" data-section="security" onclick="openModal('security')">
+                <div class="card-icon-wrap security">&#128274;</div>
+                <div class="card-body">
+                    <div class="card-title">安全配置</div>
+                    <div class="card-summary" id="summary-security">加载中...</div>
+                </div>
+            </div>
+
+            <div class="config-card" data-section="security" onclick="openModal('performance')">
+                <div class="card-icon-wrap performance">&#9889;</div>
+                <div class="card-body">
+                    <div class="card-title">性能配置</div>
+                    <div class="card-summary" id="summary-performance">加载中...</div>
+                </div>
+            </div>
+
+            <div class="config-card" data-section="security" onclick="openModal('scheduler')">
+                <div class="card-icon-wrap scheduler">&#9200;</div>
+                <div class="card-body">
+                    <div class="card-title">定时任务</div>
+                    <div class="card-summary" id="summary-scheduler">加载中...</div>
+                </div>
+            </div>
+
+            <div class="config-card" data-section="security" onclick="openModal('websocket')">
+                <div class="card-icon-wrap websocket">&#128225;</div>
+                <div class="card-body">
+                    <div class="card-title">WebSocket</div>
+                    <div class="card-summary" id="summary-websocket">加载中...</div>
+                </div>
+            </div>
+
+            <div class="config-card" id="section-proxy" data-section="proxy" onclick="openModal('proxy')">
+                <div class="card-icon-wrap proxy">&#128272;</div>
+                <div class="card-body">
+                    <div class="card-title">可信代理</div>
+                    <div class="card-summary" id="summary-proxy">加载中...</div>
+                </div>
+            </div>
+
+            <div class="config-card" id="section-log" data-section="log" onclick="openModal('log')">
+                <div class="card-icon-wrap log">&#128196;</div>
+                <div class="card-body">
+                    <div class="card-title">日志配置</div>
+                    <div class="card-summary" id="summary-log">加载中...</div>
+                </div>
+            </div>
+
+            <div class="config-card" data-section="proxy" onclick="openModal('whitelist')">
+                <div class="card-icon-wrap whitelist">&#128737;</div>
+                <div class="card-body">
+                    <div class="card-title">管理IP白名单</div>
+                    <div class="card-summary" id="summary-whitelist">加载中...</div>
+                </div>
+            </div>
+
+            <div class="config-card" id="section-apikey" data-section="apikey" onclick="openModal('apikey')">
+                <div class="card-icon-wrap apikey">&#128273;</div>
+                <div class="card-body">
+                    <div class="card-title">API密钥</div>
+                    <div class="card-summary" id="summary-apikey">加载中...</div>
+                </div>
+            </div>
+
+            <div class="config-card" data-section="apikey" onclick="openModal('password')">
+                <div class="card-icon-wrap password">&#128273;</div>
+                <div class="card-body">
+                    <div class="card-title">修改密码</div>
+                    <div class="card-summary">修改管理员登录密码，建议定期更换</div>
+                </div>
+            </div>
+
+            <div class="config-card" data-section="apikey" onclick="openModal('backup')">
+                <div class="card-icon-wrap backup">&#128229;</div>
+                <div class="card-body">
+                    <div class="card-title">配置备份</div>
+                    <div class="card-summary" id="summary-backup">导出/还原全部配置数据</div>
+                </div>
+            </div>
+
+            <div class="config-card" data-section="proxy" onclick="openModal('geoip')">
+                <div class="card-icon-wrap geoip">&#127758;</div>
+                <div class="card-body">
+                    <div class="card-title">GeoIP 更新</div>
+                    <div class="card-summary" id="summary-geoip">加载中...</div>
+                </div>
+            </div>
+
+            <div class="config-card" data-section="security" onclick="openModal('global')">
+                <div class="card-icon-wrap global">&#128264;</div>
+                <div class="card-body">
+                    <div class="card-title">全局总开关</div>
+                    <div class="card-summary" id="summary-global">加载中...</div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <div class="config-modal" id="configModal">
+        <div class="modal-box" id="configModalBox">
+            <div class="modal-head">
+                <h3 id="modalTitle">&#9881;&#65039; 配置</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+            <div class="modal-foot" id="modalFoot">
+                <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+                <button class="btn btn-danger-o" onclick="resetCurrent()">&#8634; 恢复默认</button>
+                <button class="btn btn-submit" onclick="saveCurrent()">&#128190; 保存配置</button>
+            </div>
+        </div>
+    </div>
+
+<script nonce="{{.CSPNonce}}" src="/static/js/config_system.js"></script>
+</body>
+</html>
+{{end}}

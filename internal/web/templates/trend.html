@@ -1,0 +1,47 @@
+{{define "trend"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>趋势分析 - WAF</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <link rel="stylesheet" href="/static/css/trend.css">
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main scroll-page">
+        <h2 style="margin-bottom: 20px; font-size: 20px; color: #2c3e50; flex-shrink: 0;">📈 趋势分析</h2>
+        <div class="trend-controls">
+            <div class="range-btns">
+                <button class="range-btn active" data-range="15m" onclick="setRange('15m',this)">15分钟</button>
+                <button class="range-btn" data-range="1h" onclick="setRange('1h',this)">1小时</button>
+                <button class="range-btn" data-range="12h" onclick="setRange('12h',this)">12小时</button>
+                <button class="range-btn" data-range="24h" onclick="setRange('24h',this)">24小时</button>
+                <button class="range-btn" data-range="7d" onclick="setRange('7d',this)">7天</button>
+                <button class="range-btn" data-range="30d" onclick="setRange('30d',this)">30天</button>
+                <button class="range-btn" data-range="90d" onclick="setRange('90d',this)">90天</button>
+            </div>
+            <div class="trend-tabs">
+                <button class="trend-tab active" data-metric="requests" onclick="setMetric('requests',this)">请求量</button>
+                <button class="trend-tab" data-metric="qps" onclick="setMetric('qps',this)">QPS & 延迟</button>
+                <button class="trend-tab" data-metric="traffic" onclick="setMetric('traffic',this)">网络流量</button>
+                <button class="trend-tab" data-metric="blocks" onclick="setMetric('blocks',this)">拦截率</button>
+                <button class="trend-tab" data-metric="errors" onclick="setMetric('errors',this)">错误率 & 连接</button>
+                <button class="trend-tab trend-tab-sys" data-metric="cpu" onclick="setMetric('cpu',this)">系统资源</button>
+                <button class="trend-tab trend-tab-go" data-metric="goruntime" onclick="setMetric('goruntime',this)">Go 运行时</button>
+            </div>
+        </div>
+        <div class="trend-toolbar">
+            <button class="trend-split-btn" id="splitBtn" title="拆分/合并图表">⊞ 合并</button>
+        </div>
+        <div class="trend-summary" id="trendSummary"></div>
+        <div class="trend-chart-wrap" id="trendChartWrap"></div>
+    </div>
+    <script nonce="{{.CSPNonce}}" src="/static/chart.umd.min.js"></script>
+    <script nonce="{{.CSPNonce}}" src="/static/common.js"></script>
+    <script nonce="{{.CSPNonce}}" src="/static/js/trend.js"></script>
+</body>
+</html>
+{{end}}

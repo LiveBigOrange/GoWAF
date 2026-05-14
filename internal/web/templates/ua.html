@@ -9,21 +9,6 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/common.css">
     <style>
-        /* 样式保持不变，此处省略以节省篇幅 */
-        .filter-bar { display: flex; gap: 15px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; flex-shrink: 0; }
-        .filter-bar select { padding: 8px 30px 8px 12px; border: 1px solid #dcdfe6; border-radius: 4px; font-size: 14px; background: white url('data:image/svg+xml;charset=utf8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12"><path fill="%23666" d="M6 8L1 3h10z"/></svg>') no-repeat right 10px center; cursor: pointer; appearance: none; -webkit-appearance: none; -moz-appearance: none; min-width: 120px; color: #606266; transition: border-color 0.3s, box-shadow 0.3s; }
-        .filter-bar select:hover { border-color: #c0c4cc; }
-        .filter-bar select:focus { outline: none; border-color: #409eff; box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2); }
-        .search-container { position: relative; flex: 1; max-width: 400px; min-width: 0; }
-        .search-container input { width: 100%; padding: 8px 35px 8px 35px; border: 1px solid #dcdfe6; border-radius: 4px; font-size: 14px; background: white; color: #606266; transition: border-color 0.3s, box-shadow 0.3s; }
-        .search-container input:hover { border-color: #c0c4cc; }
-        .search-container input:focus { outline: none; border-color: #409eff; box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2); }
-        .search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: #c0c4cc; font-size: 14px; pointer-events: none; }
-        .search-clear { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; border: none; background: #f0f0f0; border-radius: 50%; cursor: pointer; display: none; align-items: center; justify-content: center; font-size: 12px; color: #909399; transition: all 0.3s; }
-        .search-clear:hover { background: #e0e0e0; color: #606266; }
-        .search-clear.show { display: flex; }
-        .add-btn { margin-left: auto; padding: 8px 20px; background: #409eff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; transition: background 0.3s; }
-        .add-btn:hover { background: #66b1ff; }
         .toggle-btn { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 12px; cursor: pointer; user-select: none; }
         .toggle-btn.enabled { background: #e1f3d8; color: #67c23a; }
         .toggle-btn.disabled { background: #fde2e2; color: #f56c6c; }
@@ -35,45 +20,31 @@
         th:nth-child(5), td:nth-child(5) { white-space: nowrap; }
         th:nth-child(6), td:nth-child(6) { white-space: nowrap; }
         td code { word-break: break-all; font-size: 12px; }
-        .modal-content { background-color: #fff; padding: 0; border-radius: 8px; width: 500px; max-width: 90%; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
-        .modal-header { padding: 20px; border-bottom: 1px solid #e8e9ed; display: flex; justify-content: space-between; align-items: center; }
-        .modal-header h3 { margin: 0; font-size: 18px; color: #2c3e50; }
-        .close { color: #aaa; font-size: 28px; font-weight: bold; cursor: pointer; line-height: 1; }
-        .close:hover { color: #000; }
-        .modal-body { padding: 20px; }
-        .form-group { margin-bottom: 20px; }
-        .form-group label { display: block; margin-bottom: 8px; font-weight: 500; color: #2c3e50; font-size: 14px; }
-        .form-group select, .form-group input { width: 100%; padding: 10px; border: 1px solid #dcdfe6; border-radius: 4px; font-size: 14px; box-sizing: border-box; }
-        .form-group select:focus, .form-group input:focus { outline: none; border-color: #409eff; }
-        .form-group small { display: block; margin-top: 5px; color: #909399; font-size: 12px; }
-        .modal-footer { padding: 15px 20px; border-top: 1px solid #e8e9ed; text-align: right; }
-        .btn-cancel { padding: 8px 20px; background: #f5f5f5; color: #606266; border: 1px solid #dcdfe6; border-radius: 4px; cursor: pointer; font-size: 14px; margin-right: 10px; }
-        .btn-cancel:hover { background: #e8e8e8; }
-        .btn-submit { padding: 8px 20px; background: #409eff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
-        .btn-submit:hover { background: #66b1ff; }
-        .badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 500; }
-        .badge.whitelist { background: #d4edda; color: #155724; }
-        .badge.blacklist { background: #f8d7da; color: #721c24; }
-        .match-type { background: #e3f2fd; color: #1976d2; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
-        .delete-btn { color: #e74c3c; text-decoration: none; padding: 4px 12px; border-radius: 4px; transition: all 0.3s; border: none; background: transparent; cursor: pointer; font-size: 13px; }
-        .delete-btn:hover { background-color: #e74c3c; color: white; }
+        .badge.intel { background: #d1ecf1; color: #0c5460; }
+        .intel-action-btn { padding: 4px 10px; background: #e6a23c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; margin-right: 4px; }
+        .intel-action-btn:hover { background: #ebb563; }
     </style>
 </head>
 <body>
     {{template "sidebar" .}}
     <div class="main">
-        <div class="card">
+        <div class="card list-card">
             <div class="filter-bar">
-                <select id="filterType" onchange="filterData()">
+                <select id="filterType" class="styled-select" onchange="filterData()">
                     <option value="">所有类型</option>
                     <option value="whitelist">白名单</option>
                     <option value="blacklist">黑名单</option>
                 </select>
-                <select id="filterMatch" onchange="filterData()">
+                <select id="filterMatch" class="styled-select" onchange="filterData()">
                     <option value="">所有匹配方式</option>
                     <option value="exact">精确匹配</option>
                     <option value="contains">包含匹配</option>
                     <option value="regex">正则表达式</option>
+                </select>
+                <select id="filterSource" class="styled-select" onchange="filterData()">
+                    <option value="">所有来源</option>
+                    <option value="builtin">内置</option>
+                    <option value="manual">手动</option>
                 </select>
                 <div class="search-container">
                     <span class="search-icon">🔍</span>
@@ -84,23 +55,18 @@
             </div>
             <div class="list-container">
             <table>
-                <thead><tr><th>类型</th><th>匹配方式</th><th>模式</th><th>说明</th><th>状态</th><th>操作</th></tr></thead>
+                <thead><tr><th>类型</th><th>匹配方式</th><th>模式</th><th>来源</th><th>说明</th><th>状态</th><th>操作</th></tr></thead>
                 <tbody id="tableBody"></tbody>
             </table>
             <div class="pagination" id="pagination" style="display:none;">
-                <div class="pagination-info">
-                    <span id="pageInfo">第1 页 / 第1 页</span>
-                    <select class="page-size-select" id="pageSize" onchange="changePageSize()">
-                        <option value="5">5 条</option>
-                        <option value="10" selected>10 条</option>
-                        <option value="20">20 条</option>
-                        <option value="50">50 条</option>
-                    </select>
-                </div>
-                <div class="pagination-btns">
-                    <button class="pagination-btn" id="prevBtn" onclick="prevPage()">上一页</button>
-                    <button class="pagination-btn" id="nextBtn" onclick="nextPage()">下一页</button>
-                </div>
+                <span id="pageInfo" style="color:#888;font-size:13px;white-space:nowrap;"></span>
+                <div class="pagination-btns" id="pageBtns"></div>
+                <select class="page-size-select" id="pageSize" onchange="changePageSize()">
+                    <option value="5">5条/页</option>
+                    <option value="10" selected>10条/页</option>
+                    <option value="20">20条/页</option>
+                    <option value="50">50条/页</option>
+                </select>
             </div>
             </div>
         </div>
@@ -196,19 +162,13 @@
         </div>
     </div>
     
-    <script>
+    <script nonce="{{.CSPNonce}}">
         (function() {
             var allData = [];
             var filteredData = [];
             var currentPage = 1;
             var pageSize = 10;
 
-            function escapeHtml(text) {
-                if (text == null) return '';
-                var div = document.createElement('div');
-                div.textContent = text;
-                return div.innerHTML;
-            }
 
             // 暴露必要函数到全局
             window.openModal = function() {
@@ -306,11 +266,17 @@
             window.filterData = function() {
                 var filterType = document.getElementById('filterType').value;
                 var filterMatch = document.getElementById('filterMatch').value;
+                var filterSource = document.getElementById('filterSource').value;
                 var searchText = document.getElementById('searchPattern').value.toLowerCase().trim();
                 
                 filteredData = allData.filter(function(item) {
                     if (filterType && item.rule_type !== filterType) return false;
                     if (filterMatch && item.match_type !== filterMatch) return false;
+                    if (filterSource) {
+                        var s = item.source || 'manual';
+                        var group = s === 'intel' || s === 'intel-bot' || s === 'intel-sig' ? 'intel' : s;
+                        if (group !== filterSource) return false;
+                    }
                     if (searchText && item.pattern.toLowerCase().indexOf(searchText) === -1) return false;
                     return true;
                 });
@@ -320,28 +286,17 @@
             }
 
             window.deleteUA = function(ruleType, ua) {
-                if (!confirm('确认删除？')) return;
-                var formData = new FormData();
-                formData.append('action', 'delete');
-                formData.append('type', ruleType);
-                formData.append('ua', ua);
-                fetch('/ua', { method: 'POST', body: formData })
-                    .then(r => r.json())
-                    .then(data => {
-                        if (data.success) loadData();
-                        else showToast('error', '删除失败: ' + (data.error || '未知错误'));
-                    })
-                    .catch(e => showToast('error', '删除失败: ' + e.message));
+                WAF.confirmDelete('确认删除？','/api/ua/delete',{rule_type:ruleType,pattern:ua},loadData);
             };
 
             function loadData() {
                 fetch('/api/ua')
                     .then(r => r.json())
-                    .then(d => {
-                        allData = d || [];
+                    .then(resp => {
+                        allData = resp.data || [];
                         filterData();
                     })
-                    .catch(e => console.error('获取数据失败', e));
+                    .catch(e => showToast('error', '加载数据失败'));
             }
 
             function getMatchTypeText(type) {
@@ -354,7 +309,7 @@
                 var pagination = document.getElementById('pagination');
                 
                 if (!filteredData || filteredData.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#95a5a6; padding:20px;">暂无规则，请添加</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#95a5a6; padding:20px;">暂无规则，请添加</td></tr>';
                     pagination.style.display = 'none';
                     return;
                 }
@@ -372,10 +327,14 @@
                     var tr = document.createElement('tr');
                     var ruleTypeText = item.rule_type === 'whitelist' ? '白名单' : '黑名单';
                     var escapedPattern = escapeHtml(item.pattern);
-                    // 安全传递数据，避免内联onclick注入
-                    tr.innerHTML = '<td><span class="badge ' + item.rule_type + '">' + ruleTypeText + '</span></td>' +
+                    var ruleTypeClass = item.rule_type === 'whitelist' ? 'whitelist' : 'blacklist';
+                    var source = item.source || 'manual';
+                    var sourceLabel = source === 'intel' || source === 'intel-bot' || source === 'intel-sig' ? '情报' : source === 'builtin' ? '内置' : '手动';
+                    var sourceClass = source === 'intel' || source === 'intel-bot' || source === 'intel-sig' ? 'intel' : source === 'builtin' ? 'whitelist' : 'blacklist';
+                    tr.innerHTML = '<td><span class="badge ' + ruleTypeClass + '">' + ruleTypeText + '</span></td>' +
                         '<td><span class="match-type">' + getMatchTypeText(item.match_type) + '</span></td>' +
                         '<td><code>' + escapedPattern + '</code></td>' +
+                        '<td><span class="badge ' + sourceClass + '">' + sourceLabel + '</span></td>' +
                         '<td style="color:#909399;font-size:13px;">' + escapeHtml(item.description || '') + '</td>' +
                         '<td><span class="toggle-btn ' + (item.enabled ? 'enabled' : 'disabled') + '" data-id="' + item.id + '" onclick="toggleRule(' + item.id + ')">' + (item.enabled ? '启用' : '禁用') + '</span></td>' +
                         '<td><button class="edit-btn" data-id="' + item.id + '" onclick="openEditModal(' + item.id + ')">编辑</button> <button class="delete-btn" data-ruletype="' + escapeHtml(item.rule_type) + '" data-ua="' + escapeHtml(item.pattern) + '">删除</button></td>';
@@ -393,20 +352,55 @@
                     });
                 });
                 
-                document.getElementById('pageInfo').textContent = '第' + currentPage + ' 页 / 第' + totalPages + ' 页（共' + filteredData.length + ' 条）';
-                document.getElementById('prevBtn').disabled = currentPage <= 1;
-                document.getElementById('nextBtn').disabled = currentPage >= totalPages;
-                pagination.style.display = 'flex';
+                if (totalPages <= 1) {
+                    pagination.style.display = 'none';
+                } else {
+                    document.getElementById('pageInfo').textContent = '共 ' + filteredData.length + ' 条';
+                    renderPageBtns(currentPage, totalPages);
+                    pagination.style.display = 'flex';
+                }
             }
 
-            window.prevPage = function() { if (currentPage > 1) { currentPage--; renderData(); } };
-            window.nextPage = function() { var totalPages = Math.ceil(filteredData.length / pageSize); if (currentPage < totalPages) { currentPage++; renderData(); } };
+            window.goPage = function(p) { var total = Math.ceil(filteredData.length / pageSize); if (p < 1) p = 1; if (p > total) p = total; currentPage = p; renderData(); };
+
+            function renderPageBtns(cur, total) {
+                var c = document.getElementById('pageBtns');
+                var h = '';
+                if (total <= 1) { c.innerHTML = ''; return; }
+                if (total <= 5) {
+                    h += '<button class="pagination-btn" onclick="goPage(' + (cur - 1) + ')"' + (cur <= 1 ? ' disabled' : '') + '>‹</button>';
+                    for (var i = 1; i <= total; i++) {
+                        h += '<button class="pagination-btn' + (i === cur ? ' active' : '') + '" onclick="goPage(' + i + ')">' + i + '</button>';
+                    }
+                    h += '<button class="pagination-btn" onclick="goPage(' + (cur + 1) + ')"' + (cur >= total ? ' disabled' : '') + '>›</button>';
+                } else {
+                    h += '<button class="pagination-btn" onclick="goPage(1)"' + (cur <= 1 ? ' disabled' : '') + '>«</button>';
+                    h += '<button class="pagination-btn" onclick="goPage(' + (cur - 1) + ')"' + (cur <= 1 ? ' disabled' : '') + '>‹</button>';
+                    var start = Math.max(1, cur - 2);
+                    var end = Math.min(total, cur + 2);
+                    if (start > 1) { h += '<button class="pagination-btn" onclick="goPage(1)">1</button>'; if (start > 2) h += '<span style="padding:0 6px;color:#999;">...</span>'; }
+                    for (var i = start; i <= end; i++) {
+                        h += '<button class="pagination-btn' + (i === cur ? ' active' : '') + '" onclick="goPage(' + i + ')">' + i + '</button>';
+                    }
+                    if (end < total) { if (end < total - 1) h += '<span style="padding:0 6px;color:#999;">...</span>'; h += '<button class="pagination-btn" onclick="goPage(' + total + ')">' + total + '</button>'; }
+                    h += '<button class="pagination-btn" onclick="goPage(' + (cur + 1) + ')"' + (cur >= total ? ' disabled' : '') + '>›</button>';
+                    h += '<button class="pagination-btn" onclick="goPage(' + total + ')"' + (cur >= total ? ' disabled' : '') + '>»</button>';
+                }
+                c.innerHTML = h;
+            }
+            window.renderPageBtns = renderPageBtns;
             window.changePageSize = function() { pageSize = parseInt(document.getElementById('pageSize').value); currentPage = 1; renderData(); };
 
             window.addEventListener('click', function(event) {
                 if (event.target == document.getElementById('addModal')) closeModal();
                 if (event.target == document.getElementById('editModal')) closeEditModal();
             });
+
+            // [封存] 情报规则禁用功能暂时禁用
+            // window.disableIntelUA = function(intelId) {
+            //     if (!intelId) return;
+            //     WAF.confirmAction('确认禁用此情报规则？', '/api/intel/rules/ua/disable', {intel_id: intelId}, '已禁用', function() { loadData(); });
+            // };
 
             loadData();
 

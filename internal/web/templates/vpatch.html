@@ -1,0 +1,113 @@
+{{define "vpatch"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>虚拟补丁 - GoWAF</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <style>
+        .info-box { background: #f8f9fa; border-left: 4px solid #409eff; padding: 15px; margin-bottom: 20px; border-radius: 4px; font-size: 13px; color: #596275; line-height: 1.8; }
+        .info-box strong { color: #2c3e50; }
+        .modal.show { display: flex; }
+        .severity-critical { color: #e74c3c; font-weight: 600; }
+        .severity-high { color: #e67e22; font-weight: 600; }
+        .severity-medium { color: #f39c12; }
+        .severity-low { color: #27ae60; }
+    </style>
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main scroll-page">
+        <div class="card">
+            <div class="info-box">
+                <strong>虚拟补丁：</strong>针对已知CVE漏洞，在WAF层通过路径、参数或攻击特征正则匹配进行临时防护，无需修改应用代码即可阻断漏洞利用。
+            </div>
+            <div style="display:flex;gap:10px;margin-bottom:20px;flex-shrink:0;">
+                <button class="add-btn" onclick="openModal()">+ 添加虚拟补丁</button>
+            </div>
+            <table>
+                <thead><tr><th>CVE ID</th><th>名称</th><th>严重级别</th><th>路径匹配</th><th>状态</th><th>过期时间</th><th>操作</th></tr></thead>
+                <tbody id="patchList"><tr><td colspan="7" style="text-align:center;color:#95a5a6;">加载中...</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+    <div id="addModal" class="modal">
+        <div class="modal-content" style="width:600px;">
+            <div class="modal-header">
+                <h3>添加虚拟补丁</h3>
+                <span class="close" onclick="closeModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-group"><label>CVE ID</label><input type="text" id="addCve" placeholder="CVE-2024-XXXX"></div>
+                <div class="form-group"><label>补丁名称</label><input type="text" id="addName" placeholder="如: Log4Shell RCE"></div>
+                <div class="form-group"><label>描述</label><textarea id="addDesc" rows="2" placeholder="漏洞描述"></textarea></div>
+                <div class="form-group"><label>路径正则</label><input type="text" id="addPath" placeholder="如: /api/v1/exploit"></div>
+                <div class="form-group"><label>参数正则</label><input type="text" id="addParam" placeholder="如: jndi:ldap"></div>
+                <div class="form-group"><label>攻击特征正则</label><input type="text" id="addAttack" placeholder="如: \\$\\{jndi:"></div>
+                <div class="form-group"><label>严重级别</label>
+                    <select id="addSeverity">
+                        <option value="critical">Critical</option>
+                        <option value="high">High</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="low">Low</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="closeModal()">取消</button>
+                <button class="primary" onclick="addPatch()">添加</button>
+            </div>
+        </div>
+    </div>
+<script nonce="{{.CSPNonce}}">
+var severityMap={critical:'Critical',high:'High',medium:'Medium',low:'Low'};
+var severityClassMap={critical:'severity-critical',high:'severity-high',medium:'severity-medium',low:'severity-low'};
+function loadPatches(){
+    fetch('/api/vpatch/list').then(r=>r.json()).then(d=>{
+        if(!d.success) return;
+        var tbody=document.getElementById('patchList');
+        var data=d.data||[];
+        if(!data.length){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:#95a5a6;">暂无虚拟补丁</td></tr>';return;}
+        tbody.innerHTML=data.map(function(p){
+            var exp=p.expires_at?'<span style="color:#e67e22">'+escapeHtml(p.expires_at)+'</span>':'<span style="color:#95a5a6">永不过期</span>';
+            var sevText=severityMap[p.severity]||escapeHtml(p.severity);
+            var sevClass=severityClassMap[p.severity]||'';
+            var statusHtml=p.enabled?'<span style="color:#27ae60">启用</span>':'<span style="color:#95a5a6">禁用</span>';
+            return '<tr><td><strong>'+escapeHtml(p.cve_id)+'</strong></td><td>'+escapeHtml(p.name)+'</td><td class="'+sevClass+'">'+sevText+'</td><td><code>'+escapeHtml(p.path_pattern||'-')+'</code></td><td>'+statusHtml+'</td><td>'+exp+'</td><td>'+(p.enabled?'<button class="del-btn" data-cve="'+escapeHtml(p.cve_id)+'" data-action="disable">禁用</button>':'<button data-cve="'+escapeHtml(p.cve_id)+'" data-action="enable" style="color:#27ae60;background:none;border:none;cursor:pointer;">启用</button>')+' <button class="del-btn" data-cve="'+escapeHtml(p.cve_id)+'" data-action="delete">删除</button></td></tr>';
+        }).join('');
+    });
+}
+function openModal(){document.getElementById('addModal').classList.add('show');}
+function closeModal(){document.getElementById('addModal').classList.remove('show');}
+function addPatch(){
+    var o={cve_id:document.getElementById('addCve').value.trim(),name:document.getElementById('addName').value.trim(),description:document.getElementById('addDesc').value.trim(),path_pattern:document.getElementById('addPath').value.trim(),param_pattern:document.getElementById('addParam').value.trim(),attack_pattern:document.getElementById('addAttack').value.trim(),severity:document.getElementById('addSeverity').value};
+    if(!o.cve_id||!o.name){showToast('error','请填写CVE ID和名称');return;}
+    fetch('/api/vpatch/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(o)}).then(r=>r.json()).then(d=>{
+        if(d.success){showToast('success','虚拟补丁已添加');closeModal();loadPatches();}else showToast('error',d.error);
+    });
+}
+function deletePatch(cve){
+    WAF.confirmDelete('确认删除补丁 '+cve+'?','/api/vpatch/delete',{cve_id:cve},loadPatches);
+}
+function togglePatch(cve,en){
+    fetch('/api/vpatch/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cve_id:cve,enabled:en})}).then(r=>r.json()).then(d=>{
+        if(d.success){showToast('success',en?'已启用':'已禁用');loadPatches();}else showToast('error',d.error);
+    });
+}
+document.getElementById('patchList').addEventListener('click',function(e){
+    var btn=e.target.closest('[data-cve]');
+    if(!btn) return;
+    var cve=btn.dataset.cve;
+    var action=btn.dataset.action;
+    if(action==='delete') deletePatch(cve);
+    else if(action==='enable') togglePatch(cve,true);
+    else if(action==='disable') togglePatch(cve,false);
+});
+WAF.Modal.clickOutside('addModal',closeModal);
+loadPatches();
+</script>
+</body>
+</html>
+{{end}}

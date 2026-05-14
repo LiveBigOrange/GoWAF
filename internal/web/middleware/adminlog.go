@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"gowaf-demo/internal/timeutil"
-	"gowaf-demo/internal/web/model"
+	"gowaf/internal/timeutil"
+	"gowaf/internal/web/model"
 )
 
 // --- 管理端口访问日志 ---
@@ -30,6 +30,29 @@ func InitAdminLog(filePath string) error {
 	adminLogFile = f
 	adminLogPath = filePath
 	return nil
+}
+
+// CheckAdminLogRetention 检查管理日志文件是否超过保留天数，若过期则清空重建
+func CheckAdminLogRetention(retentionDays int) {
+	if adminLogPath == "" || retentionDays <= 0 {
+		return
+	}
+	info, err := os.Stat(adminLogPath)
+	if err != nil {
+		return
+	}
+	if time.Since(info.ModTime()) > time.Duration(retentionDays)*24*time.Hour {
+		adminLogMu.Lock()
+		defer adminLogMu.Unlock()
+		if adminLogFile != nil {
+			adminLogFile.Close()
+			adminLogFile = nil
+		}
+		f, err := os.OpenFile(adminLogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		if err == nil {
+			adminLogFile = f
+		}
+	}
 }
 
 // CloseAdminLog 关闭管理端口日志
@@ -135,7 +158,7 @@ func AdminAccessLog(next http.Handler) http.Handler {
 // adminResponseWriter 捕获响应状态码
 type adminResponseWriter struct {
 	http.ResponseWriter
-	statusCode int
+	statusCode  int
 	wroteHeader bool
 }
 

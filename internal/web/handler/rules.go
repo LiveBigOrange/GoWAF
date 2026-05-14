@@ -2,99 +2,174 @@ package handler
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 
-	"gowaf-demo/internal/web/templates"
+	"gowaf/internal/web/templates"
 )
 
 func RulesPage(w http.ResponseWriter, r *http.Request) {
-	// 处理POST请求
 	if r.Method == "POST" {
-		// 解析multipart/form-data
-		err := r.ParseMultipartForm(10 << 20) // 10MB
+		err := r.ParseMultipartForm(10 << 20)
 		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Failed to parse form data"})
+			jsonError(w, "Failed to parse form data", http.StatusBadRequest)
 			return
 		}
-		
+
 		action := r.FormValue("action")
-		
-		// 处理删除操作
+
 		if action == "delete" {
 			ruleType := r.FormValue("type")
 			ip := r.FormValue("ip")
-			
+
 			if ip == "" {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "IP address is required"})
+				jsonError(w, "IP address is required", http.StatusBadRequest)
 				return
 			}
-			
-			if RuleEngine == nil {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "RuleEngine not initialized"})
+
+			if !requireManager(w, deps.RuleEngine, "规则引擎") {
 				return
 			}
-			
-			// 默认为黑名单
+
 			if ruleType == "" {
 				ruleType = "blacklist"
 			}
-			
-			err := RuleEngine.RemoveIPRule(ruleType, ip)
+
+			err := deps.RuleEngine.RemoveIPRule(ruleType, ip)
 			if err != nil {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+				jsonError(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]bool{"success": true})
+
+			jsonSuccess(w, nil)
 			return
 		}
-		
-		// 处理添加操作
+
 		ruleType := r.FormValue("rule_type")
 		ip := r.FormValue("ip")
-		
+
 		if ip != "" {
-			if RuleEngine == nil {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "RuleEngine not initialized"})
+			if !requireManager(w, deps.RuleEngine, "规则引擎") {
 				return
 			}
-			
-			// 默认为黑名单
+
 			if ruleType == "" {
 				ruleType = "blacklist"
 			}
-			
-			err := RuleEngine.AddIPRule(ruleType, ip)
+
+			err := deps.RuleEngine.AddIPRule(ruleType, ip)
 			if err != nil {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+				jsonError(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 		}
-		
-		// 返回JSON成功响应
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+
+		jsonSuccess(w, nil)
 		return
 	}
 
-	// 使用模板渲染
-	data := map[string]interface{}{
-		"Active": "rules",
+	renderPage(w, r, templates.RulesTmpl, "rules", "rules")
+}
+
+func APIAddIPRule(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Type string `json:"type"`
+		IP   string `json:"ip"`
 	}
-	templates.RulesTmpl.ExecuteTemplate(w, "rules", data)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	if req.IP == "" {
+		jsonError(w, "ip is required", http.StatusBadRequest)
+		return
+	}
+	if !isValidIPOrCIDR(req.IP) {
+		jsonError(w, "ip format invalid, must be valid IP or CIDR", http.StatusBadRequest)
+		return
+	}
+	if req.Type == "" {
+		req.Type = "blacklist"
+	}
+	if req.Type != "blacklist" && req.Type != "whitelist" {
+		jsonError(w, "type must be blacklist or whitelist", http.StatusBadRequest)
+		return
+	}
+	if !requireManager(w, deps.RuleEngine, "规则引擎") {
+		return
+	}
+	if err := deps.RuleEngine.AddIPRule(req.Type, req.IP); err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonSuccess(w, nil)
+}
+
+func APIToggleIPRule(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Type    string `json:"type"`
+		IP      string `json:"ip"`
+		Enabled bool   `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	if req.IP == "" {
+		jsonError(w, "ip is required", http.StatusBadRequest)
+		return
+	}
+	if !isValidIPOrCIDR(req.IP) {
+		jsonError(w, "ip format invalid", http.StatusBadRequest)
+		return
+	}
+	if !requireManager(w, deps.RuleEngine, "规则引擎") {
+		return
+	}
+	if err := deps.RuleEngine.SetIPRuleEnabled(req.Type, req.IP, req.Enabled); err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonSuccess(w, nil)
+}
+
+func APIRemoveIPRule(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Type string `json:"type"`
+		IP   string `json:"ip"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	if req.IP == "" {
+		jsonError(w, "ip is required", http.StatusBadRequest)
+		return
+	}
+	if !isValidIPOrCIDR(req.IP) {
+		jsonError(w, "ip format invalid", http.StatusBadRequest)
+		return
+	}
+	if !requireManager(w, deps.RuleEngine, "规则引擎") {
+		return
+	}
+	if req.Type == "" {
+		req.Type = "blacklist"
+	}
+	if err := deps.RuleEngine.RemoveIPRule(req.Type, req.IP); err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonSuccess(w, nil)
+}
+
+func isValidIPOrCIDR(ip string) bool {
+	if len(ip) > 256 {
+		return false
+	}
+	if net.ParseIP(ip) != nil {
+		return true
+	}
+	_, _, err := net.ParseCIDR(ip)
+	return err == nil
 }

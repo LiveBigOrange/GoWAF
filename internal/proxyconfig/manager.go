@@ -5,59 +5,183 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
+)
+
+// 代理协议常量
+const (
+	ProtocolHTTP  = "http"
+	ProtocolHTTPS = "https"
+	ProtocolWS    = "ws"
+	ProtocolWSS   = "wss"
 )
 
 // ProxyConfig 代理配置
 type ProxyConfig struct {
 	ID         string `json:"id"`
-	ListenAddr string `json:"listen_addr"` // 监听地址，如 ":80", ":443"
-	Protocol   string `json:"protocol"`    // http, https
+	ListenAddr string `json:"listen_addr"`
+	Protocol   string `json:"protocol"`
 	Enabled    bool   `json:"enabled"`
 	CreatedAt  int64  `json:"created_at"`
 	UpdatedAt  int64  `json:"updated_at"`
 }
 
+// IsWebSocket 是否包含 WebSocket 协议
+func (c *ProxyConfig) IsWebSocket() bool {
+	protos := c.GetProtocols()
+	for _, p := range protos {
+		if p == ProtocolWS || p == ProtocolWSS {
+			return true
+		}
+	}
+	return false
+}
+
+// ListenProtocol 获取底层监听协议 (ws->http, wss->https, 支持逗号分隔)
+func (c *ProxyConfig) ListenProtocol() string {
+	protos := c.GetProtocols()
+	for _, p := range protos {
+		if p == ProtocolHTTPS || p == ProtocolWSS {
+			return ProtocolHTTPS
+		}
+	}
+	for _, p := range protos {
+		if p == ProtocolHTTP || p == ProtocolWS {
+			return ProtocolHTTP
+		}
+	}
+	return ProtocolHTTP
+}
+
+// GetProtocols 获取协议列表（逗号分隔）
+func (c *ProxyConfig) GetProtocols() []string {
+	if c.Protocol == "" {
+		return []string{ProtocolHTTP}
+	}
+	parts := strings.Split(c.Protocol, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	if len(result) == 0 {
+		return []string{ProtocolHTTP}
+	}
+	return result
+}
+
+// HasProtocol 是否包含指定协议
+func (c *ProxyConfig) HasProtocol(proto string) bool {
+	protos := c.GetProtocols()
+	for _, p := range protos {
+		if p == proto {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateProtocolList 验证逗号分隔的协议列表是否合法
+// 合法组合: http, https, ws, wss, http+ws, https+wss
+func ValidateProtocolList(protocol string) error {
+	parts := strings.Split(protocol, ",")
+	var protos []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if p != ProtocolHTTP && p != ProtocolHTTPS && p != ProtocolWS && p != ProtocolWSS {
+			return fmt.Errorf("不支持的协议: %s", p)
+		}
+		protos = append(protos, p)
+	}
+	if len(protos) == 0 {
+		return fmt.Errorf("至少需要选择一个协议")
+	}
+	hasHTTP := false
+	hasHTTPS := false
+	hasWS := false
+	hasWSS := false
+	for _, p := range protos {
+		switch p {
+		case ProtocolHTTP:
+			hasHTTP = true
+		case ProtocolHTTPS:
+			hasHTTPS = true
+		case ProtocolWS:
+			hasWS = true
+		case ProtocolWSS:
+			hasWSS = true
+		}
+	}
+	if hasHTTP && hasHTTPS {
+		return fmt.Errorf("HTTP和HTTPS不能同时选择")
+	}
+	if hasWS && hasWSS {
+		return fmt.Errorf("WS和WSS不能同时选择")
+	}
+	if hasHTTP && hasWSS {
+		return fmt.Errorf("HTTP和WSS不匹配（HTTP应搭配WS，HTTPS应搭配WSS）")
+	}
+	if hasHTTPS && hasWS {
+		return fmt.Errorf("HTTPS和WS不匹配（HTTP应搭配WS，HTTPS应搭配WSS）")
+	}
+	if hasWS && !hasHTTP {
+		return fmt.Errorf("WS必须搭配HTTP（WebSocket建立在HTTP之上）")
+	}
+	if hasWSS && !hasHTTPS {
+		return fmt.Errorf("WSS必须搭配HTTPS（安全WebSocket建立在HTTPS之上）")
+	}
+	return nil
+}
+
 // DomainConfig 域名配置
 type DomainConfig struct {
 	ID         string   `json:"id"`
-	Domain     string   `json:"domain"`      // 域名，如 "api.example.com"
-	ProxyIDs   []string `json:"proxy_ids"`   // 关联的代理配置ID列表（支持多个）
-	BackendIDs []string `json:"backend_ids"` // 关联的后端服务ID列表（支持多个）
-	CertID     string   `json:"cert_id"`     // 关联的证书ID（HTTPS用）
+	Domain     string   `json:"domain"`
+	ProxyIDs   []string `json:"proxy_ids"`
+	BackendIDs []string `json:"backend_ids"`
+	GroupID    string   `json:"group_id"`
+	CertID     string   `json:"cert_id"`
 	Enabled    bool     `json:"enabled"`
-	ForceHTTPS bool     `json:"force_https"` // 是否强制跳转HTTPS
+	ForceHTTPS bool     `json:"force_https"`
 }
 
 // SSLCert SSL证书
 type SSLCert struct {
-	ID         string   `json:"id"`
-	Name       string   `json:"name"`        // 证书名称/描述（用于识别证书用途）
-	Domains    []string `json:"domains"`     // 证书包含的域名列表（包括通配域名）
-	CertPEM    string   `json:"-"`           // 证书内容（不返回前端）
-	KeyPEM     string   `json:"-"`           // 私钥内容（不返回前端）
-	NotBefore  int64    `json:"not_before"`  // 生效时间
-	NotAfter   int64    `json:"not_after"`   // 过期时间
-	Issuer     string   `json:"issuer"`      // 颁发者
-	Subject    string   `json:"subject"`     // 主体
-	DaysLeft   int      `json:"days_left"`   // 剩余天数
-	CreatedAt  int64    `json:"created_at"`
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Domains   []string `json:"domains"`
+	CertPEM   string   `json:"-"`
+	KeyPEM    string   `json:"-"`
+	NotBefore int64    `json:"not_before"`
+	NotAfter  int64    `json:"not_after"`
+	Issuer    string   `json:"issuer"`
+	Subject   string   `json:"subject"`
+	DaysLeft  int      `json:"days_left"`
+	CreatedAt int64    `json:"created_at"`
+	Source    string   `json:"source"`     // "manual" | "acme"
+	AutoRenew bool     `json:"auto_renew"` // ACME 自动续期
 }
 
 // Manager 代理配置管理器
 type Manager struct {
-	db *sql.DB
-	mu sync.RWMutex
+	db          *sql.DB
+	mu          sync.RWMutex
+	domainCache sync.Map
 }
 
 // NewManager 创建代理配置管理器
 func NewManager(db *sql.DB) (*Manager, error) {
 	m := &Manager{db: db}
 
-	// 创建表
 	if err := m.createTables(); err != nil {
 		return nil, err
 	}
+
+	m.warmDomainCache()
 
 	return m, nil
 }
@@ -86,6 +210,7 @@ func (m *Manager) createTables() error {
 			domain TEXT NOT NULL UNIQUE,
 			proxy_ids TEXT,
 			backend_ids TEXT,
+			group_id TEXT,
 			cert_id TEXT,
 			enabled INTEGER DEFAULT 1,
 			force_https INTEGER DEFAULT 0
@@ -96,7 +221,12 @@ func (m *Manager) createTables() error {
 	}
 
 	// 迁移：确保 domain_config 表有 proxy_ids 字段
-	_, _ = m.db.Exec(`ALTER TABLE domain_config ADD COLUMN proxy_ids TEXT`)
+	migrateAddColumn(m.db, "domain_config", "proxy_id", "TEXT")
+	// 迁移：确保 domain_config 表有 group_id 字段
+	migrateAddColumn(m.db, "domain_config", "group_id", "TEXT")
+
+	m.db.Exec(`CREATE INDEX IF NOT EXISTS idx_domain_group_id ON domain_config(group_id)`)
+	m.db.Exec(`CREATE INDEX IF NOT EXISTS idx_domain_cert_id ON domain_config(cert_id)`)
 
 	// SSL证书表
 	_, err = m.db.Exec(`
@@ -118,8 +248,17 @@ func (m *Manager) createTables() error {
 	}
 
 	// 迁移：确保 ssl_certs 表有 name 和 domains 字段
-	_, _ = m.db.Exec(`ALTER TABLE ssl_certs ADD COLUMN name TEXT`)
-	_, _ = m.db.Exec(`ALTER TABLE ssl_certs ADD COLUMN domains TEXT`)
+	migrateAddColumn(m.db, "ssl_certs", "name", "TEXT")
+	migrateAddColumn(m.db, "ssl_certs", "domains", "TEXT")
+	migrateAddColumn(m.db, "ssl_certs", "source", "TEXT DEFAULT 'manual'")
+	migrateAddColumn(m.db, "ssl_certs", "auto_renew", "INTEGER DEFAULT 0")
+
+	m.db.Exec(`CREATE INDEX IF NOT EXISTS idx_ssl_certs_source ON ssl_certs(source)`)
+
+	// 修复存量 ACME 证书空颁发者/自签名分发者
+	m.db.Exec(`UPDATE ssl_certs SET issuer = '自签名' WHERE source = 'acme' AND (issuer IS NULL OR issuer = '' OR issuer = subject)`)
+	// 修复存量 ACME 证书颁发者被错误设为域名的情况（issuer 包含 '.' 但不是已知 CA 名称）
+	m.db.Exec(`UPDATE ssl_certs SET issuer = '' WHERE source = 'acme' AND issuer LIKE '%.%' AND issuer NOT LIKE '%encrypt%' AND issuer NOT LIKE '%certum%' AND issuer NOT LIKE '%digicert%'`)
 
 	// 系统配置表
 	_, err = m.db.Exec(`
@@ -136,428 +275,12 @@ func (m *Manager) createTables() error {
 	return nil
 }
 
+// EnsureTables 确保数据库表已初始化
+func (m *Manager) EnsureTables() error {
+	return m.createTables()
+}
+
 // Close 关闭数据库连接（不关闭数据库连接，由统一的数据库管理器管理）
 func (m *Manager) Close() error {
-	// 不关闭数据库连接，因为连接是共享的
 	return nil
-}
-
-// ========== 代理配置相关 ==========
-
-// AddProxy 添加代理配置
-func (m *Manager) AddProxy(cfg *ProxyConfig) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	now := time.Now().Unix()
-	cfg.CreatedAt = now
-	cfg.UpdatedAt = now
-
-	_, err := m.db.Exec(`
-		INSERT INTO proxy_config (id, listen_addr, protocol, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, cfg.ID, cfg.ListenAddr, cfg.Protocol, cfg.Enabled, cfg.CreatedAt, cfg.UpdatedAt)
-	return err
-}
-
-// UpdateProxy 更新代理配置
-func (m *Manager) UpdateProxy(cfg *ProxyConfig) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	cfg.UpdatedAt = time.Now().Unix()
-
-	_, err := m.db.Exec(`
-		UPDATE proxy_config SET listen_addr = ?, protocol = ?, enabled = ?, updated_at = ?
-		WHERE id = ?
-	`, cfg.ListenAddr, cfg.Protocol, cfg.Enabled, cfg.UpdatedAt, cfg.ID)
-	return err
-}
-
-// DeleteProxy 删除代理配置
-func (m *Manager) DeleteProxy(id string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	_, err := m.db.Exec(`DELETE FROM proxy_config WHERE id = ?`, id)
-	return err
-}
-
-// GetProxy 获取单个代理配置
-func (m *Manager) GetProxy(id string) (*ProxyConfig, error) {
-	var cfg ProxyConfig
-	var enabled int
-	err := m.db.QueryRow(`
-		SELECT id, listen_addr, protocol, enabled, created_at, updated_at
-		FROM proxy_config WHERE id = ?
-	`, id).Scan(&cfg.ID, &cfg.ListenAddr, &cfg.Protocol, &enabled, &cfg.CreatedAt, &cfg.UpdatedAt)
-	if err != nil {
-		return nil, err
-	}
-	cfg.Enabled = enabled == 1
-	return &cfg, nil
-}
-
-// ListProxies 获取所有代理配置
-func (m *Manager) ListProxies() ([]ProxyConfig, error) {
-	rows, err := m.db.Query(`
-		SELECT id, listen_addr, protocol, enabled, created_at, updated_at
-		FROM proxy_config ORDER BY created_at DESC
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var proxies []ProxyConfig
-	for rows.Next() {
-		var cfg ProxyConfig
-		var enabled int
-		if err := rows.Scan(&cfg.ID, &cfg.ListenAddr, &cfg.Protocol, &enabled, &cfg.CreatedAt, &cfg.UpdatedAt); err != nil {
-			continue
-		}
-		cfg.Enabled = enabled == 1
-		proxies = append(proxies, cfg)
-	}
-	return proxies, nil
-}
-
-// ========== 域名配置相关 ==========
-
-// AddDomain 添加域名配置
-func (m *Manager) AddDomain(cfg *DomainConfig) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	proxyIDs := joinBackendIDs(cfg.ProxyIDs)
-	backendIDs := joinBackendIDs(cfg.BackendIDs)
-
-	_, err := m.db.Exec(`
-		INSERT INTO domain_config (id, domain, proxy_ids, backend_ids, cert_id, enabled, force_https)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, cfg.ID, cfg.Domain, proxyIDs, backendIDs, cfg.CertID, cfg.Enabled, cfg.ForceHTTPS)
-	return err
-}
-
-// UpdateDomain 更新域名配置
-func (m *Manager) UpdateDomain(cfg *DomainConfig) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	proxyIDs := joinBackendIDs(cfg.ProxyIDs)
-	backendIDs := joinBackendIDs(cfg.BackendIDs)
-
-	_, err := m.db.Exec(`
-		UPDATE domain_config SET domain = ?, proxy_ids = ?, backend_ids = ?, cert_id = ?, enabled = ?, force_https = ?
-		WHERE id = ?
-	`, cfg.Domain, proxyIDs, backendIDs, cfg.CertID, cfg.Enabled, cfg.ForceHTTPS, cfg.ID)
-	return err
-}
-
-// DeleteDomain 删除域名配置
-func (m *Manager) DeleteDomain(id string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	_, err := m.db.Exec(`DELETE FROM domain_config WHERE id = ?`, id)
-	return err
-}
-
-// GetDomain 获取单个域名配置
-func (m *Manager) GetDomain(id string) (*DomainConfig, error) {
-	var cfg DomainConfig
-	var enabled, forceHTTPS int
-	var proxyIDsStr, backendIDsStr sql.NullString
-	err := m.db.QueryRow(`
-		SELECT id, domain, proxy_ids, backend_ids, cert_id, enabled, force_https
-		FROM domain_config WHERE id = ?
-	`, id).Scan(&cfg.ID, &cfg.Domain, &proxyIDsStr, &backendIDsStr, &cfg.CertID, &enabled, &forceHTTPS)
-	if err != nil {
-		return nil, err
-	}
-	cfg.Enabled = enabled == 1
-	cfg.ForceHTTPS = forceHTTPS == 1
-	if proxyIDsStr.Valid {
-		cfg.ProxyIDs = splitBackendIDs(proxyIDsStr.String)
-	}
-	if backendIDsStr.Valid {
-		cfg.BackendIDs = splitBackendIDs(backendIDsStr.String)
-	}
-	return &cfg, nil
-}
-
-// GetDomainByName 根据域名获取配置
-func (m *Manager) GetDomainByName(domain string) (*DomainConfig, error) {
-	var cfg DomainConfig
-	var enabled, forceHTTPS int
-	var proxyIDsStr, backendIDsStr sql.NullString
-	err := m.db.QueryRow(`
-		SELECT id, domain, proxy_ids, backend_ids, cert_id, enabled, force_https
-		FROM domain_config WHERE domain = ?
-	`, domain).Scan(&cfg.ID, &cfg.Domain, &proxyIDsStr, &backendIDsStr, &cfg.CertID, &enabled, &forceHTTPS)
-	if err != nil {
-		return nil, err
-	}
-	cfg.Enabled = enabled == 1
-	cfg.ForceHTTPS = forceHTTPS == 1
-	if proxyIDsStr.Valid {
-		cfg.ProxyIDs = splitBackendIDs(proxyIDsStr.String)
-	}
-	if backendIDsStr.Valid {
-		cfg.BackendIDs = splitBackendIDs(backendIDsStr.String)
-	}
-	return &cfg, nil
-}
-
-// ListDomains 获取所有域名配置
-func (m *Manager) ListDomains() ([]DomainConfig, error) {
-	rows, err := m.db.Query(`
-		SELECT id, domain, proxy_ids, backend_ids, cert_id, enabled, force_https
-		FROM domain_config ORDER BY domain ASC
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var domains []DomainConfig
-	for rows.Next() {
-		var cfg DomainConfig
-		var enabled, forceHTTPS int
-		var proxyIDsStr, backendIDsStr sql.NullString
-		if err := rows.Scan(&cfg.ID, &cfg.Domain, &proxyIDsStr, &backendIDsStr, &cfg.CertID, &enabled, &forceHTTPS); err != nil {
-			continue
-		}
-		cfg.Enabled = enabled == 1
-		cfg.ForceHTTPS = forceHTTPS == 1
-		if proxyIDsStr.Valid {
-			cfg.ProxyIDs = splitBackendIDs(proxyIDsStr.String)
-		}
-		if backendIDsStr.Valid {
-			cfg.BackendIDs = splitBackendIDs(backendIDsStr.String)
-		}
-		domains = append(domains, cfg)
-	}
-	return domains, nil
-}
-
-// ========== SSL证书相关 ==========
-
-// AddCert 添加证书
-func (m *Manager) AddCert(cert *SSLCert) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	cert.CreatedAt = time.Now().Unix()
-	domains := joinBackendIDs(cert.Domains)
-
-	_, err := m.db.Exec(`
-		INSERT INTO ssl_certs (id, name, domains, cert_pem, key_pem, not_before, not_after, issuer, subject, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, cert.ID, cert.Name, domains, cert.CertPEM, cert.KeyPEM, cert.NotBefore, cert.NotAfter, cert.Issuer, cert.Subject, cert.CreatedAt)
-	return err
-}
-
-// UpdateCert 更新证书
-func (m *Manager) UpdateCert(cert *SSLCert) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	domains := joinBackendIDs(cert.Domains)
-
-	_, err := m.db.Exec(`
-		UPDATE ssl_certs SET name = ?, domains = ?, cert_pem = ?, key_pem = ?, not_before = ?, not_after = ?, issuer = ?, subject = ?
-		WHERE id = ?
-	`, cert.Name, domains, cert.CertPEM, cert.KeyPEM, cert.NotBefore, cert.NotAfter, cert.Issuer, cert.Subject, cert.ID)
-	return err
-}
-
-// DeleteCert 删除证书
-func (m *Manager) DeleteCert(id string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	_, err := m.db.Exec(`DELETE FROM ssl_certs WHERE id = ?`, id)
-	return err
-}
-
-// GetCert 获取证书（包含证书内容）
-func (m *Manager) GetCert(id string) (*SSLCert, error) {
-	var cert SSLCert
-	var name, domainsStr sql.NullString
-	err := m.db.QueryRow(`
-		SELECT id, name, domains, cert_pem, key_pem, not_before, not_after, issuer, subject, created_at
-		FROM ssl_certs WHERE id = ?
-	`, id).Scan(&cert.ID, &name, &domainsStr, &cert.CertPEM, &cert.KeyPEM, &cert.NotBefore, &cert.NotAfter, &cert.Issuer, &cert.Subject, &cert.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-
-	if name.Valid {
-		cert.Name = name.String
-	}
-	if domainsStr.Valid {
-		cert.Domains = splitBackendIDs(domainsStr.String)
-	}
-
-	// 计算剩余天数
-	if cert.NotAfter > 0 {
-		daysLeft := int((time.Until(time.Unix(cert.NotAfter, 0)).Hours()) / 24)
-		cert.DaysLeft = daysLeft
-	}
-
-	return &cert, nil
-}
-
-// ========== 系统配置相关 ==========
-
-// GetSystemConfig 获取系统配置
-func (m *Manager) GetSystemConfig(key string) (string, error) {
-	var value string
-	err := m.db.QueryRow("SELECT value FROM system_config WHERE key = ?", key).Scan(&value)
-	if err == sql.ErrNoRows {
-		return "", nil
-	}
-	return value, err
-}
-
-// SetSystemConfig 设置系统配置
-func (m *Manager) SetSystemConfig(key, value string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	now := time.Now().Unix()
-	_, err := m.db.Exec(`
-		INSERT OR REPLACE INTO system_config (key, value, updated_at)
-		VALUES (?, ?, ?)
-	`, key, value, now)
-	return err
-}
-
-// GetRateLimitConfig 获取限流配置
-func (m *Manager) GetRateLimitConfig() (enabled bool, qps int, burst int, err error) {
-	enabledStr, err := m.GetSystemConfig("ratelimit_enabled")
-	if err != nil {
-		return false, 10, 20, err
-	}
-	qpsStr, err := m.GetSystemConfig("ratelimit_qps")
-	if err != nil {
-		return false, 10, 20, err
-	}
-	burstStr, err := m.GetSystemConfig("ratelimit_burst")
-	if err != nil {
-		return false, 10, 20, err
-	}
-
-	enabled = enabledStr == "true"
-	if qpsStr == "" {
-		qps = 10
-	} else {
-		_, err := fmt.Sscanf(qpsStr, "%d", &qps)
-		if err != nil {
-			qps = 10
-		}
-	}
-	if burstStr == "" {
-		burst = 20
-	} else {
-		_, err := fmt.Sscanf(burstStr, "%d", &burst)
-		if err != nil {
-			burst = 20
-		}
-	}
-	return enabled, qps, burst, nil
-}
-
-// SetRateLimitConfig 设置限流配置
-func (m *Manager) SetRateLimitConfig(enabled bool, qps, burst int) error {
-	enabledStr := "false"
-	if enabled {
-		enabledStr = "true"
-	}
-	if err := m.SetSystemConfig("ratelimit_enabled", enabledStr); err != nil {
-		return err
-	}
-	if err := m.SetSystemConfig("ratelimit_qps", fmt.Sprintf("%d", qps)); err != nil {
-		return err
-	}
-	if err := m.SetSystemConfig("ratelimit_burst", fmt.Sprintf("%d", burst)); err != nil {
-		return err
-	}
-	return nil
-}
-
-// GetTrustedProxies 获取可信代理IP列表
-func (m *Manager) GetTrustedProxies() ([]string, error) {
-	value, err := m.GetSystemConfig("trusted_proxies")
-	if err != nil {
-		return nil, err
-	}
-	if value == "" {
-		return []string{"127.0.0.1/32", "::1/128"}, nil
-	}
-	return strings.Split(value, ","), nil
-}
-
-// SetTrustedProxies 设置可信代理IP列表
-func (m *Manager) SetTrustedProxies(proxies []string) error {
-	value := strings.Join(proxies, ",")
-	return m.SetSystemConfig("trusted_proxies", value)
-}
-
-// ListCerts 获取所有证书（不包含证书内容）
-func (m *Manager) ListCerts() ([]SSLCert, error) {
-	rows, err := m.db.Query(`
-		SELECT id, name, domains, not_before, not_after, issuer, subject, created_at
-		FROM ssl_certs ORDER BY created_at DESC
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var certs []SSLCert
-	for rows.Next() {
-		var cert SSLCert
-		var name, domainsStr sql.NullString
-		if err := rows.Scan(&cert.ID, &name, &domainsStr, &cert.NotBefore, &cert.NotAfter, &cert.Issuer, &cert.Subject, &cert.CreatedAt); err != nil {
-			continue
-		}
-		if name.Valid {
-			cert.Name = name.String
-		}
-		if domainsStr.Valid {
-			cert.Domains = splitBackendIDs(domainsStr.String)
-		}
-		cert.DaysLeft = int((cert.NotAfter - time.Now().Unix()) / 86400)
-		certs = append(certs, cert)
-	}
-	return certs, nil
-}
-
-// CheckCertExpiry 检查证书有效期
-func (m *Manager) CheckCertExpiry() ([]SSLCert, error) {
-	rows, err := m.db.Query(`
-		SELECT id, name, not_before, not_after, issuer, subject, created_at
-		FROM ssl_certs WHERE not_after < ?
-	`, time.Now().Add(30*24*time.Hour).Unix()) // 30天内过期
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var certs []SSLCert
-	for rows.Next() {
-		var cert SSLCert
-		var name sql.NullString
-		if err := rows.Scan(&cert.ID, &name, &cert.NotBefore, &cert.NotAfter, &cert.Issuer, &cert.Subject, &cert.CreatedAt); err != nil {
-			continue
-		}
-		if name.Valid {
-			cert.Name = name.String
-		}
-		cert.DaysLeft = int((cert.NotAfter - time.Now().Unix()) / 86400)
-		certs = append(certs, cert)
-	}
-	return certs, nil
 }

@@ -279,7 +279,7 @@
         </div>
     </div>
 
-    <script>
+    <script nonce="{{.CSPNonce}}">
         let originalConfig = {};
         let hasChanges = false;
 
@@ -291,12 +291,13 @@
                     if (!r.ok) throw new Error(`HTTP ${r.status}`);
                     return r.json();
                 })
-                .then(data => {
-                    if (data.error) {
-                        showAlert('error', '❌ ' + data.error);
+                .then(resp => {
+                    if (!resp.success) {
+                        showAlert('error', '❌ ' + (resp.error || '加载失败'));
                         return;
                     }
 
+                    var data = resp.data || {};
                     originalConfig = JSON.parse(JSON.stringify(data));
 
                     document.getElementById('dashboard_push').value    = data.dashboard_push || 2;
@@ -333,8 +334,8 @@
                 return r.json();
             })
             .then(data => {
-                if (data.error) {
-                    showAlert('error', '❌ ' + data.error);
+                if (!data.success) {
+                    showAlert('error', '❌ ' + (data.error || '保存失败'));
                 } else {
                     showAlert('success', '✅ WebSocket配置保存成功！需重启服务生效。');
                     hasChanges = false;
@@ -363,8 +364,8 @@
                 return r.json();
             })
             .then(data => {
-                if (data.error) {
-                    showAlert('error', '❌ ' + data.error);
+                if (!data.success) {
+                    showAlert('error', '❌ ' + (data.error || '恢复失败'));
                 } else {
                     showAlert('success', '✅ 已恢复默认WebSocket配置');
                     setTimeout(loadConfig, 500);

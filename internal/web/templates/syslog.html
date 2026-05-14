@@ -1,0 +1,80 @@
+{{define "syslog"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>系统日志 - GoWAF</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <link rel="stylesheet" href="/static/css/syslog.css">
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main">
+        <h2 style="margin-bottom:20px;font-size:20px;color:#2c3e50;flex-shrink:0;">📋 系统日志</h2>
+
+        <!-- 统计卡片 -->
+        <div class="stats-row">
+            <div class="stat-card"><div class="label">总条数</div><div class="value" id="totalCount">-</div></div>
+            <div class="stat-card"><div class="label">DEBUG</div><div class="value" id="debugCount" style="color:#95a5a6">-</div></div>
+            <div class="stat-card"><div class="label">INFO</div><div class="value" id="infoCount" style="color:#409eff">-</div></div>
+            <div class="stat-card"><div class="label">WARN</div><div class="value" id="warnCount" style="color:#e67e22">-</div></div>
+            <div class="stat-card"><div class="label">ERROR</div><div class="value" id="errorCount" style="color:#e74c3c">-</div></div>
+            <div class="stat-card"><div class="label">FATAL</div><div class="value" id="fatalCount" style="color:#c0392b">-</div></div>
+        </div>
+
+        <!-- 筛选栏 -->
+        <div class="filter-bar">
+            <select id="filterLevel" onchange="filterByLevel()">
+                <option value="all">所有级别</option>
+                <option value="debug">DEBUG</option>
+                <option value="info">INFO</option>
+                <option value="warn">WARN</option>
+                <option value="error">ERROR</option>
+                <option value="fatal">FATAL</option>
+            </select>
+            <input type="text" id="searchKeyword" placeholder="搜索关键词..." oninput="searchLogs()" class="search-input" style="width:220px">
+            <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+                <button class="btn btn-primary" onclick="loadLogs()" style="padding:8px 16px;background:#409eff;color:white;border:none;border-radius:4px;cursor:pointer;">刷新</button>
+                <button class="auto-refresh-btn active" id="autoRefreshBtn" onclick="toggleAutoRefresh()">
+                    <span class="ar-icon">⟳</span> <span id="arLabel">自动刷新 5s</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- 日志表格 -->
+        <div class="list-container">
+            <table class="log-table" id="logTable">
+                <thead>
+                    <tr>
+                        <th style="width:160px">时间</th>
+                        <th style="width:70px">级别</th>
+                        <th>消息</th>
+                    </tr>
+                </thead>
+                <tbody id="logBody">
+                    <tr><td colspan="3" class="empty-message">加载中...</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="pagination" id="pagination">
+            <div class="pagination-info">
+                <span id="pageInfo">第 1 页 / 第 1 页</span>
+                <select class="page-size-select" id="pageSize" onchange="changePageSize()">
+                    <option value="50" selected>50 条/页</option>
+                    <option value="100">100 条</option>
+                    <option value="200">200 条</option>
+                    <option value="500">500 条</option>
+                </select>
+            </div>
+            <div class="pagination-btns">
+                <button class="pagination-btn" id="prevBtn" onclick="prevPage()">上一页</button>
+                <button class="pagination-btn" id="nextBtn" onclick="nextPage()">下一页</button>
+            </div>
+        </div>
+    </div>
+    <script nonce="{{.CSPNonce}}" src="/static/js/syslog_page.js"></script>
+</body>
+</html>
+{{end}}

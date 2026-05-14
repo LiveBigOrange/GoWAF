@@ -1,0 +1,457 @@
+{{define "blockpage"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>拦截响应配置 - GoWAF</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <style>
+        .config-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+        .config-card{background:#fff;border-radius:8px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,.06);cursor:pointer;transition:all .2s;border:2px solid transparent}
+        .config-card:hover{border-color:#d0d7de;box-shadow:0 3px 12px rgba(0,0,0,.08)}
+        .config-card.selected{border-color:#409eff;box-shadow:0 3px 12px rgba(64,158,255,.15)}
+        .card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+        .card-reason{font-size:15px;font-weight:600;color:#2c3e50}
+        .card-type{font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;text-transform:uppercase}
+        .type-html{background:#e6f7ff;color:#096dd9}
+        .type-json{background:#fff7e6;color:#d46b08}
+        .type-redirect{background:#f6ffed;color:#389e0d}
+        .card-desc{font-size:13px;color:#7f8c8d;margin-bottom:8px}
+        .card-meta{display:flex;gap:16px;font-size:12px;color:#b0b9c3}
+        .editor-panel{background:#fff;border-radius:8px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-top:20px;display:none}
+        .editor-panel.active{display:block}
+        .editor-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:12px;border-bottom:1px solid #f0f0f0}
+        .editor-header h3{font-size:17px;color:#2c3e50;margin:0}
+        .form-row{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+        .form-group{flex:1;min-width:180px}
+        .form-group label{display:block;font-size:13px;font-weight:500;color:#596275;margin-bottom:6px}
+        .form-group select,.form-group input{width:100%;padding:8px 12px;border:1px solid #dce1e8;border-radius:6px;font-size:13px;box-sizing:border-box;background:#fff}
+        .form-group select:focus,.form-group input:focus{outline:none;border-color:#409eff;box-shadow:0 0 0 2px rgba(64,158,255,.12)}
+        .form-group textarea{width:100%;padding:10px 12px;border:1px solid #dce1e8;border-radius:6px;font-size:13px;font-family:"SF Mono",Monaco,"Cascadia Code",monospace;resize:vertical;min-height:180px;box-sizing:border-box;line-height:1.5;background:#fafbfc}
+        .form-group textarea:focus{outline:none;border-color:#409eff;box-shadow:0 0 0 2px rgba(64,158,255,.12)}
+        .form-group code{background:#f0f2f5;padding:1px 5px;border-radius:3px;font-size:11px;color:#e74c3c}
+        .btn-row{display:flex;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid #f0f0f0}
+        .btn{padding:8px 18px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;border:1px solid transparent;transition:all .15s}
+        .btn-primary{background:#409eff;color:#fff;border-color:#409eff}
+        .btn-primary:hover{background:#337ecc;border-color:#337ecc}
+        .btn-ghost{background:transparent;color:#596275;border-color:#dcdfe6}
+        .btn-ghost:hover{background:#f5f7fa;color:#2c3e50;border-color:#c0c4cc}
+        .btn-danger{background:#f56c6c;color:#fff;border-color:#f56c6c}
+        .btn-danger:hover{background:#e45050;border-color:#e45050}
+        .btn-icon{margin-right:4px;font-size:14px}
+        .form-hint{font-size:12px;color:#b0b9c3;margin-top:4px;line-height:1.4}
+        .preview-modal{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:1000}
+        .preview-modal.show{display:flex}
+        .preview-box{background:#fff;border-radius:12px;width:90%;max-width:750px;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 8px 24px rgba(0,0,0,.15)}
+        .preview-header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #f0f0f0}
+        .preview-header h3{margin:0;font-size:16px;color:#2c3e50}
+        .preview-close{background:none;border:none;font-size:22px;cursor:pointer;color:#b0b9c3;padding:0;line-height:1}
+        .preview-close:hover{color:#2c3e50}
+        .preview-body{flex:1;overflow:auto;padding:0}
+        .preview-body iframe{width:100%;height:480px;border:none}
+        .preview-json{background:#f8f9fa;padding:16px;margin:0;font-family:"SF Mono",Monaco,monospace;font-size:13px;white-space:pre-wrap;word-break:break-all;max-height:400px;overflow:auto}
+        .preview-redirect{text-align:center;padding:60px 20px;color:#7f8c8d}
+        .preview-redirect strong{color:#2c3e50;word-break:break-all}
+        .empty-state{text-align:center;padding:60px 20px;color:#b0b9c3;font-size:14px}
+    </style>
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main scroll-page">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;flex-shrink:0">
+            <h2 style="font-size:20px;color:#2c3e50;margin:0">&#128683; 拦截响应配置</h2>
+            <button class="btn btn-primary" onclick="showCreateModal()" style="white-space:nowrap">&#10133; 创建自定义类型</button>
+        </div>
+        <p style="font-size:13px;color:#95a5a6;margin:0 0 20px 0;flex-shrink:0">自定义 WAF 拦截时的响应内容，支持 HTML 页面 / JSON 接口 / 重定向三种方式</p>
+
+        <div class="config-grid" id="configGrid">
+            <div class="empty-state">加载中...</div>
+        </div>
+
+        <div class="editor-panel" id="editorPanel">
+            <div class="editor-header">
+                <h3 id="editorTitle">编辑配置</h3>
+                <button class="btn btn-ghost" onclick="closeEditor()">&times; 关闭</button>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>响应类型</label>
+                    <select id="editResponseType" onchange="onTypeChange()">
+                        <option value="html">&#128196; HTML 拦截页面</option>
+                        <option value="json">&#128268; JSON 响应</option>
+                        <option value="redirect">&#10145; 302 重定向</option>
+                    </select>
+                    <div class="form-hint">HTML 适合浏览器场景，JSON 适合 API 接口，重定向适合跳转到人机验证页</div>
+                </div>
+                <div class="form-group">
+                    <label>HTTP 状态码</label>
+                    <input type="number" id="editStatusCode" min="200" max="599">
+                    <div class="form-hint">如 403（禁止）、429（限流）、502（网关故障）</div>
+                </div>
+                <div class="form-group" id="redirectUrlGroup" style="display:none">
+                    <label>重定向 URL</label>
+                    <input type="text" id="editRedirectURL" placeholder="https://captcha.example.com/verify">
+                    <div class="form-hint">用户将被 302 重定向到此地址</div>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>拦截原因描述</label>
+                    <input type="text" id="editDefaultReason" placeholder="例如: Attack Detected">
+                    <div class="form-hint">显示在拦截页面上的原因文字，支持中英文</div>
+                </div>
+            </div>
+            <div class="form-group" id="htmlTemplateGroup">
+                <label>HTML 模板 &mdash; 可用变量: <code>{{"{{.Status}}"}}</code> <code>{{"{{.Reason}}"}}</code> <code>{{"{{.RequestID}}"}}</code> <code>{{"{{.Time}}"}}</code> <code>{{"{{.ClientIP}}"}}</code> <code>{{"{{.RuleID}}"}}</code> <code>{{"{{.Host}}"}}</code></label>
+                <textarea id="editHTMLTemplate" placeholder="输入 HTML 模板内容，留空使用内置默认模板..."></textarea>
+                <div class="form-hint">使用上述变量动态替换，留空则使用系统默认拦截页面</div>
+            </div>
+            <div class="form-group" id="jsonTemplateGroup" style="display:none">
+                <label>JSON 模板 &mdash; 留空使用默认格式</label>
+                <textarea id="editJSONTemplate" placeholder='例如: {"error":"blocked","reason":"{{"{{.Reason}}"}}","request_id":"{{"{{.RequestID}}"}}"}'
+></textarea>
+                <div class="form-hint">自定义 JSON 响应体结构，便于前端统一处理拦截响应</div>
+            </div>
+            <div class="btn-row">
+                <button class="btn btn-primary" onclick="saveConfig()"><span class="btn-icon">&#128190;</span>保存配置</button>
+                <button class="btn btn-ghost" onclick="testPreview()"><span class="btn-icon">&#128065;</span>预览测试</button>
+                <button class="btn btn-danger" onclick="resetConfig()"><span class="btn-icon">&#8634;</span>恢复默认</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="preview-modal" id="previewModal">
+        <div class="preview-box">
+            <div class="preview-header">
+                <h3 id="previewTitle">预览</h3>
+                <button class="preview-close" onclick="closePreview()">&times;</button>
+            </div>
+            <div class="preview-body" id="previewBody"></div>
+        </div>
+    </div>
+
+    <!-- 创建自定义类型弹窗 -->
+    <div class="preview-modal" id="createModal" style="display:none">
+        <div class="preview-box" style="max-width:450px">
+            <div class="preview-header">
+                <h3>&#10133; 创建自定义拦截类型</h3>
+                <button class="preview-close" onclick="closeCreateModal()">&times;</button>
+            </div>
+            <div style="padding:20px">
+                <div class="form-group">
+                    <label>类型标识（英文）</label>
+                    <input type="text" id="createReason" placeholder="例如: maintenance_mode" style="width:100%">
+                    <div class="form-hint">唯一标识，用于代码中调用 blockpage.RenderBlock 时指定</div>
+                </div>
+                <div class="form-group" style="margin-top:12px">
+                    <label>拦截原因描述（中文）</label>
+                    <input type="text" id="createReasonDesc" placeholder="例如: 系统维护中" style="width:100%">
+                    <div class="form-hint">显示在拦截页面上的原因文字</div>
+                </div>
+                <div class="form-group" style="margin-top:10px">
+                    <label><input type="checkbox" id="createAndEdit" checked> 创建后立即进入编辑</label>
+                </div>
+                <div style="margin-top:16px;display:flex;gap:10px;justify-content:flex-end">
+                    <button class="btn btn-ghost" onclick="closeCreateModal()">取消</button>
+                    <button class="btn btn-primary" onclick="doCreate()">&#128190; 创建</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script nonce="{{.CSPNonce}}">
+var allConfigs = {};
+var currentReason = '';
+var defaults = {};
+
+function loadConfigs() {
+    fetch('/api/blockpage/list')
+        .then(function(r){return r.json();})
+        .then(function(resp){
+            if (!resp.success) { showToast('error','加载配置失败'); return; }
+            allConfigs = resp.data;
+            defaults = JSON.parse(JSON.stringify(resp.data));
+            renderCards();
+        })
+        .catch(function(){showToast('error','加载配置失败');});
+}
+
+function renderCards() {
+    var grid = document.getElementById('configGrid');
+    var reasons = Object.keys(allConfigs);
+    if (reasons.length === 0) {
+        grid.innerHTML = '<div class="empty-state">无配置项</div>';
+        return;
+    }
+
+    // 中文名称和描述映射
+    var cnNames = {
+        'attack': '攻击拦截',
+        'ip_blocked': 'IP 黑名单',
+        'geo_blocked': '地区封锁',
+        'ua_blocked': 'UA 黑名单',
+        'path_blocked': '路径拦截',
+        'method_blocked': '方法拦截',
+        'rate_limit': '频率限制',
+        'threat_detected': '威胁检测',
+        'body_too_large': '请求体过大',
+        'gateway_error': '网关故障'
+    };
+    var cnDescs = {
+        'attack': '检测到 SQL注入/XSS/命令注入等攻击行为时触发',
+        'ip_blocked': '来源 IP 在黑名单中被禁止访问',
+        'geo_blocked': '来源地区被地理封锁规则拦截',
+        'ua_blocked': 'User-Agent 被黑名单规则拦截',
+        'path_blocked': '请求路径匹配黑名单或不在白名单中',
+        'method_blocked': '请求方法（如 PUT/DELETE）不在允许列表中',
+        'rate_limit': '请求频率超过限流阈值',
+        'threat_detected': '智能限流引擎判定为恶意请求',
+        'body_too_large': '请求体超过允许的最大大小',
+        'gateway_error': '后端服务不可用（未配置域名/后端或后端宕机）'
+    };
+
+    // 内置类型标识
+    var builtinTypes = ['attack','ip_blocked','geo_blocked','ua_blocked','path_blocked','method_blocked','rate_limit','threat_detected','body_too_large','gateway_error'];
+
+    var html = '';
+    reasons.forEach(function(r){
+        var c = allConfigs[r];
+        var typeClass = 'type-' + c.response_type;
+        var typeLabel = {'html':'HTML','json':'JSON','redirect':'重定向'}[c.response_type]||'HTML';
+        var name = cnNames[r] || r;
+        var desc = cnDescs[r] || c.default_reason || '未设置';
+        var isBuiltin = builtinTypes.indexOf(r) >= 0;
+        html += '<div class="config-card'+(currentReason===r?' selected':'')+'" onclick="openEditor(\''+escHtml(r)+'\')">';
+        html += '<div class="card-header"><span class="card-reason">'+escHtml(name)+'</span>';
+        html += isBuiltin ? '<span style="font-size:10px;background:#e6f7ff;color:#1890ff;padding:1px 6px;border-radius:8px">内置</span>' : '<span style="font-size:10px;background:#fff7e6;color:#d48806;padding:1px 6px;border-radius:8px">自定义</span>';
+        html += '</div>';
+        html += '<div class="card-desc">'+escHtml(desc)+'</div>';
+        html += '<div class="card-meta"><span>HTTP '+escHtml(String(c.status_code||403))+'</span><span class="card-type '+typeClass+'">'+typeLabel+'</span>';
+        if (!isBuiltin) {
+            html += '<span style="margin-left:auto;color:#f56c6c;cursor:pointer;font-size:12px" onclick="event.stopPropagation();deleteType(\''+escHtml(r)+'\')">&#128465; 删除</span>';
+        }
+        html += '</div>';
+        html += '</div>';
+    });
+    grid.innerHTML = html;
+}
+
+function openEditor(reason) {
+    currentReason = reason;
+    var c = allConfigs[reason];
+    if (!c) return;
+    var cnNames = {
+        'attack': '攻击拦截', 'ip_blocked': 'IP 黑名单', 'geo_blocked': '地区封锁',
+        'ua_blocked': 'UA 黑名单', 'path_blocked': '路径拦截', 'method_blocked': '方法拦截',
+        'rate_limit': '频率限制', 'threat_detected': '威胁检测', 'body_too_large': '请求体过大',
+        'gateway_error': '网关故障'
+    };
+    document.getElementById('editorPanel').classList.add('active');
+    document.getElementById('editorTitle').textContent = '编辑: ' + (cnNames[reason] || reason);
+    document.getElementById('editResponseType').value = c.response_type || 'html';
+    document.getElementById('editStatusCode').value = c.status_code || 403;
+    document.getElementById('editDefaultReason').value = c.default_reason || '';
+    document.getElementById('editHTMLTemplate').value = c.html_template || '';
+    document.getElementById('editJSONTemplate').value = c.json_template || '';
+    document.getElementById('editRedirectURL').value = c.redirect_url || '';
+    onTypeChange();
+    renderCards();
+    document.getElementById('editorPanel').scrollIntoView({behavior:'smooth'});
+}
+
+function closeEditor() {
+    currentReason = '';
+    document.getElementById('editorPanel').classList.remove('active');
+    renderCards();
+}
+
+function onTypeChange() {
+    var t = document.getElementById('editResponseType').value;
+    document.getElementById('htmlTemplateGroup').style.display = (t==='html')?'':'none';
+    document.getElementById('jsonTemplateGroup').style.display = (t==='json')?'':'none';
+    document.getElementById('redirectUrlGroup').style.display = (t==='redirect')?'':'none';
+}
+
+function saveConfig() {
+    if (!currentReason) return;
+    var payload = {
+        reason: currentReason,
+        response_type: document.getElementById('editResponseType').value,
+        status_code: parseInt(document.getElementById('editStatusCode').value)||403,
+        default_reason: document.getElementById('editDefaultReason').value,
+        html_template: document.getElementById('editHTMLTemplate').value,
+        json_template: document.getElementById('editJSONTemplate').value,
+        redirect_url: document.getElementById('editRedirectURL').value
+    };
+    fetch('/api/blockpage/update', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+    })
+    .then(function(r){return r.json();})
+    .then(function(resp){
+        if (resp.success) {
+            showToast('success','配置已更新');
+            loadConfigs();
+        } else {
+            showToast('error',resp.error||'更新失败');
+        }
+    })
+    .catch(function(){showToast('error','请求失败');});
+}
+
+function resetConfig() {
+    if (!currentReason) return;
+    var def = defaults[currentReason];
+    if (!def) return;
+    if (!confirm('确定要恢复 '+currentReason+' 的默认配置吗？')) return;
+    def.reason = currentReason;
+    fetch('/api/blockpage/update', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(def)
+    })
+    .then(function(r){return r.json();})
+    .then(function(resp){
+        if (resp.success) {
+            showToast('success','已恢复默认配置');
+            loadConfigs();
+            openEditor(currentReason);
+        } else {
+            showToast('error',resp.error||'恢复失败');
+        }
+    })
+    .catch(function(){showToast('error','请求失败');});
+}
+
+function testPreview() {
+    if (!currentReason) return;
+    var t = document.getElementById('editResponseType').value;
+    var modal = document.getElementById('previewModal');
+    var body = document.getElementById('previewBody');
+    document.getElementById('previewTitle').textContent = '预览: ' + currentReason;
+    var status = parseInt(document.getElementById('editStatusCode').value)||403;
+    var reasonDesc = document.getElementById('editDefaultReason').value;
+
+    if (t === 'html') {
+        var tmpl = document.getElementById('editHTMLTemplate').value;
+        var html = renderTemplate(tmpl, currentReason, status, reasonDesc);
+        body.innerHTML = '<iframe srcdoc="'+escAttr(html)+'"></iframe>';
+    } else if (t === 'json') {
+        var jtmpl = document.getElementById('editJSONTemplate').value;
+        var jsonStr = renderJSONTemplate(jtmpl, currentReason, status, reasonDesc);
+        body.innerHTML = '<pre class="preview-json">'+escHtml(jsonStr)+'</pre>';
+    } else if (t === 'redirect') {
+        var url = document.getElementById('editRedirectURL').value||'/';
+        body.innerHTML = '<div class="preview-redirect">&#10145; 用户将被重定向到<br><strong>'+escHtml(url)+'</strong></div>';
+    }
+    modal.classList.add('show');
+}
+
+function closePreview() {
+    document.getElementById('previewModal').classList.remove('show');
+}
+
+document.getElementById('previewModal').addEventListener('click', function(e){
+    if (e.target === this) closePreview();
+});
+
+function renderTemplate(tmpl, reason, status, reasonDesc) {
+    var now = new Date().toISOString().replace('T',' ').substring(0,19);
+    return (tmpl||'')
+        .replace(/\{\{\.Status\}\}/g, String(status))
+        .replace(/\{\{\.Reason\}\}/g, reasonDesc||reason)
+        .replace(/\{\{\.RequestID\}\}/g, 'req_'+Math.random().toString(36).substring(2,10))
+        .replace(/\{\{\.Time\}\}/g, now)
+        .replace(/\{\{\.ClientIP\}\}/g, '203.0.113.10')
+        .replace(/\{\{\.RuleID\}\}/g, 'WAF-001')
+        .replace(/\{\{\.Host\}\}/g, 'example.com');
+}
+
+function renderJSONTemplate(jtmpl, reason, status, reasonDesc) {
+    var now = new Date().toISOString().replace('T',' ').substring(0,19);
+    var reqId = 'req_'+Math.random().toString(36).substring(2,10);
+    if (jtmpl) {
+        return jtmpl
+            .replace(/\{\{\.Status\}\}/g, String(status))
+            .replace(/\{\{\.Reason\}\}/g, reasonDesc||reason)
+            .replace(/\{\{\.RequestID\}\}/g, reqId)
+            .replace(/\{\{\.Time\}\}/g, now)
+            .replace(/\{\{\.ClientIP\}\}/g, '203.0.113.10')
+            .replace(/\{\{\.RuleID\}\}/g, 'WAF-001')
+            .replace(/\{\{\.Host\}\}/g, 'example.com');
+    }
+    return JSON.stringify({
+        error:'blocked',status:status,reason:reasonDesc||reason,
+        request_id:reqId,time:now,client_ip:'203.0.113.10',
+        rule_id:'WAF-001',host:'example.com'
+    }, null, 2);
+}
+
+function showCreateModal() {
+    document.getElementById('createReason').value = '';
+    document.getElementById('createReasonDesc').value = '';
+    document.getElementById('createAndEdit').checked = true;
+    document.getElementById('createModal').style.display = 'flex';
+    document.getElementById('createModal').classList.add('show');
+}
+
+function closeCreateModal() {
+    document.getElementById('createModal').style.display = 'none';
+    document.getElementById('createModal').classList.remove('show');
+}
+
+function doCreate() {
+    var reason = document.getElementById('createReason').value.trim();
+    if (!reason) { showToast('error', '请输入类型标识'); return; }
+    if (!/^[a-z][a-z0-9_]*$/.test(reason)) { showToast('error', '标识只能包含小写字母/数字/下划线，且以字母开头'); return; }
+
+    fetch('/api/blockpage/create', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+            reason: reason,
+            response_type: 'html',
+            status_code: 502,
+            default_reason: document.getElementById('createReasonDesc').value || reason
+        })
+    })
+    .then(function(r){return r.json();})
+    .then(function(resp){
+        if (resp.success) {
+            showToast('success', '自定义类型已创建');
+            closeCreateModal();
+            loadConfigs();
+            if (document.getElementById('createAndEdit').checked) {
+                setTimeout(function(){ openEditor(reason); }, 300);
+            }
+        } else {
+            showToast('error', resp.error || '创建失败');
+        }
+    })
+    .catch(function(){showToast('error','请求失败');});
+}
+
+function deleteType(reason) {
+    WAF.confirmDelete('确定要删除自定义类型 "' + reason + '" 吗？\n\n此操作不可撤销。', '/api/blockpage/delete', {reason: reason}, function() {
+        if (currentReason === reason) closeEditor();
+        loadConfigs();
+    });
+}
+
+function escHtml(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function escAttr(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+}
+
+loadConfigs();
+</script>
+</body>
+</html>
+{{end}}

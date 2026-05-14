@@ -80,7 +80,7 @@ func (d *SQLInjectionDetector) compilePatterns() {
 	d.patterns = make([]*regexp.Regexp, 0, len(patternEntries))
 	d.patternDescs = make([]string, 0, len(patternEntries))
 	for _, entry := range patternEntries {
-		re, err := regexp.Compile(entry.pattern)
+		re, err := compileRegex(entry.pattern)
 		if err == nil {
 			d.patterns = append(d.patterns, re)
 			d.patternDescs = append(d.patternDescs, entry.description)
@@ -121,23 +121,28 @@ func (d *SQLInjectionDetector) Detect(input string) (bool, string, int, string) 
 
 // heuristicCheck 启发式检测
 func (d *SQLInjectionDetector) heuristicCheck(input string) bool {
-	// 检测单引号数量是否为奇数(可能未闭合)
-	// 但排除仅包含一个引号的短输入（如人名 O'Brien）
+	upper := strings.ToUpper(input)
+	hasSQLKeyword := func() bool {
+		keywords := []string{"SELECT", "UNION", "INSERT", "UPDATE", "DELETE", "DROP", "EXEC", "OR", "AND", "WHERE", "FROM", "HAVING", "GROUP", "ORDER", "TABLE", "DATABASE", "INFORMATION_SCHEMA", "SLEEP", "BENCHMARK"}
+		for _, kw := range keywords {
+			if strings.Contains(upper, kw) {
+				return true
+			}
+		}
+		return false
+	}()
+
 	quoteCount := strings.Count(input, "'")
-	if quoteCount > 1 && quoteCount%2 != 0 {
+	if quoteCount > 1 && quoteCount%2 != 0 && hasSQLKeyword {
 		return true
 	}
 
-	// 检测双引号数量是否为奇数
 	doubleQuoteCount := strings.Count(input, "\"")
-	if doubleQuoteCount > 1 && doubleQuoteCount%2 != 0 {
+	if doubleQuoteCount > 1 && doubleQuoteCount%2 != 0 && hasSQLKeyword {
 		return true
 	}
 
-	// 检测可疑的括号组合（更严格：要求包含SQL关键字上下文）
-	if (strings.Contains(input, "())") || strings.Contains(input, "(())")) {
-		// 只有在附近存在SQL关键字时才判定
-		upper := strings.ToUpper(input)
+	if strings.Contains(input, "())") || strings.Contains(input, "(())") {
 		sqlKeywords := []string{"SELECT", "UNION", "INSERT", "UPDATE", "DELETE", "DROP", "EXEC"}
 		for _, kw := range sqlKeywords {
 			if strings.Contains(upper, kw) {

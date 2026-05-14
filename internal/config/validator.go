@@ -11,9 +11,9 @@ import (
 type ConfigPriority int
 
 const (
-	PriorityDefault ConfigPriority = iota // 默认值（最低优先级）
-	PriorityYAML                          // YAML配置文件
-	PriorityDatabase                      // 数据库配置（最高优先级）
+	PriorityDefault  ConfigPriority = iota // 默认值（最低优先级）
+	PriorityYAML                           // YAML配置文件
+	PriorityDatabase                       // 数据库配置（最高优先级）
 )
 
 // ConfigValidator 配置验证器
@@ -114,10 +114,12 @@ func (v *ConfigValidator) validateAuthConfig(cfg *Config) {
 	if cfg.Auth.Username == "" {
 		v.addError("auth.username", "用户名不能为空")
 	}
-	// 密码可以为空（可能已经使用哈希密码）
-	// 只在有明文密码时才检查长度（最小4位，允许"admin"等常见默认密码）
-	if cfg.Auth.Password != "" && len(cfg.Auth.Password) < 4 {
-		v.addError("auth.password", "密码长度不能少于4位")
+	if cfg.Auth.Password != "" && len(cfg.Auth.Password) < 8 {
+		v.addError("auth.password", "密码长度不能少于8位")
+	}
+	weakPasswords := map[string]bool{"admin": true, "password": true, "123456": true, "admin123": true, "root": true}
+	if cfg.Auth.Password != "" && weakPasswords[cfg.Auth.Password] {
+		v.addError("auth.password", "不能使用常见弱口令（admin/password/123456等），请修改config.yaml中的auth.password")
 	}
 }
 
@@ -160,11 +162,10 @@ func (v *ConfigValidator) addError(field, message string) {
 }
 
 // isValidAddr 验证地址格式
+var addrPattern = regexp.MustCompile(`^(\[[^\]]+\]|[^\[:]+)?:\d+$`)
+
 func isValidAddr(addr string) bool {
-	// 匹配 :port 或 host:port 格式
-	pattern := `^(\[[^\]]+\]|[^\[:]+)?:\d+$`
-	matched, _ := regexp.MatchString(pattern, addr)
-	return matched
+	return addrPattern.MatchString(addr)
 }
 
 // MergeConfig 合并配置（按优先级）

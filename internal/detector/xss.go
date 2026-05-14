@@ -85,7 +85,7 @@ func (d *XSSDetector) compilePatterns() {
 	d.patterns = make([]*regexp.Regexp, 0, len(patternEntries))
 	d.patternDescs = make([]string, 0, len(patternEntries))
 	for _, entry := range patternEntries {
-		re, err := regexp.Compile(entry.pattern)
+		re, err := compileRegex(entry.pattern)
 		if err == nil {
 			d.patterns = append(d.patterns, re)
 			d.patternDescs = append(d.patternDescs, entry.description)
@@ -116,13 +116,15 @@ func (d *XSSDetector) Detect(input string) (bool, string, int, string) {
 		}
 	}
 
-	for i, pattern := range d.patterns {
-		if pattern.MatchString(decoded) {
-			desc := ""
-			if i < len(d.patternDescs) {
-				desc = d.patternDescs[i]
+	if decoded != input {
+		for i, pattern := range d.patterns {
+			if pattern.MatchString(decoded) {
+				desc := ""
+				if i < len(d.patternDescs) {
+					desc = d.patternDescs[i]
+				}
+				return true, pattern.String() + " (decoded)", i + 1, desc
 			}
-			return true, pattern.String() + " (decoded)", i + 1, desc
 		}
 	}
 

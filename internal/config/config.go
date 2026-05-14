@@ -5,7 +5,8 @@ import (
 	"os"
 	"sync"
 
-	"gowaf-demo/internal/logger"
+	intelconfig "gowaf/internal/intel/config"
+	"gowaf/internal/logger"
 
 	"gopkg.in/yaml.v3"
 )
@@ -45,7 +46,7 @@ type Config struct {
 	DefaultProxy *DefaultProxyConfig `yaml:"default_proxy"`
 	// TrustedProxies 信任代理列表（从数据库读取，不在配置文件中）
 	TrustedProxies []string
-	Log struct {
+	Log            struct {
 		// File 日志文件路径
 		File string `yaml:"file"`
 		// Level 日志级别
@@ -61,22 +62,30 @@ type Config struct {
 		// Password 认证密码
 		Password string `yaml:"password"`
 	} `yaml:"auth"`
+	TLS struct {
+		CertDir   string   `yaml:"cert_dir"`
+		ACMEEmail string   `yaml:"acme_email"`
+		Domains   []string `yaml:"domains"`
+	} `yaml:"tls"`
 	// RuntimeConfig 运行时配置（从数据库加载）
 	RuntimeConfig `yaml:"-" json:"-"` // 嵌入RuntimeConfig，不存入yaml
+	// Intel 情报中心配置
+	Intel *intelconfig.IntelConfig `yaml:"intel" json:"intel,omitempty"`
 }
 
 // GetDefaultRuntimeConfig 获取运行时默认配置（当数据库无记录时使用）
 func GetDefaultRuntimeConfig() *RuntimeConfig {
 	return &RuntimeConfig{
 		Security: SecurityConfig{
-			Login:    LoginSecurityConfig{MaxAttempts: 5, BlockDuration: 15},
-			Session:  SessionSecurityConfig{TTL: 8, CleanupInterval: 5},
-			Captcha:  CaptchaSecurityConfig{TTL: 5},
+			Login:     LoginSecurityConfig{MaxAttempts: 5, BlockDuration: 15},
+			Session:   SessionSecurityConfig{TTL: 8, AbsoluteTTL: 24, CleanupInterval: 5},
+			Captcha:   CaptchaSecurityConfig{TTL: 5},
 			RateLimit: RateLimitConfig{APILimit: 300, APIWindow: 1},
 		},
 		Performance: PerformanceConfig{
 			LogChannelSize: 10000, CacheSize: 1000, CacheTTL: 5,
 			MaxRequestBody: 10, ScanBuffer: 1024,
+			DisableCompression: true,
 		},
 		Scheduler: SchedulerConfig{
 			HealthCheck: 5, LogFlush: 2, LogCleanup: 24,
@@ -85,6 +94,22 @@ func GetDefaultRuntimeConfig() *RuntimeConfig {
 		WebSocket: WebSocketConfig{
 			DashboardPush: 2, LogHeartbeat: 30,
 			BufferSize: 1024, BroadcastChannel: 1000,
+		},
+		Log: LogConfig{
+			Level:      "info",
+			MaxSize:    100,
+			MaxBackups: 10,
+			MaxAge:     7,
+			Compress:   true,
+		},
+		Retention: RetentionConfig{
+			LogRetentionDays:      30,
+			MetricsRetentionDays:  30,
+			AdminLogRetentionDays: 90,
+		},
+		SessionSafe: SessionSafeConfig{
+			IPMutationThreshold: 3,
+			UADetectionEnabled:  true,
 		},
 	}
 }
@@ -95,6 +120,39 @@ type RuntimeConfig struct {
 	Performance PerformanceConfig `json:"performance"`
 	Scheduler   SchedulerConfig   `json:"scheduler"`
 	WebSocket   WebSocketConfig   `json:"websocket"`
+	Log         LogConfig         `json:"log"`
+	Retention   RetentionConfig   `json:"retention"`
+	SessionSafe SessionSafeConfig `json:"session_safe"`
+}
+
+// LogConfig 日志运行时配置
+type LogConfig struct {
+	Level      string `json:"level"`       // debug/info/warn/error
+	MaxSize    int    `json:"max_size"`    // 单文件最大MB
+	MaxBackups int    `json:"max_backups"` // 保留旧文件数
+	MaxAge     int    `json:"max_age"`     // 保留天数
+	Compress   bool   `json:"compress"`    // 是否压缩
+	Fields     struct {
+		Host        bool `json:"host"`
+		Query       bool `json:"query"`
+		Referer     bool `json:"referer"`
+		ContentType bool `json:"content_type"`
+		BodySize    bool `json:"body_size"`
+		LatencyUs   bool `json:"latency_us"`
+	} `json:"fields"`
+}
+
+// RetentionConfig 数据保留配置
+type RetentionConfig struct {
+	LogRetentionDays      int `json:"log_retention_days"`       // 访问日志保留天数
+	MetricsRetentionDays  int `json:"metrics_retention_days"`   // 指标数据保留天数
+	AdminLogRetentionDays int `json:"admin_log_retention_days"` // 管理日志保留天数
+}
+
+// SessionSafeConfig 会话安全配置
+type SessionSafeConfig struct {
+	IPMutationThreshold int  `json:"ip_mutation_threshold"` // IP变化触发告警次数（默认3）
+	UADetectionEnabled  bool `json:"ua_detection_enabled"`  // UA变化检测开关（默认true）
 }
 
 // SecurityConfig 安全配置
@@ -113,7 +171,8 @@ type LoginSecurityConfig struct {
 
 // SessionSecurityConfig Session安全配置
 type SessionSecurityConfig struct {
-	TTL             int `json:"ttl"`              // Session有效期(小时)
+	TTL             int `json:"ttl"`              // Session滑动有效期(小时)
+	AbsoluteTTL     int `json:"absolute_ttl"`     // Session绝对有效期(小时), 0表示不限制
 	CleanupInterval int `json:"cleanup_interval"` // 清理间隔(分钟)
 }
 
@@ -130,11 +189,12 @@ type RateLimitConfig struct {
 
 // PerformanceConfig 性能配置
 type PerformanceConfig struct {
-	LogChannelSize int `json:"log_channel_size"` // 日志通道大小
-	CacheSize      int `json:"cache_size"`       // 查询缓存大小
-	CacheTTL       int `json:"cache_ttl"`        // 缓存TTL(分钟)
-	MaxRequestBody int `json:"max_request_body"` // 请求体最大值(MB)
-	ScanBuffer     int `json:"scan_buffer"`      // 扫描缓冲区(KB)
+	LogChannelSize     int  `json:"log_channel_size"`    // 日志通道大小
+	CacheSize          int  `json:"cache_size"`          // 查询缓存大小
+	CacheTTL           int  `json:"cache_ttl"`           // 缓存TTL(分钟)
+	MaxRequestBody     int  `json:"max_request_body"`    // 请求体最大值(MB)
+	ScanBuffer         int  `json:"scan_buffer"`         // 扫描缓冲区(KB)
+	DisableCompression bool `json:"disable_compression"` // 禁用上游响应压缩（默认启用压缩）
 }
 
 // SchedulerConfig 定时任务配置
@@ -170,12 +230,12 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
-	
+
 	// 保存配置文件路径
 	configMu.Lock()
 	configPath = path
 	configMu.Unlock()
-	
+
 	// 设置默认值
 	if cfg.Log.Format.TimeFormat == "" {
 		cfg.Log.Format.TimeFormat = "2006-01-02T15:04:05.000Z07:00"
@@ -202,6 +262,16 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("配置验证失败: %w", err)
 	}
 
+	// 初始化 Intel 默认值并验证
+	if cfg.Intel == nil {
+		cfg.Intel = intelconfig.DefaultIntelConfig()
+	} else {
+		cfg.Intel = intelconfig.MergeIntelConfig(intelconfig.DefaultIntelConfig(), cfg.Intel)
+	}
+	if err := intelconfig.ValidateIntelConfig(cfg.Intel); err != nil {
+		return nil, fmt.Errorf("情报中心配置验证失败: %w", err)
+	}
+
 	return &cfg, nil
 }
 
@@ -209,17 +279,17 @@ func Load(path string) (*Config, error) {
 func (c *Config) Save() error {
 	configMu.Lock()
 	defer configMu.Unlock()
-	
+
 	if configPath == "" {
 		return os.ErrNotExist
 	}
-	
+
 	// 序列化配置为YAML
 	data, err := yaml.Marshal(c)
 	if err != nil {
 		return err
 	}
-	
+
 	// 写入文件
-	return os.WriteFile(configPath, data, 0644)
+	return os.WriteFile(configPath, data, 0600)
 }

@@ -2,12 +2,12 @@ package handler
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"sync"
 	"time"
 
-	"gowaf-demo/internal/web/middleware"
+	"gowaf/internal/logger"
+	"gowaf/internal/web/middleware"
 
 	"github.com/gorilla/websocket"
 )
@@ -21,7 +21,10 @@ var upgrader = websocket.Upgrader{
 			return false
 		}
 		host := r.Host
-		return origin == "http://"+host || origin == "https://"+host
+		if origin == "http://"+host || origin == "https://"+host {
+			return true
+		}
+		return false
 	},
 }
 
@@ -36,13 +39,14 @@ type LogHub struct {
 	register   chan *client
 	unregister chan *client
 	mutex      sync.RWMutex
+	stopChan   chan struct{}
 }
 
 var (
-	logHub        *LogHub
-	logHubOnce    sync.Once
-	logHeartbeat  = 30
-	logHubMu      sync.RWMutex
+	logHub       *LogHub
+	logHubOnce   sync.Once
+	logHeartbeat = 30
+	logHubMu     sync.RWMutex
 )
 
 func NewLogHub(bufferSize, broadcastChannel int) *LogHub {
@@ -51,6 +55,7 @@ func NewLogHub(bufferSize, broadcastChannel int) *LogHub {
 		broadcast:  make(chan LogEntry, broadcastChannel),
 		register:   make(chan *client, 16),
 		unregister: make(chan *client, 16),
+		stopChan:   make(chan struct{}),
 	}
 }
 
@@ -68,9 +73,16 @@ func (h *LogHub) Run() {
 		select {
 		case client := <-h.register:
 			h.mutex.Lock()
+			if len(h.clients) >= 100 {
+				h.mutex.Unlock()
+				client.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseTryAgainLater, "Max connections reached"))
+				client.conn.Close()
+				logger.Warn("日志WebSocket连接数已达上限，拒绝新连接")
+				continue
+			}
 			h.clients[client] = true
 			h.mutex.Unlock()
-			log.Printf("WebSocket client connected. Total clients: %d", len(h.clients))
+			logger.Info("WebSocket client connected. Total clients: %d", len(h.clients))
 
 		case client := <-h.unregister:
 			h.mutex.Lock()
@@ -79,7 +91,7 @@ func (h *LogHub) Run() {
 				close(client.send)
 			}
 			h.mutex.Unlock()
-			log.Printf("WebSocket client disconnected. Total clients: %d", len(h.clients))
+			logger.Info("WebSocket client disconnected. Total clients: %d", len(h.clients))
 
 		case logEntry := <-h.broadcast:
 			data, err := json.Marshal(logEntry)
@@ -95,7 +107,25 @@ func (h *LogHub) Run() {
 				}
 			}
 			h.mutex.RUnlock()
+
+		case <-h.stopChan:
+			h.mutex.Lock()
+			for c := range h.clients {
+				close(c.send)
+			}
+			h.clients = make(map[*client]bool)
+			h.mutex.Unlock()
+			return
 		}
+	}
+}
+
+func (h *LogHub) Close() {
+	select {
+	case <-h.stopChan:
+		return
+	default:
+		close(h.stopChan)
 	}
 }
 
@@ -114,14 +144,14 @@ func (c *client) writePump() {
 				return
 			}
 
-			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			c.conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
 			err := c.conn.WriteMessage(websocket.TextMessage, message)
 			if err != nil {
 				return
 			}
 
 		case <-ticker.C:
-			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			c.conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
@@ -142,13 +172,13 @@ func BroadcastLog(logEntry LogEntry) {
 func HandleLogWebSocket(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("session")
 	if err != nil || !middleware.IsValidSession(cookie.Value) {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		jsonError(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("WebSocket upgrade failed: %v", err)
+		logger.Warn("WebSocket upgrade failed: %v", err)
 		return
 	}
 
@@ -160,7 +190,8 @@ func HandleLogWebSocket(w http.ResponseWriter, r *http.Request) {
 	select {
 	case logHub.register <- c:
 	default:
-		log.Printf("日志WebSocket注册通道已满，关闭连接")
+		logger.Warn("日志WebSocket注册通道已满，关闭连接")
+		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseTryAgainLater, "Server busy"))
 		conn.Close()
 		return
 	}

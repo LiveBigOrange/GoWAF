@@ -292,9 +292,14 @@
             </div>
             <div class="config-grid">
                 <div class="config-item">
-                    <label for="session_ttl">Session 有效期 <small>(小时)</small></label>
+                    <label for="session_ttl">Session 滑动有效期 <small>(小时)</small></label>
                     <input type="number" id="session_ttl" min="1" max="168" autocomplete="off">
-                    <div class="help-text">登录保持时间，建议 8-24 小时</div>
+                    <div class="help-text">每次操作后自动续期，建议 8-24 小时</div>
+                </div>
+                <div class="config-item">
+                    <label for="session_absolute_ttl">Session 绝对有效期 <small>(小时)</small></label>
+                    <input type="number" id="session_absolute_ttl" min="0" max="720" autocomplete="off">
+                    <div class="help-text">无论是否活跃，超过此时长强制过期，0 表示不限制</div>
                 </div>
                 <div class="config-item">
                     <label for="session_cleanup_interval">Session 清理间隔 <small>(分钟)</small></label>
@@ -344,7 +349,7 @@
         </div>
     </div>
 
-    <script>
+    <script nonce="{{.CSPNonce}}">
         let originalConfig = {};
         let hasChanges = false;
 
@@ -356,18 +361,20 @@
                     if (!r.ok) throw new Error(`HTTP ${r.status}`);
                     return r.json();
                 })
-                .then(data => {
-                    if (data.error) {
-                        showAlert('error', '❌ ' + data.error);
+                .then(resp => {
+                    if (!resp.success) {
+                        showAlert('error', '❌ ' + (resp.error || '加载失败'));
                         return;
                     }
 
+                    var data = resp.data || {};
                     originalConfig = JSON.parse(JSON.stringify(data));
 
                     if (document.getElementById('admin_log_path')) {
                         fetch('/api/config/basic')
                             .then(r => r.json())
-                            .then(basic => {
+                            .then(function(resp) {
+                                var basic = resp.data || {};
                                 document.getElementById('admin_log_path').value = basic.admin_log || '未配置';
                             })
                             .catch(() => {
@@ -378,6 +385,7 @@
                     document.getElementById('login_max_attempts').value    = (data.login && data.login.max_attempts) || 5;
                     document.getElementById('login_block_duration').value  = (data.login && data.login.block_duration) || 15;
                     document.getElementById('session_ttl').value           = (data.session && data.session.ttl) || 8;
+                    document.getElementById('session_absolute_ttl').value  = (data.session && data.session.absolute_ttl) || 0;
                     document.getElementById('session_cleanup_interval').value = (data.session && data.session.cleanup_interval) || 5;
                     document.getElementById('captcha_ttl').value           = (data.captcha && data.captcha.ttl) || 5;
                     document.getElementById('api_limit').value             = (data.rate_limit && data.rate_limit.api_limit) || 300;
@@ -400,6 +408,7 @@
                 },
                 session: {
                     ttl: safeInt(document.getElementById('session_ttl').value, 8),
+                    absolute_ttl: safeInt(document.getElementById('session_absolute_ttl').value, 0),
                     cleanup_interval: safeInt(document.getElementById('session_cleanup_interval').value, 5)
                 },
                 captcha: {
@@ -423,8 +432,8 @@
                 return r.json();
             })
             .then(data => {
-                if (data.error) {
-                    showAlert('error', '❌ ' + data.error);
+                if (!data.success) {
+                    showAlert('error', '❌ ' + (data.error || '保存失败'));
                 } else {
                     showAlert('success', '✅ 安全配置保存成功！登录安全和验证码配置立即生效，Session和限流配置需重启服务生效。');
                     hasChanges = false;
@@ -453,8 +462,8 @@
                 return r.json();
             })
             .then(data => {
-                if (data.error) {
-                    showAlert('error', '❌ ' + data.error);
+                if (!data.success) {
+                    showAlert('error', '❌ ' + (data.error || '恢复失败'));
                 } else {
                     showAlert('success', '✅ 已恢复默认安全配置');
                     setTimeout(loadConfig, 500);

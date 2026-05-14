@@ -2,40 +2,34 @@ package database
 
 import (
 	"database/sql"
-	"sync"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
 
-// Manager 数据库管理器
 type Manager struct {
 	db   *sql.DB
 	path string
-	mu   sync.RWMutex
 }
 
-// NewManager 创建数据库管理器
 func NewManager(dbPath string) (*Manager, error) {
-	db, err := sql.Open("sqlite", dbPath)
+	// 通过 DSN 参数设置 pragma，确保连接池中所有连接（不仅是第一条）都继承这些设置
+	// busy_timeout、synchronous、cache_size、temp_store 是连接级设置，必须在 DSN 中指定
+	// journal_mode 和 auto_vacuum 是数据库级设置，设置一次即全局生效
+	dsn := dbPath + "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=cache_size(5000)&_pragma=temp_store(MEMORY)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
 
-	// SQLite性能优化配置
-	pragmas := []string{
-		"PRAGMA journal_mode=WAL",        // WAL模式，提高并发性能
-		"PRAGMA cache_size=5000",         // 增大缓存
-		"PRAGMA synchronous=NORMAL",      // 平衡性能和安全
-		"PRAGMA auto_vacuum=INCREMENTAL", // 自动回收空间
-		"PRAGMA temp_store=MEMORY",       // 临时数据存内存
-	}
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(30 * time.Minute)
 
-	for _, pragma := range pragmas {
-		if _, err := db.Exec(pragma); err != nil {
-			// 优化配置失败不影响启动
-			continue
-		}
-	}
+	// auto_vacuum 是数据库级别设置，只需执行一次
+	db.Exec("PRAGMA auto_vacuum=INCREMENTAL")
+	// 更频繁的WAL检查点，避免WAL文件过大影响读性能
+	db.Exec("PRAGMA wal_autocheckpoint=500")
 
 	return &Manager{
 		db:   db,
@@ -51,4 +45,9 @@ func (m *Manager) GetDB() *sql.DB {
 // Close 关闭数据库连接
 func (m *Manager) Close() error {
 	return m.db.Close()
+}
+
+// TableInitializer 定义数据库表初始化的接口约定
+type TableInitializer interface {
+	EnsureTables() error
 }

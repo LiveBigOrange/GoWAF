@@ -6,7 +6,11 @@ import (
 	"html/template"
 )
 
-//go:embed dashboard.html sidebar.html intercepts.html proxyconfig.html domain.html cert.html rules.html ua.html path.html ratelimit.html backend.html detector.html logs.html adminlog.html config.html config-security.html config-performance.html config-scheduler.html config-websocket.html change_password.html geoblock.html httpmethods.html pathratelimit.html
+type PageData struct {
+	CSPNonce string
+}
+
+//go:embed dashboard.html sidebar.html intercepts.html proxyconfig.html domain.html cert.html rules.html ua.html path.html ratelimit.html backend.html detector.html logs.html adminlog.html syslog.html config.html config-security.html config-performance.html config-scheduler.html config-websocket.html config-system.html change_password.html geoblock.html httpmethods.html pathratelimit.html smartlimit.html blockpage.html notify.html bot.html vpatch.html compliance.html respheader.html dlp.html apischema.html intel-config.html intel-sync.html intel-audit.html trend.html
 var FS embed.FS
 
 // DashboardTmpl 是仪表盘模板
@@ -51,6 +55,9 @@ var LogsTmpl *template.Template
 // AdminLogTmpl 是管理日志页面模板
 var AdminLogTmpl *template.Template
 
+// SysLogTmpl 是系统日志页面模板
+var SysLogTmpl *template.Template
+
 // ConfigTmpl 是系统配置页面模板
 var ConfigTmpl *template.Template
 
@@ -69,6 +76,9 @@ var ConfigWebSocketTmpl *template.Template
 // ChangePasswordTmpl 是修改密码页面模板
 var ChangePasswordTmpl *template.Template
 
+// ConfigSystemTmpl 是统一系统配置卡片页面模板
+var ConfigSystemTmpl *template.Template
+
 // GeoBlockTmpl 是GeoIP阻断页面模板
 var GeoBlockTmpl *template.Template
 
@@ -77,6 +87,45 @@ var HTTPMethodsTmpl *template.Template
 
 // PathRateLimitTmpl 是路径级限流页面模板
 var PathRateLimitPageTmpl *template.Template
+
+// SmartLimitTmpl 是智能限流页面模板
+var SmartLimitTmpl *template.Template
+
+// NotifyTmpl 是告警通知页面模板
+var NotifyTmpl *template.Template
+
+// BlockPageTmpl 是拦截响应配置页面模板
+var BlockPageTmpl *template.Template
+
+// BotTmpl 是Bot管理页面模板
+var BotTmpl *template.Template
+
+// VPatchTmpl 是虚拟补丁页面模板
+var VPatchTmpl *template.Template
+
+// ComplianceTmpl 是合规报告页面模板
+var ComplianceTmpl *template.Template
+
+// RespHeaderTmpl 是响应头规则页面模板
+var RespHeaderTmpl *template.Template
+
+// DLPTmpl 是DLP规则页面模板
+var DLPTmpl *template.Template
+
+// APISchemaTmpl 是API Schema页面模板
+var APISchemaTmpl *template.Template
+
+// IntelConfigTmpl 是情报中心配置页面模板
+var IntelConfigTmpl *template.Template
+
+// IntelSyncTmpl 是情报中心同步页面模板
+var IntelSyncTmpl *template.Template
+
+// IntelAuditTmpl 是情报中心审计页面模板
+var IntelAuditTmpl *template.Template
+
+// TrendTmpl 是趋势分析页面模板
+var TrendTmpl *template.Template
 
 // InitTemplates 初始化所有模板，返回错误而不是panic
 func InitTemplates() error {
@@ -166,6 +215,11 @@ func InitTemplates() error {
 		return fmt.Errorf("加载管理日志模板失败: %w", err)
 	}
 
+	SysLogTmpl, err = template.ParseFS(FS, "sidebar.html", "syslog.html")
+	if err != nil {
+		return fmt.Errorf("加载系统日志模板失败: %w", err)
+	}
+
 	// 加载系统配置页面模板
 	ConfigTmpl, err = template.ParseFS(FS, "sidebar.html", "config.html")
 	if err != nil {
@@ -218,6 +272,90 @@ func InitTemplates() error {
 	PathRateLimitPageTmpl, err = template.ParseFS(FS, "sidebar.html", "pathratelimit.html")
 	if err != nil {
 		return fmt.Errorf("加载路径级限流模板失败: %w", err)
+	}
+
+	// 加载智能限流页面模板
+	SmartLimitTmpl, err = template.ParseFS(FS, "sidebar.html", "smartlimit.html")
+	if err != nil {
+		return fmt.Errorf("加载智能限流模板失败: %w", err)
+	}
+
+	// 加载告警通知页面模板
+	NotifyTmpl, err = template.ParseFS(FS, "sidebar.html", "notify.html")
+	if err != nil {
+		return fmt.Errorf("加载告警通知模板失败: %w", err)
+	}
+
+	// 加载拦截响应配置页面模板
+	BlockPageTmpl, err = template.ParseFS(FS, "sidebar.html", "blockpage.html")
+	if err != nil {
+		return fmt.Errorf("加载拦截响应模板失败: %w", err)
+	}
+
+	// 加载统一系统配置页面模板
+	ConfigSystemTmpl, err = template.ParseFS(FS, "sidebar.html", "config-system.html")
+	if err != nil {
+		return fmt.Errorf("加载系统配置模板失败: %w", err)
+	}
+
+	// 加载Bot管理页面模板
+	BotTmpl, err = template.ParseFS(FS, "sidebar.html", "bot.html")
+	if err != nil {
+		return fmt.Errorf("加载Bot管理模板失败: %w", err)
+	}
+
+	// 加载虚拟补丁页面模板
+	VPatchTmpl, err = template.ParseFS(FS, "sidebar.html", "vpatch.html")
+	if err != nil {
+		return fmt.Errorf("加载虚拟补丁模板失败: %w", err)
+	}
+
+	// 加载合规报告页面模板
+	ComplianceTmpl, err = template.ParseFS(FS, "sidebar.html", "compliance.html")
+	if err != nil {
+		return fmt.Errorf("加载合规报告模板失败: %w", err)
+	}
+
+	// 加载响应头规则页面模板
+	RespHeaderTmpl, err = template.ParseFS(FS, "sidebar.html", "respheader.html")
+	if err != nil {
+		return fmt.Errorf("加载响应头规则模板失败: %w", err)
+	}
+
+	// 加载DLP规则页面模板
+	DLPTmpl, err = template.ParseFS(FS, "sidebar.html", "dlp.html")
+	if err != nil {
+		return fmt.Errorf("加载DLP规则模板失败: %w", err)
+	}
+
+	// 加载API Schema页面模板
+	APISchemaTmpl, err = template.ParseFS(FS, "sidebar.html", "apischema.html")
+	if err != nil {
+		return fmt.Errorf("加载API Schema模板失败: %w", err)
+	}
+
+	// 加载情报中心配置页面模板
+	IntelConfigTmpl, err = template.ParseFS(FS, "sidebar.html", "intel-config.html")
+	if err != nil {
+		return fmt.Errorf("加载情报中心配置模板失败: %w", err)
+	}
+
+	// 加载情报中心同步页面模板
+	IntelSyncTmpl, err = template.ParseFS(FS, "sidebar.html", "intel-sync.html")
+	if err != nil {
+		return fmt.Errorf("加载情报中心同步模板失败: %w", err)
+	}
+
+	// 加载情报中心审计页面模板
+	IntelAuditTmpl, err = template.ParseFS(FS, "sidebar.html", "intel-audit.html")
+	if err != nil {
+		return fmt.Errorf("加载情报中心审计模板失败: %w", err)
+	}
+
+	// 加载趋势分析页面模板
+	TrendTmpl, err = template.ParseFS(FS, "sidebar.html", "trend.html")
+	if err != nil {
+		return fmt.Errorf("加载趋势分析模板失败: %w", err)
 	}
 
 	return nil

@@ -3,21 +3,18 @@ package handler
 import (
 	"encoding/json"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"strconv"
 
-	"gowaf-demo/internal/web/model"
-	"gowaf-demo/internal/web/templates"
+	"gowaf/internal/logger"
+	"gowaf/internal/web/model"
+	"gowaf/internal/web/templates"
 )
 
 // AdminLogPage 管理日志页面
 func AdminLogPage(w http.ResponseWriter, r *http.Request) {
-	data := map[string]interface{}{
-		"Active": "adminlog",
-	}
-	templates.AdminLogTmpl.ExecuteTemplate(w, "adminlog", data)
+	renderPage(w, r, templates.AdminLogTmpl, "adminlog", "adminlog")
 }
 
 // APIAdminLogList 获取管理日志列表
@@ -33,8 +30,8 @@ func APIAdminLogList(w http.ResponseWriter, r *http.Request) {
 
 	// 从配置获取日志文件路径
 	logPath := "./admin.log" // 默认路径
-	if cfg != nil && cfg.Admin.AdminLog != "" {
-		logPath = cfg.Admin.AdminLog
+	if deps.Config != nil && deps.Config.Admin.AdminLog != "" {
+		logPath = deps.Config.Admin.AdminLog
 	}
 
 	// 读取日志文件
@@ -42,12 +39,11 @@ func APIAdminLogList(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// 文件不存在时返回空数组，而不是错误
 		if os.IsNotExist(err) {
-			log.Printf("管理日志文件不存在: %s", logPath)
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]model.AdminLogEntry{})
+			logger.Error("管理日志文件不存在: %s", logPath)
+			jsonSuccess(w, []model.AdminLogEntry{})
 			return
 		}
-		log.Printf("无法打开管理日志文件: %v", err)
+		logger.Error("无法打开管理日志文件: %v", err)
 		jsonError(w, "无法打开日志文件: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -56,29 +52,27 @@ func APIAdminLogList(w http.ResponseWriter, r *http.Request) {
 	// 获取文件大小
 	stat, err := file.Stat()
 	if err != nil {
-		log.Printf("获取文件信息失败: %v", err)
-		jsonError(w, "获取文件信息失败: "+err.Error(), http.StatusInternalServerError)
+		logger.Error("获取文件信息失败: %v", err)
+		dbError(w, "获取文件信息", err)
 		return
 	}
 	fileSize := stat.Size()
 
 	// 如果文件为空，返回空数组
 	if fileSize == 0 {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]model.AdminLogEntry{})
+		jsonSuccess(w, []model.AdminLogEntry{})
 		return
 	}
 
 	// 从文件末尾反向读取，提高性能
 	logs, err := readRecentAdminLogsFromFile(file, fileSize, limit)
 	if err != nil {
-		log.Printf("读取日志文件失败: %v", err)
-		jsonError(w, "读取日志文件失败: "+err.Error(), http.StatusInternalServerError)
+		logger.Error("读取日志文件失败: %v", err)
+		dbError(w, "读取日志文件", err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(logs)
+	jsonSuccess(w, logs)
 }
 
 // readRecentAdminLogsFromFile 从文件末尾读取最近N条管理日志

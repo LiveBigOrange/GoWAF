@@ -2,62 +2,40 @@ package handler
 
 import (
 	"crypto/rand"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"image"
 	"image/color"
 	"image/draw"
 	"image/png"
-	"log"
 	"math/big"
 	"net"
 	"net/http"
 	"sync"
-	"html/template"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
-	"gowaf-demo/internal/backend"
-	"gowaf-demo/internal/config"
-	"gowaf-demo/internal/metrics"
-	"gowaf-demo/internal/proxyconfig"
-	"gowaf-demo/internal/rules"
-	"gowaf-demo/internal/web"
-	"gowaf-demo/internal/web/middleware"
-	"gowaf-demo/internal/web/templates"
+	"gowaf/internal/config"
+	"gowaf/internal/logger"
+	"gowaf/internal/web"
+	"gowaf/internal/web/middleware"
+	"gowaf/internal/web/templates"
 )
 
-var cfg *config.Config
-var RuleEngine *rules.Engine
-var BackendManager *backend.Manager
-var MetricsManager *metrics.Manager
-var ProxyConfigManager *proxyconfig.Manager
 var StaticFS = web.StaticFS
-
-// WAFProxy WAF代理实例,用于动态更新检测器配置
-var WAFProxyInstance interface {
-	ApplyDetectorConfig(detectorType string, enabled bool)
-}
-
-// ProxyServerManager 代理服务器管理器，用于动态更新代理端口
-var ProxyServerManager interface {
-	AddProxy(cfg *proxyconfig.ProxyConfig) error
-	UpdateProxy(cfg *proxyconfig.ProxyConfig) error
-	DeleteProxy(id string) error
-	ReloadAll() error
-}
 
 var cfgMu sync.RWMutex // 保护配置修改的并发安全
 
 // --- 登录暴力破解防护 ---
 
 var (
-	loginAttempts = make(map[string]int)
-	loginBlocked  = make(map[string]time.Time)
-	loginMu       sync.RWMutex
+	loginAttempts       = make(map[string]int)
+	loginAttemptsByUser = make(map[string]int)
+	loginBlocked        = make(map[string]time.Time)
+	loginMu             sync.RWMutex
 )
 
 // 移除硬编码常量,改用配置
@@ -66,37 +44,79 @@ var (
 // 	loginBlockDuration = 15 * time.Minute
 // )
 
-func isLoginBlocked(ip string) bool {
+func isLoginBlocked(ip, username string) bool {
 	loginMu.Lock()
 	defer loginMu.Unlock()
 	blockedUntil, ok := loginBlocked[ip]
-	if !ok {
-		return false
-	}
-	if time.Now().After(blockedUntil) {
+	if ok {
+		if time.Now().Before(blockedUntil) {
+			return true
+		}
 		delete(loginBlocked, ip)
 		delete(loginAttempts, ip)
-		return false
 	}
-	return true
+	if username != "" {
+		userKey := ip + ":" + username
+		blockedUntil, ok = loginBlocked[userKey]
+		if ok {
+			if time.Now().Before(blockedUntil) {
+				return true
+			}
+			delete(loginBlocked, userKey)
+			delete(loginAttemptsByUser, userKey)
+		}
+	}
+	return false
 }
 
-// getSecurityConfig 获取当前的安全配置（优先从数据库）
+func cleanExpiredLoginEntries() {
+	loginMu.Lock()
+	defer loginMu.Unlock()
+	now := time.Now()
+	for ip, blockedUntil := range loginBlocked {
+		if now.After(blockedUntil) {
+			delete(loginBlocked, ip)
+			delete(loginAttempts, ip)
+		}
+	}
+	if len(loginAttempts) > 50000 {
+		cnt := 0
+		for ip := range loginAttempts {
+			if _, ok := loginBlocked[ip]; !ok {
+				delete(loginAttempts, ip)
+				cnt++
+				if cnt >= len(loginAttempts)/2 {
+					break
+				}
+			}
+		}
+	}
+}
+
+var (
+	cachedSecurityConfig    config.SecurityConfig
+	securityConfigCacheTime time.Time
+	securityConfigCacheTTL  = 30 * time.Second
+	securityConfigCacheMu   sync.RWMutex
+)
+
+// getSecurityConfig 获取当前的安全配置（优先从数据库，带30秒内存缓存）
 func getSecurityConfig() config.SecurityConfig {
-	if configDB == nil {
+	now := time.Now()
+	securityConfigCacheMu.RLock()
+	if now.Sub(securityConfigCacheTime) < securityConfigCacheTTL {
+		cached := cachedSecurityConfig
+		securityConfigCacheMu.RUnlock()
+		return cached
+	}
+	securityConfigCacheMu.RUnlock()
+
+	if deps == nil || deps.ConfigDB == nil {
 		return config.GetDefaultRuntimeConfig().Security
 	}
 	var jsonStr string
-	// 使用统一的接口调用，避免复杂的类型断言
-	type Querier interface {
-		QueryRow(string, ...interface{}) *sql.Row
-	}
-	q, ok := configDB.(Querier)
-	if !ok {
-		return config.GetDefaultRuntimeConfig().Security
-	}
 
-	err := q.QueryRow("SELECT value FROM system_config WHERE key='runtime_config'").Scan(&jsonStr)
+	err := deps.ConfigDB.QueryRow("SELECT value FROM system_config WHERE key='runtime_config'").Scan(&jsonStr)
 	if err != nil || jsonStr == "" {
 		return config.GetDefaultRuntimeConfig().Security
 	}
@@ -104,10 +124,16 @@ func getSecurityConfig() config.SecurityConfig {
 	if err := json.Unmarshal([]byte(jsonStr), &rc); err != nil {
 		return config.GetDefaultRuntimeConfig().Security
 	}
+
+	securityConfigCacheMu.Lock()
+	cachedSecurityConfig = rc.Security
+	securityConfigCacheTime = now
+	securityConfigCacheMu.Unlock()
+
 	return rc.Security
 }
 
-func recordLoginFailure(ip string) {
+func recordLoginFailure(ip, username string) {
 	loginMu.Lock()
 	defer loginMu.Unlock()
 	secCfg := getSecurityConfig()
@@ -116,13 +142,26 @@ func recordLoginFailure(ip string) {
 		loginBlocked[ip] = time.Now().Add(time.Duration(secCfg.Login.BlockDuration) * time.Minute)
 		delete(loginAttempts, ip)
 	}
+	if username != "" {
+		userKey := ip + ":" + username
+		loginAttemptsByUser[userKey]++
+		if loginAttemptsByUser[userKey] >= secCfg.Login.MaxAttempts {
+			loginBlocked[userKey] = time.Now().Add(time.Duration(secCfg.Login.BlockDuration) * time.Minute)
+			delete(loginAttemptsByUser, userKey)
+		}
+	}
 }
 
-func clearLoginAttempts(ip string) {
+func clearLoginAttempts(ip, username string) {
 	loginMu.Lock()
 	defer loginMu.Unlock()
 	delete(loginAttempts, ip)
 	delete(loginBlocked, ip)
+	if username != "" {
+		userKey := ip + ":" + username
+		delete(loginAttemptsByUser, userKey)
+		delete(loginBlocked, userKey)
+	}
 }
 
 func getClientIP(r *http.Request) string {
@@ -187,8 +226,7 @@ var captchaFont = map[rune][]string{
 
 // generateCaptcha 生成验证码：返回 (captchaID, answer)
 func generateCaptcha() (string, string) {
-	// 生成4位验证码
-	answer := make([]byte, 4)
+	answer := make([]byte, 5)
 	charsLen := big.NewInt(int64(len(captchaChars)))
 	for i := range answer {
 		n, _ := rand.Int(rand.Reader, charsLen)
@@ -197,7 +235,9 @@ func generateCaptcha() (string, string) {
 
 	// 生成captchaID
 	idBytes := make([]byte, 16)
-	rand.Read(idBytes)
+	if _, err := rand.Read(idBytes); err != nil {
+		idBytes = []byte(fmt.Sprintf("%d", time.Now().UnixNano()))
+	}
 	captchaID := hex.EncodeToString(idBytes)
 
 	captchaMu.Lock()
@@ -328,7 +368,7 @@ func drawCaptchaImage(answer string) *image.RGBA {
 func drawLine(img *image.RGBA, x1, y1, x2, y2 int, c color.Color) {
 	dx := abs(x2 - x1)
 	dy := abs(y2 - y1)
-	steps := max(dx, dy)
+	steps := maxInt(dx, dy)
 	if steps == 0 {
 		return
 	}
@@ -382,7 +422,7 @@ func abs(x int) int {
 	return x
 }
 
-func max(a, b int) int {
+func maxInt(a, b int) int {
 	if a > b {
 		return a
 	}
@@ -411,45 +451,9 @@ func CaptchaHandler(w http.ResponseWriter, r *http.Request) {
 	png.Encode(w, img)
 }
 
-func InitHandlers(c *config.Config, engine *rules.Engine, bm *backend.Manager, mm *metrics.Manager, pcm *proxyconfig.Manager) {
-	cfg = c
-	RuleEngine = engine
-	BackendManager = bm
-	MetricsManager = mm
-	ProxyConfigManager = pcm
-}
-
-// SetWAFProxy 设置WAF代理实例
-func SetWAFProxy(wp interface {
-	ApplyDetectorConfig(detectorType string, enabled bool)
-}) {
-	WAFProxyInstance = wp
-}
-
-// SetProxyServerManager 设置代理服务器管理器
-func SetProxyServerManager(psm interface {
-	AddProxy(cfg *proxyconfig.ProxyConfig) error
-	UpdateProxy(cfg *proxyconfig.ProxyConfig) error
-	DeleteProxy(id string) error
-	ReloadAll() error
-}) {
-	ProxyServerManager = psm
-}
-
-func LoginPage(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" {
-		clientIP := getClientIP(r)
-		blocked := isLoginBlocked(clientIP)
-		secCfg := getSecurityConfig()
-		blockMins := secCfg.Login.BlockDuration
-
-		html := `<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>登录 · GoWAF</title>
-    <style>
+// TODO(C4): LoginPage 和 renderLoginError 中内联了大量HTML，应改为使用模板文件（templates/login.html）。
+// 当前内联HTML方式不利于维护和国际化，建议后续迭代将登录页模板化。
+const loginPageCSS = `
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -486,199 +490,6 @@ func LoginPage(w http.ResponseWriter, r *http.Request) {
         button:disabled { background: #ccc; cursor: not-allowed; }
         .footer { margin-top: 20px; color: #999; font-size: 12px; }
         .blocked { color: #e53e3e; margin-bottom: 15px; font-size: 14px; font-weight: 500; }
-    </style>
-</head>
-<body>
-    <div class="login-card">
-        <h1>GoWAF</h1>
-        <div class="subtitle">Web 应用防火墙</div>`
-		if blocked {
-			html += `<div class="blocked">` + fmt.Sprintf("登录尝试过多，请%d分钟后再试", blockMins) + `</div>
-        <form method="POST" onsubmit="return false;">
-            <div class="input-group">
-                <label>用户名</label>
-                <input type="text" name="username" disabled>
-            </div>
-            <div class="input-group">
-                <label>密码</label>
-                <input type="password" name="password" disabled>
-            </div>
-            <button type="submit" disabled>登录</button>
-        </form>`
-		} else {
-			html += `<form method="POST">
-            <div class="input-group">
-                <label>用户名</label>
-                <input type="text" name="username" placeholder="请输入用户名" required autofocus>
-            </div>
-            <div class="input-group">
-                <label>密码</label>
-                <input type="password" name="password" placeholder="请输入密码" required>
-            </div>
-            <div class="captcha-group">
-                <label>验证码</label>
-                <div class="captcha-row">
-                    <input type="text" name="captcha" placeholder="请输入验证码" required maxlength="4" autocomplete="off">
-                    <img class="captcha-img" id="captchaImg" src="/captcha" onclick="refreshCaptcha()" title="点击刷新验证码">
-                    <span class="captcha-refresh" onclick="refreshCaptcha()" title="刷新验证码">&#x21bb;</span>
-                </div>
-            </div>
-            <button type="submit">登录</button>
-        </form>
-        <script>
-            function refreshCaptcha() {
-                document.getElementById('captchaImg').src = '/captcha?t=' + Date.now();
-            }
-        </script>`
-		}
-		html += `<div class="footer">请使用管理员账户登录</div>
-    </div>
-</body>
-</html>`
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(html))
-		return
-	}
-
-	// POST 登录
-	clientIP := getClientIP(r)
-
-	if isLoginBlocked(clientIP) {
-		secCfg := getSecurityConfig()
-		renderLoginError(w, fmt.Sprintf("登录尝试过多，请%d分钟后再试", secCfg.Login.BlockDuration))
-		return
-	}
-
-	r.ParseForm()
-
-	// 验证验证码
-	captchaIDCookie, err := r.Cookie("captcha_id")
-	if err != nil {
-		renderLoginError(w, "请先获取验证码")
-		return
-	}
-	captchaInput := r.FormValue("captcha")
-	if !validateCaptcha(captchaIDCookie.Value, captchaInput) {
-		recordLoginFailure(clientIP)
-		renderLoginError(w, "验证码错误或已过期")
-		return
-	}
-
-	user := r.FormValue("username")
-	pass := r.FormValue("password")
-	
-	// 优先使用哈希密码验证，兼容旧版明文密码
-	isValid := false
-	cfgMu.RLock()
-	if cfg.Admin.PasswordHash != "" {
-		if user == cfg.Admin.Username && checkPassword(pass, cfg.Admin.PasswordHash) {
-			isValid = true
-		}
-	} else if user == cfg.Auth.Username && pass == cfg.Auth.Password {
-		// 兼容旧的明文配置
-		isValid = true
-	}
-	cfgMu.RUnlock()
-
-	if isValid {
-		clearLoginAttempts(clientIP)
-		token := middleware.GenerateSessionToken()
-		middleware.AddSession(token, user)
-		secCfg := getSecurityConfig()
-		http.SetCookie(w, &http.Cookie{
-			Name:     "session",
-			Value:    token,
-			Path:     "/",
-			HttpOnly: true,
-			Secure:   r.TLS != nil,
-			SameSite: http.SameSiteStrictMode,
-			MaxAge:   secCfg.Session.TTL * 3600, // 使用配置中的Session TTL(小时转秒)
-		})
-		csrfToken := middleware.GenerateSessionToken()
-		http.SetCookie(w, &http.Cookie{
-			Name:     "csrf_token",
-			Value:    csrfToken,
-			Path:     "/",
-			HttpOnly: false,
-			Secure:   r.TLS != nil,
-			SameSite: http.SameSiteStrictMode,
-			MaxAge:   secCfg.Session.TTL * 3600, // 使用配置中的Session TTL(小时转秒)
-		})
-		// 清除captcha_id cookie
-		http.SetCookie(w, &http.Cookie{Name: "captcha_id", MaxAge: -1, Path: "/"})
-		http.Redirect(w, r, "/", http.StatusFound)
-	} else {
-		recordLoginFailure(clientIP)
-		renderLoginError(w, "用户名或密码错误")
-	}
-}
-
-func Logout(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie("session"); err == nil {
-		middleware.RemoveSession(cookie.Value)
-	}
-	http.SetCookie(w, &http.Cookie{Name: "session", MaxAge: -1, Path: "/"})
-	http.Redirect(w, r, "/login", http.StatusFound)
-}
-
-// StartSessionCleaner 启动 session 和 captcha 清理器
-func StartSessionCleaner() {
-	go func() {
-		secCfg := getSecurityConfig()
-		ticker := time.NewTicker(time.Duration(secCfg.Session.CleanupInterval) * time.Minute)
-		defer ticker.Stop()
-		for range ticker.C {
-			middleware.CleanExpiredSessions()
-			cleanExpiredCaptchas()
-		}
-	}()
-}
-
-// renderLoginError 渲染带错误提示的登录页面
-func renderLoginError(w http.ResponseWriter, errorMsg string) {
-	safeMsg := template.HTMLEscapeString(errorMsg)
-	html := `<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>登录 · GoWAF</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .login-card {
-            background: white;
-            border-radius: 16px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
-            width: 400px;
-            padding: 40px;
-            text-align: center;
-        }
-        h1 { font-weight: 500; color: #333; margin-bottom: 10px; }
-        .subtitle { color: #666; margin-bottom: 30px; font-size: 14px; }
-        .input-group { margin-bottom: 20px; text-align: left; }
-        .input-group label { display: block; margin-bottom: 8px; color: #555; font-weight: 500; }
-        .input-group input { width: 100%; padding: 12px 16px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; transition: border 0.2s; }
-        .input-group input:focus { outline: none; border-color: #667eea; }
-        .captcha-group { margin-bottom: 20px; text-align: left; }
-        .captcha-group label { display: block; margin-bottom: 8px; color: #555; font-weight: 500; }
-        .captcha-row { display: flex; gap: 8px; align-items: center; }
-        .captcha-row input { width: 120px; padding: 12px 16px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; letter-spacing: 4px; text-transform: uppercase; }
-        .captcha-row input:focus { outline: none; border-color: #667eea; }
-        .captcha-img { border-radius: 8px; cursor: pointer; height: 46px; border: 1px solid #ddd; }
-        .captcha-refresh { color: #667eea; cursor: pointer; font-size: 22px; width: 36px; height: 46px; display: flex; align-items: center; justify-content: center; border: 1px solid #ddd; border-radius: 8px; background: #f8f9fa; }
-        .captcha-refresh:hover { color: #5a67d8; background: #eef; border-color: #667eea; }
-        button { width: 100%; padding: 12px; background: #667eea; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer; transition: background 0.2s; }
-        button:hover { background: #5a67d8; }
-        button:disabled { background: #ccc; cursor: not-allowed; }
-        .footer { margin-top: 20px; color: #999; font-size: 12px; }
         .error-msg {
             background: #fee;
             border: 1px solid #fcc;
@@ -692,15 +503,40 @@ func renderLoginError(w http.ResponseWriter, errorMsg string) {
         @keyframes fadeOut {
             from { opacity: 1; max-height: 100px; margin-bottom: 20px; padding: 12px; }
             to { opacity: 0; max-height: 0; margin-bottom: 0; padding: 0; border: none; }
-        }
-    </style>
+        }`
+
+func renderLoginHTML(r *http.Request, errorMsg string, blocked bool, blockMins int) string {
+	html := `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 · GoWAF</title>
+    <style>` + loginPageCSS + `</style>
 </head>
 <body>
     <div class="login-card">
         <h1>GoWAF</h1>
-        <div class="subtitle">Web 应用防火墙</div>
-        <div class="error-msg" id="errorMsg">` + safeMsg + `</div>
-        <form method="POST">
+        <div class="subtitle">Web 应用防火墙</div>`
+	if errorMsg != "" {
+		safeMsg := template.HTMLEscapeString(errorMsg)
+		html += `<div class="error-msg" id="errorMsg">` + safeMsg + `</div>`
+	}
+	if blocked {
+		html += `<div class="blocked">登录尝试过多，请` + fmt.Sprintf("%d", blockMins) + `分钟后再试</div>
+        <form method="POST" onsubmit="return false;">
+            <div class="input-group">
+                <label>用户名</label>
+                <input type="text" name="username" disabled>
+            </div>
+            <div class="input-group">
+                <label>密码</label>
+                <input type="password" name="password" disabled>
+            </div>
+            <button type="submit" disabled>登录</button>
+        </form>`
+	} else {
+		html += `<form method="POST">
             <div class="input-group">
                 <label>用户名</label>
                 <input type="text" name="username" placeholder="请输入用户名" required autofocus>
@@ -712,29 +548,162 @@ func renderLoginError(w http.ResponseWriter, errorMsg string) {
             <div class="captcha-group">
                 <label>验证码</label>
                 <div class="captcha-row">
-                    <input type="text" name="captcha" placeholder="请输入验证码" required maxlength="4" autocomplete="off">
+                    <input type="text" name="captcha" placeholder="请输入验证码" required maxlength="5" autocomplete="off">
                     <img class="captcha-img" id="captchaImg" src="/captcha" onclick="refreshCaptcha()" title="点击刷新验证码">
                     <span class="captcha-refresh" onclick="refreshCaptcha()" title="刷新验证码">&#x21bb;</span>
                 </div>
             </div>
             <button type="submit">登录</button>
         </form>
-        <script>
+        <script nonce="` + middleware.GetCSPNonce(r) + `">
             function refreshCaptcha() {
                 document.getElementById('captchaImg').src = '/captcha?t=' + Date.now();
-            }
-            // 3秒后自动隐藏错误提示
+            }`
+		if errorMsg != "" {
+			html += `
             setTimeout(function() {
                 var errorMsgEl = document.getElementById('errorMsg');
                 if (errorMsgEl) {
                     errorMsgEl.style.display = 'none';
                 }
-            }, 3500);
-        </script>
-        <div class="footer">请使用管理员账户登录</div>
+            }, 3500);`
+		}
+		html += `
+        </script>`
+	}
+	html += `<div class="footer">请使用管理员账户登录</div>
     </div>
 </body>
 </html>`
+	return html
+}
+
+func LoginPage(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" {
+		clientIP := getClientIP(r)
+		blocked := isLoginBlocked(clientIP, "")
+		secCfg := getSecurityConfig()
+		html := renderLoginHTML(r, "", blocked, secCfg.Login.BlockDuration)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(html))
+		return
+	}
+
+	// POST 登录
+	clientIP := getClientIP(r)
+
+	if isLoginBlocked(clientIP, "") {
+		secCfg := getSecurityConfig()
+		renderLoginError(w, r, fmt.Sprintf("登录尝试过多，请%d分钟后再试", secCfg.Login.BlockDuration))
+		return
+	}
+
+	r.ParseForm()
+
+	// 验证验证码
+	captchaIDCookie, err := r.Cookie("captcha_id")
+	if err != nil {
+		renderLoginError(w, r, "请先获取验证码")
+		return
+	}
+	captchaInput := r.FormValue("captcha")
+	if !validateCaptcha(captchaIDCookie.Value, captchaInput) {
+		recordLoginFailure(clientIP, "")
+		renderLoginError(w, r, "验证码错误或已过期")
+		return
+	}
+
+	user := r.FormValue("username")
+	pass := r.FormValue("password")
+
+	if isLoginBlocked(clientIP, user) {
+		secCfg := getSecurityConfig()
+		renderLoginError(w, r, fmt.Sprintf("此账户登录尝试过多，请%d分钟后再试", secCfg.Login.BlockDuration))
+		return
+	}
+
+	// 验证用户凭据（优先查users表，fallback到config admin）
+	isValid := ValidateUserCredentials(user, pass)
+
+	if isValid {
+		clearLoginAttempts(clientIP, user)
+		if oldCookie, oldErr := r.Cookie("session"); oldErr == nil && oldCookie.Value != "" {
+			middleware.RemoveSession(oldCookie.Value)
+		}
+		token := middleware.GenerateSessionToken()
+		csrfToken := middleware.GenerateSessionToken()
+		if token == "" || csrfToken == "" {
+			jsonError(w, "Failed to generate secure token", http.StatusInternalServerError)
+			return
+		}
+		middleware.AddSessionWithCSRF(token, user, csrfToken)
+		secCfg := getSecurityConfig()
+		http.SetCookie(w, &http.Cookie{
+			Name:     "session",
+			Value:    token,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   true,
+			SameSite: http.SameSiteStrictMode,
+			MaxAge:   secCfg.Session.TTL * 3600,
+		})
+		http.SetCookie(w, &http.Cookie{
+			Name:     "csrf_token",
+			Value:    csrfToken,
+			Path:     "/",
+			HttpOnly: false,
+			Secure:   true,
+			SameSite: http.SameSiteStrictMode,
+			MaxAge:   secCfg.Session.TTL * 3600,
+		})
+		// 清除captcha_id cookie
+		http.SetCookie(w, &http.Cookie{Name: "captcha_id", MaxAge: -1, Path: "/"})
+		http.Redirect(w, r, "/", http.StatusFound)
+	} else {
+		recordLoginFailure(clientIP, user)
+		renderLoginError(w, r, "用户名或密码错误")
+	}
+}
+
+func Logout(w http.ResponseWriter, r *http.Request) {
+	if cookie, err := r.Cookie("session"); err == nil {
+		middleware.RemoveSession(cookie.Value)
+	}
+	http.SetCookie(w, &http.Cookie{Name: "session", MaxAge: -1, Path: "/"})
+	http.Redirect(w, r, "/login", http.StatusFound)
+}
+
+var sessionCleanerStop = make(chan struct{})
+
+// StartSessionCleaner 启动 session 和 captcha 清理器
+func StartSessionCleaner() {
+	go func() {
+		secCfg := getSecurityConfig()
+		ticker := time.NewTicker(time.Duration(secCfg.Session.CleanupInterval) * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-sessionCleanerStop:
+				return
+			case <-ticker.C:
+				middleware.CleanExpiredSessions()
+				cleanExpiredCaptchas()
+				cleanExpiredLoginEntries()
+				cleanPasswordChangeEntries()
+				cleanAPIKeyCreateEntries()
+			}
+		}
+	}()
+}
+
+// StopSessionCleaner 停止 session 清理器
+func StopSessionCleaner() {
+	close(sessionCleanerStop)
+}
+
+// renderLoginError 渲染带错误提示的登录页面
+func renderLoginError(w http.ResponseWriter, r *http.Request, errorMsg string) {
+	html := renderLoginHTML(r, errorMsg, false, 0)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(html))
 }
@@ -742,10 +711,36 @@ func renderLoginError(w http.ResponseWriter, errorMsg string) {
 // ChangePasswordPage 修改密码页面
 func ChangePasswordPage(w http.ResponseWriter, r *http.Request) {
 	// 直接使用 templates 包下的变量
-	data := map[string]interface{}{
-		"Active": "change_password",
+	renderPage(w, r, templates.ChangePasswordTmpl, "change_password", "change_password")
+}
+
+var (
+	passwordChangeAttempts = make(map[string]int)
+	passwordChangeMu       sync.RWMutex
+)
+
+func isPasswordChangeBlocked(ip string) bool {
+	passwordChangeMu.Lock()
+	defer passwordChangeMu.Unlock()
+	count := passwordChangeAttempts[ip]
+	if count >= 3 {
+		return true
 	}
-	templates.ChangePasswordTmpl.ExecuteTemplate(w, "change_password", data)
+	passwordChangeAttempts[ip] = count + 1
+	return false
+}
+
+func cleanPasswordChangeEntries() {
+	passwordChangeMu.Lock()
+	defer passwordChangeMu.Unlock()
+	if len(passwordChangeAttempts) > 10000 {
+		for ip := range passwordChangeAttempts {
+			delete(passwordChangeAttempts, ip)
+			if len(passwordChangeAttempts) < 100 {
+				break
+			}
+		}
+	}
 }
 
 // APIChangePassword 修改密码接口
@@ -756,45 +751,86 @@ func APIChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"error": "无效的请求格式"})
+		jsonError(w, "无效的请求格式", http.StatusBadRequest)
+		return
+	}
+
+	if req.OldPassword == "" {
+		jsonError(w, "原密码不能为空", http.StatusBadRequest)
+		return
+	}
+
+	if err := validatePasswordStrength(req.NewPassword); err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	clientIP := getClientIP(r)
+	if isPasswordChangeBlocked(clientIP) {
+		jsonError(w, "密码修改次数过多，请稍后再试", http.StatusTooManyRequests)
 		return
 	}
 
 	cfgMu.RLock()
-	currentHash := cfg.Admin.PasswordHash
+	currentHash := deps.Config.Admin.PasswordHash
 	cfgMu.RUnlock()
 
 	if !checkPassword(req.OldPassword, currentHash) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"error": "原密码错误"})
+		jsonError(w, "原密码错误", http.StatusUnauthorized)
 		return
 	}
 
 	newHash, err := hashPassword(req.NewPassword)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"error": "密码加密失败"})
+		jsonError(w, "密码加密失败", http.StatusInternalServerError)
 		return
 	}
 
-	// 更新配置
 	cfgMu.Lock()
-	cfg.Admin.PasswordHash = newHash
-	// 同步更新 Auth 字段以确保兼容性，但实际验证将优先使用 Hash
-	cfg.Auth.Password = "" // 清空明文，强制使用哈希验证
+	deps.Config.Admin.PasswordHash = newHash
+	deps.Config.Auth.Password = ""
 	cfgMu.Unlock()
 
-	// 持久化到数据库
-	if configDB != nil {
-		_, err := configDB.Exec("UPDATE system_config SET value=? WHERE key='admin_password_hash'", newHash)
+	if deps.ConfigDB != nil {
+		_, err := deps.ConfigDB.Exec("UPDATE system_config SET value=? WHERE key='admin_password_hash'", newHash)
 		if err != nil {
-			log.Printf("Failed to save new password to DB: %v", err)
+			logger.Warn("密码保存到数据库失败: %v", err)
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "密码修改成功，请重新登录"})
+	jsonSuccess(w, map[string]string{"message": "密码修改成功，请重新登录"})
+}
+
+func validatePasswordStrength(password string) error {
+	if len(password) < 8 {
+		return fmt.Errorf("密码长度不能少于8位")
+	}
+	if len(password) > 128 {
+		return fmt.Errorf("密码长度不能超过128位")
+	}
+	hasUpper := false
+	hasLower := false
+	hasDigit := false
+	for _, c := range password {
+		switch {
+		case c >= 'A' && c <= 'Z':
+			hasUpper = true
+		case c >= 'a' && c <= 'z':
+			hasLower = true
+		case c >= '0' && c <= '9':
+			hasDigit = true
+		}
+	}
+	if !hasUpper {
+		return fmt.Errorf("密码必须包含大写字母")
+	}
+	if !hasLower {
+		return fmt.Errorf("密码必须包含小写字母")
+	}
+	if !hasDigit {
+		return fmt.Errorf("密码必须包含数字")
+	}
+	return nil
 }
 
 // checkPassword 检查密码是否匹配哈希

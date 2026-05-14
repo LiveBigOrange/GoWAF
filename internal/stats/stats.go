@@ -6,17 +6,19 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gowaf-demo/internal/timeutil"
+	"gowaf/internal/timeutil"
 )
 
 var (
 	totalRequests   uint64
 	blockedRequests uint64
 	errorRequests   uint64 // 错误请求数（4xx+5xx）
-	totalLatency    uint64 // 总延迟（毫秒）
-	activeConns     uint64 // 活跃连接数
 	networkBytesIn  uint64 // 网络入站字节数
 	networkBytesOut uint64 // 网络出站字节数
+)
+
+var (
+	activeConns uint64 // 活跃连接数
 )
 
 var (
@@ -24,18 +26,24 @@ var (
 	lastSecondTimestamp int64
 )
 
+var (
+	latencyWindow     [60]uint64
+	latencyWindowIdx  uint64
+	latencyWindowLock sync.Mutex
+)
+
 // TOP 统计相关
 var (
-	topMutex          sync.RWMutex
-	blockedIPs        = make(map[string]int)
-	blockedPaths      = make(map[string]int)
-	ruleHits          = make(map[string]int)
-	blockedIPsTime    = make(map[string]time.Time)
-	blockedPathsTime  = make(map[string]time.Time)
-	ruleHitsTime      = make(map[string]time.Time)
-	blockedIPsRules   = make(map[string]map[string]int)
+	topMutex            sync.RWMutex
+	blockedIPs          = make(map[string]int)
+	blockedPaths        = make(map[string]int)
+	ruleHits            = make(map[string]int)
+	blockedIPsTime      = make(map[string]time.Time)
+	blockedPathsTime    = make(map[string]time.Time)
+	ruleHitsTime        = make(map[string]time.Time)
+	blockedIPsRules     = make(map[string]map[string]int)
 	blockedPathsMethods = make(map[string]map[string]int)
-	blockedPathsIPs    = make(map[string]map[string]int)
+	blockedPathsIPs     = make(map[string]map[string]int)
 )
 
 const maxTopEntries = 10000
@@ -79,11 +87,17 @@ func CleanupTopStats() {
 func IncTotal() {
 	atomic.AddUint64(&totalRequests, 1)
 	now := time.Now().Unix()
-	if atomic.LoadInt64(&lastSecondTimestamp) == now {
-		atomic.AddUint64(&lastSecondRequests, 1)
-	} else {
-		atomic.StoreInt64(&lastSecondTimestamp, now)
-		atomic.StoreUint64(&lastSecondRequests, 1)
+	for {
+		old := atomic.LoadInt64(&lastSecondTimestamp)
+		if old == now {
+			atomic.AddUint64(&lastSecondRequests, 1)
+			break
+		}
+		if atomic.CompareAndSwapInt64(&lastSecondTimestamp, old, now) {
+			atomic.StoreUint64(&lastSecondRequests, 1)
+			break
+		}
+		// CAS failed: another goroutine updated timestamp, retry
 	}
 }
 
@@ -154,51 +168,65 @@ func IncError() {
 	atomic.AddUint64(&errorRequests, 1)
 }
 
-// AddLatency 增加延迟统计
 func AddLatency(latencyMs uint64) {
-	atomic.AddUint64(&totalLatency, latencyMs)
+	latencyWindowLock.Lock()
+	idx := latencyWindowIdx % 60
+	latencyWindow[idx] = latencyMs
+	latencyWindowIdx++
+	latencyWindowLock.Unlock()
 }
 
-// IncActiveConn 增加活跃连接
 func IncActiveConn() {
 	atomic.AddUint64(&activeConns, 1)
 }
 
-// DecActiveConn 减少活跃连接
 func DecActiveConn() {
 	if atomic.LoadUint64(&activeConns) > 0 {
 		atomic.AddUint64(&activeConns, ^uint64(0))
 	}
 }
 
-// GetErrorRate 获取错误率
 func GetErrorRate() float64 {
 	total := atomic.LoadUint64(&totalRequests)
-	if total == 0 {
+	blocked := atomic.LoadUint64(&blockedRequests)
+	all := total + blocked
+	if all == 0 {
 		return 0
 	}
 	errors := atomic.LoadUint64(&errorRequests)
-	return float64(errors) / float64(total) * 100
+	return float64(errors) / float64(all) * 100
 }
 
-// GetBlockRate 获取拦截率
 func GetBlockRate() float64 {
 	total := atomic.LoadUint64(&totalRequests)
-	if total == 0 {
+	blocked := atomic.LoadUint64(&blockedRequests)
+	all := total + blocked
+	if all == 0 {
 		return 0
 	}
-	blocked := atomic.LoadUint64(&blockedRequests)
-	return float64(blocked) / float64(total) * 100
+	return float64(blocked) / float64(all) * 100
 }
 
-// GetAvgLatency 获取平均延迟
 func GetAvgLatency() float64 {
-	total := atomic.LoadUint64(&totalRequests)
-	if total == 0 {
+	latencyWindowLock.Lock()
+	defer latencyWindowLock.Unlock()
+	count := latencyWindowIdx
+	if count == 0 {
 		return 0
 	}
-	latency := atomic.LoadUint64(&totalLatency)
-	return float64(latency) / float64(total)
+	start := uint64(0)
+	if count > 60 {
+		start = count - 60
+	}
+	var total uint64
+	samples := count - start
+	for i := start; i < count; i++ {
+		total += latencyWindow[i%60]
+	}
+	if samples == 0 {
+		return 0
+	}
+	return float64(total) / float64(samples)
 }
 
 // GetActiveConns 获取活跃连接数
@@ -219,12 +247,12 @@ func GetNetworkStats() (bytesIn, bytesOut uint64) {
 
 // BusinessStats 业务统计
 type BusinessStats struct {
-	ErrorRate    float64 `json:"error_rate"`    // 错误率
-	BlockRate    float64 `json:"block_rate"`    // 拦截率
-	AvgLatency   float64 `json:"avg_latency"`   // 平均延迟
-	ActiveConns  uint64  `json:"active_conns"`  // 活跃连接
-	NetworkIn    uint64  `json:"network_in"`    // 网络入站字节
-	NetworkOut   uint64  `json:"network_out"`   // 网络出站字节
+	ErrorRate   float64 `json:"error_rate"`   // 错误率
+	BlockRate   float64 `json:"block_rate"`   // 拦截率
+	AvgLatency  float64 `json:"avg_latency"`  // 平均延迟
+	ActiveConns uint64  `json:"active_conns"` // 活跃连接
+	NetworkIn   uint64  `json:"network_in"`   // 网络入站字节
+	NetworkOut  uint64  `json:"network_out"`  // 网络出站字节
 }
 
 // GetBusinessStats 获取业务统计
@@ -242,18 +270,17 @@ func GetBusinessStats() BusinessStats {
 
 // TopItem TOP 统计项
 type TopItem struct {
-	Name          string            `json:"name"`
-	Count         int               `json:"count"`
+	Name          string             `json:"name"`
+	Count         int                `json:"count"`
 	LastSeen      timeutil.LocalTime `json:"last_seen,omitempty"`
-	RuleTypes     map[string]int    `json:"rule_types,omitempty"`
-	SourceIPCount int               `json:"source_ip_count,omitempty"`
-	Methods       map[string]int    `json:"methods,omitempty"`
-	RiskLevel     string            `json:"risk_level,omitempty"`
-	RuleType      string            `json:"rule_type,omitempty"`
-	GeoCountry    string            `json:"geo_country,omitempty"`
-	GeoFlag       string            `json:"geo_flag,omitempty"`
+	RuleTypes     map[string]int     `json:"rule_types,omitempty"`
+	SourceIPCount int                `json:"source_ip_count,omitempty"`
+	Methods       map[string]int     `json:"methods,omitempty"`
+	RiskLevel     string             `json:"risk_level,omitempty"`
+	RuleType      string             `json:"rule_type,omitempty"`
+	GeoCountry    string             `json:"geo_country,omitempty"`
+	GeoFlag       string             `json:"geo_flag,omitempty"`
 }
-
 
 // GetTopBlockedIPs 获取被拦截最多的 IP（TOP N）
 func GetTopBlockedIPs(n int) []TopItem {

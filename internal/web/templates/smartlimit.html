@@ -1,0 +1,460 @@
+{{define "smartlimit"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能拦截 - GoWAF</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <link rel="stylesheet" href="/static/css/smartlimit.css">
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main scroll-page">
+        <div class="card">
+            <div class="card-header">
+                <h2>智能拦截引擎</h2>
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <span class="status-badge" id="statusBadge">加载中...</span>
+                    <button class="btn btn-sm" id="toggleBtn" onclick="toggleEngine()">启用</button>
+                    <button class="btn btn-sm" id="modeBtn" onclick="toggleMode()" title="切换观测/拦截模式">拦截模式</button>
+                    <label style="font-size:12px;color:#596275;cursor:pointer;display:flex;align-items:center;gap:4px;">
+                        <input type="checkbox" id="autoRefresh" checked style="margin:0;"> 自动刷新
+                    </label>
+                </div>
+            </div>
+            <div class="stats-grid">
+                <div class="stat-item"><div class="label">全局 QPS</div><div class="value" id="globalQps">-</div></div>
+                <div class="stat-item"><div class="label">画像数量</div><div class="value" id="profileCount">-</div></div>
+                <div class="stat-item"><div class="label">窗口大小</div><div class="value" id="windowSize">-</div></div>
+                <div class="stat-item"><div class="label">画像有效期</div><div class="value" id="maxAge">-</div></div>
+            </div>
+            <div class="info-grid">
+                <div class="info-card info-blue">
+                    <div class="info-card-title">🧠 智能拦截原理</div>
+                    <div class="info-card-desc">基于滑动窗口多维度加权评分，综合请求速率-拦截率-错误率-路径多样性-UA多样性-请求间隔方差-敏感路径命中 等13项指标。</div>
+                </div>
+                <div class="info-card info-green">
+                    <div class="info-card-title">🛡️ 信任体系</div>
+                    <div class="info-card-desc">正常请求积累信用分(+0.1/请求，每10请求额外+1)，异常扣分(拦截-2，错误-1)。信任越高阈值越宽松(最高5倍)，信任越低阈值越严格(最低0.2倍)。</div>
+                </div>
+                <div class="info-card info-orange">
+                    <div class="info-card-title">⚡ 智能增强</div>
+                    <div class="info-card-desc">浏览器指纹追踪跨IP攻击者 | 攻击链检测(侦察→扫描→利用) | 24h时段行为画像 | 攻击类型自动学习加权 | 误报自动修复。</div>
+                </div>
+                <div class="info-card info-purple">
+                    <div class="info-card-title">📈 梯度响应</div>
+                    <div class="info-card-desc">评分接近阈值时先 Slowdown(降速) → Throttle(限流) → Challenge(人机验证) → Block(拦截)，渐进式而非一刀切。</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-bar">
+            <div class="tab active" data-tab="config" onclick="switchTab('config')">检测阈值</div>
+            <div class="tab" data-tab="weights" onclick="switchTab('weights')">评分权重</div>
+            <div class="tab" data-tab="intel" onclick="switchTab('intel')">智能增强</div>
+            <div class="tab" data-tab="profiles" onclick="switchTab('profiles')">行为画像</div>
+        </div>
+
+        <!-- 检测阈值 -->
+        <div class="tab-content active" id="tab-config">
+            <div class="card">
+                <!-- 请求阈值 -->
+                <div class="section-group" style="background:transparent;padding:0;">
+                    <div class="section-group-title">
+                        <span class="group-indicator group-indicator-blue"></span> 请求阈值
+                    </div>
+                    <div class="form-row-2col">
+                        <div class="form-group">
+                            <label>IP请求速率阈值 (次/窗口)</label>
+                            <input type="number" id="ipRequestThreshold" min="1" max="10000">
+                            <div class="hint">窗口内单IP最大请求次数，默认100</div>
+                        </div>
+                        <div class="form-group">
+                            <label>IP拦截速率阈值 (次/窗口)</label>
+                            <input type="number" id="ipBlockThreshold" min="1" max="1000">
+                            <div class="hint">窗口内单IP最大拦截次数，默认10</div>
+                        </div>
+                        <div class="form-group">
+                            <label>全局QPS阈值</label>
+                            <input type="number" id="globalQpsThreshold" min="100" max="100000">
+                            <div class="hint">全局每秒最大请求数，默认5000</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 决策阈值 -->
+                <div class="section-group" style="background:transparent;padding:0;">
+                    <div class="section-group-title">
+                        <span class="group-indicator group-indicator-red"></span> 决策阈值
+                    </div>
+                    <div class="form-row-2col">
+                        <div class="form-group">
+                            <label>Block 阈值 (直接拦截)</label>
+                            <input type="number" id="blockThreshold" min="0" max="2" step="0.05">
+                            <div class="hint">评分≥此值直接拦截，默认0.8</div>
+                        </div>
+                        <div class="form-group">
+                            <label>Challenge 阈值 (人机验证)</label>
+                            <input type="number" id="challengeThreshold" min="0" max="2" step="0.05">
+                            <div class="hint">评分≥此值触发验证，默认0.5</div>
+                        </div>
+                        <div class="form-group">
+                            <label>Throttle 阈值 (限流)</label>
+                            <input type="number" id="throttleThreshold" min="0" max="2" step="0.05">
+                            <div class="hint">评分≥此值限流降速，默认0.3</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 异常检测 - 流量异常 -->
+                <div class="section-group">
+                    <div class="section-group-title">
+                        <span class="group-indicator group-indicator-orange"></span> 异常检测 - 流量异常
+                    </div>
+                    <div class="form-row-2col">
+                        <div class="form-group">
+                            <label>错误率阈值</label>
+                            <input type="number" id="errorRatioThreshold" min="0" max="1" step="0.05">
+                            <div class="hint">错误响应占比阈值，默认0.5</div>
+                        </div>
+                        <div class="form-group">
+                            <label>请求体大小阈值 (bytes)</label>
+                            <input type="number" id="bodySizeThreshold" min="0" max="10485760">
+                            <div class="hint">带请求体请求次数阈值，默认1048576(1MB)</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 异常检测 - 行为异常 -->
+                <div class="section-group">
+                    <div class="section-group-title">
+                        <span class="group-indicator group-indicator-purple"></span> 异常检测 - 行为异常
+                    </div>
+                    <div class="form-row-2col">
+                        <div class="form-group">
+                            <label>路径多样性阈值</label>
+                            <input type="number" id="pathDivThreshold" min="1" max="500">
+                            <div class="hint">窗口内唯一路径数，默认50</div>
+                        </div>
+                        <div class="form-group">
+                            <label>UA多样性阈值</label>
+                            <input type="number" id="uaDivThreshold" min="1" max="50">
+                            <div class="hint">窗口内唯一UA数，默认3</div>
+                        </div>
+                        <div class="form-group">
+                            <label>方法多样性阈值</label>
+                            <input type="number" id="methodDivThreshold" min="1" max="20">
+                            <div class="hint">HTTP方法种类数阈值，默认4</div>
+                        </div>
+                    </div>
+                    <div class="form-row-2col">
+                        <div class="form-group">
+                            <label>敏感路径命中限制</label>
+                            <input type="number" id="sensitivePathLimit" min="1" max="100">
+                            <div class="hint">敏感路径访问次数限制，默认3</div>
+                        </div>
+                        <div class="form-group">
+                            <label>间隔方差最小值</label>
+                            <input type="number" id="intervalVarMin" min="0" max="1" step="0.0001">
+                            <div class="hint">间隔方差低于此值视为机器行为，默认0.001</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 异常检测 - 协议异常 -->
+                <div class="section-group">
+                    <div class="section-group-title">
+                        <span class="group-indicator group-indicator-cyan"></span> 异常检测 - 协议异常
+                    </div>
+                    <div class="form-row-2col">
+                        <div class="form-group">
+                            <label>规则命中多样性阈值</label>
+                            <input type="number" id="ruleDivThreshold" min="1" max="50">
+                            <div class="hint">窗口内命中规则种类数，默认5</div>
+                        </div>
+                        <div class="form-group">
+                            <label>无Cookie比率阈值</label>
+                            <input type="number" id="noCookieRatioThreshold" min="0" max="1" step="0.05">
+                            <div class="hint">无Cookie请求占比阈值，默认0.8</div>
+                        </div>
+                        <div class="form-group">
+                            <label>无Referer比率阈值</label>
+                            <input type="number" id="noRefererRatioThreshold" min="0" max="1" step="0.05">
+                            <div class="hint">无Referer请求占比阈值，默认0.8</div>
+                        </div>
+                    </div>
+                    <div class="form-row-2col">
+                        <div class="form-group">
+                            <label>国家/地区变化阈值</label>
+                            <input type="number" id="asnChangeThreshold" min="1" max="20">
+                            <div class="hint">同一IP国家变化次数阈值，默认2</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 自适应基线 -->
+                <div class="section-group" style="background:transparent;padding:0;">
+                    <div class="section-group-title">
+                        <span class="group-indicator group-indicator-green"></span> 自适应基线
+                    </div>
+                    <div class="form-row-2col">
+                        <div class="form-group">
+                            <label>自适应学习</label>
+                            <select id="adaptiveEnabled">
+                                <option value="true">启用</option>
+                                <option value="false">禁用</option>
+                            </select>
+                            <div class="hint">根据历史行为自动调整基线</div>
+                        </div>
+                        <div class="form-group">
+                            <label>灵敏度倍数</label>
+                            <input type="number" id="sensitivity" min="1" max="5" step="0.5">
+                            <div class="hint">基线乘以此倍数作为告警线，默认2.0</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 白名单 -->
+                <div class="section-group" style="background:transparent;padding:0;">
+                    <div class="section-group-title">
+                        <span class="group-indicator group-indicator-blue"></span> 白名单IP (跳过智能拦截评估)
+                    </div>
+                    <div class="whitelist-area">
+                        <div class="form-group">
+                            <label>白名单IP列表 (每行一个IP，支持CIDR如 10.0.0.0/8)</label>
+                            <textarea class="whitelist-textarea" id="whitelistIPs" placeholder="192.168.1.0/24&#10;10.0.0.1"></textarea>
+                            <div class="hint">白名单中的IP将跳过智能拦截评估，直接放行</div>
+                        </div>
+                        <div class="whitelist-tags" id="whitelistTags"></div>
+                    </div>
+                </div>
+
+                <!-- 限流键策略 -->
+                <div class="section-group" style="background:transparent;padding:0;">
+                    <div class="section-group-title">
+                        <span class="group-indicator group-indicator-orange"></span> 限流键策略
+                    </div>
+                    <div class="form-row-2col">
+                        <div class="form-group">
+                            <label>键类型</label>
+                            <select id="ratelimitKeyType" onchange="toggleRatelimitKeyExtra()">
+                                <option value="ip">IP地址 - 按客户端IP限流</option>
+                                <option value="session">Session - 按会话限流</option>
+                                <option value="api_key">API Key - 按API密钥限流</option>
+                                <option value="cookie">Cookie - 按Cookie值限流</option>
+                                <option value="header">Header - 按请求头限流</option>
+                                <option value="combined">组合键 - 多字段组合限流</option>
+                            </select>
+                            <div class="hint">控制限流时以什么标识区分请求来源</div>
+                        </div>
+                    </div>
+                    <div class="form-row-2col" id="ratelimitKeyExtra" style="display:none;margin-top:8px;">
+                        <div class="form-group">
+                            <label>Header名称</label>
+                            <input type="text" id="ratelimitHeaderName" value="X-API-Key" placeholder="X-API-Key">
+                        </div>
+                        <div class="form-group">
+                            <label>Cookie名称</label>
+                            <input type="text" id="ratelimitCookieName" value="session_id" placeholder="session_id">
+                        </div>
+                        <div class="form-group">
+                            <label>Session键名</label>
+                            <input type="text" id="ratelimitSessionKey" value="SESSIONID" placeholder="SESSIONID">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="btn-group">
+                    <button class="btn btn-primary" onclick="saveConfig()">保存配置</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 评分权重 -->
+        <div class="tab-content" id="tab-weights">
+            <div class="card">
+                <div class="weight-sum-bar sum-ok" id="weightSumBar">
+                    <strong>权重总和：</strong><span id="weightSum">-</span>
+                    <span id="weightSumHint" style="margin-left:8px;font-size:12px;">(应为1.0)</span>
+                </div>
+                <div id="weightList"></div>
+                <div class="btn-group">
+                    <button class="btn btn-primary" onclick="saveConfig()">保存配置</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 智能增强配置 -->
+        <div class="tab-content" id="tab-intel">
+            <div class="card">
+                <!-- 主动检测 -->
+                <div class="collapse-card collapse-blue" id="collapse-detect">
+                    <div class="collapse-header" onclick="toggleCollapse('collapse-detect')">
+                        <div class="collapse-title">🔍 主动检测</div>
+                        <div class="collapse-arrow">▼</div>
+                    </div>
+                    <div class="collapse-body">
+                        <div class="section-title" style="margin-top:0;">攻击链检测</div>
+                        <div class="form-row-2col">
+                            <div class="form-group">
+                                <label>攻击链检测</label>
+                                <select id="attackChainEnabled"><option value="true">启用</option><option value="false">禁用</option></select>
+                                <div class="hint">检测侦察→扫描→利用→外泄攻击序列，匹配杀伤链自动加分</div>
+                            </div>
+                            <div class="form-group">
+                                <label>攻击链权重</label>
+                                <input type="number" id="attackChainWeight" min="0" max="0.5" step="0.01">
+                                <div class="hint">匹配攻击链时的评分加成系数，默认0.08</div>
+                            </div>
+                        </div>
+                        <div class="section-title">浏览器指纹</div>
+                        <div class="form-row-2col">
+                            <div class="form-group">
+                                <label>指纹追踪</label>
+                                <select id="fingerprintEnabled"><option value="true">启用</option><option value="false">禁用</option></select>
+                                <div class="hint">通过 UA/Accept-Lang/CH-UA 生成指纹，同指纹多IP共享风险评分</div>
+                            </div>
+                            <div class="form-group">
+                                <label>标记阈值</label>
+                                <input type="number" id="fingerprintSuspectThreshold" min="5" max="500" step="1">
+                                <div class="hint">同指纹IP数超过此值时自动标记为可疑指纹群，默认20</div>
+                            </div>
+                        </div>
+                        <div class="section-title">时段画像</div>
+                        <div class="form-row-2col">
+                            <div class="form-group">
+                                <label>24小时时段分析</label>
+                                <select id="hourProfileEnabled"><option value="true">启用</option><option value="false">禁用</option></select>
+                                <div class="hint">统计每IP各时段请求量，非正常时段异常行为自动检测</div>
+                            </div>
+                            <div class="form-group">
+                                <label>时段异常权重</label>
+                                <input type="number" id="hourAnomalyWeight" min="0" max="0.5" step="0.01">
+                                <div class="hint">时段异常行为的评分加成系数，默认0.04</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 自动响应 -->
+                <div class="collapse-card collapse-orange" id="collapse-response">
+                    <div class="collapse-header" onclick="toggleCollapse('collapse-response')">
+                        <div class="collapse-title">🚨 自动响应</div>
+                        <div class="collapse-arrow">▼</div>
+                    </div>
+                    <div class="collapse-body">
+                        <div class="section-title" style="margin-top:0;">自动封禁</div>
+                        <div class="form-row-2col">
+                            <div class="form-group">
+                                <label>自动封禁</label>
+                                <select id="autoBlockEnabled"><option value="true">启用</option><option value="false">禁用</option></select>
+                                <div class="hint">IP连续Challenge验证失败达到阈值后自动加入黑名单</div>
+                            </div>
+                            <div class="form-group">
+                                <label>失败次数阈值</label>
+                                <input type="number" id="autoBlockThreshold" min="1" max="10" step="1">
+                                <div class="hint">连续Challenge失败N次后自动封禁，默认3</div>
+                            </div>
+                        </div>
+                        <div class="form-row-2col">
+                            <div class="form-group">
+                                <label>封禁时长(秒)</label>
+                                <input type="number" id="autoBlockDuration" min="60" max="86400" step="60">
+                                <div class="hint">自动封禁的有效时长，默认600秒(10分钟)</div>
+                            </div>
+                        </div>
+                        <div class="section-title">误报自修复</div>
+                        <div class="form-row-2col">
+                            <div class="form-group">
+                                <label>误报自动修复</label>
+                                <select id="falsePositiveRepair"><option value="true">启用</option><option value="false">禁用</option></select>
+                                <div class="hint">连续500次正常请求的IP自动放回白名单并提升信任分</div>
+                            </div>
+                            <div class="form-group">
+                                <label>自动豁免</label>
+                                <select id="autoPardonEnabled"><option value="true">启用</option><option value="false">禁用</option></select>
+                                <div class="hint">自动给误判IP增加+20信任分（上限100）</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 自适应学习 -->
+                <div class="collapse-card collapse-green" id="collapse-learning">
+                    <div class="collapse-header" onclick="toggleCollapse('collapse-learning')">
+                        <div class="collapse-title">📊 自适应学习</div>
+                        <div class="collapse-arrow">▼</div>
+                    </div>
+                    <div class="collapse-body">
+                        <div class="section-title" style="margin-top:0;">自动学习</div>
+                        <div class="form-row-2col">
+                            <div class="form-group">
+                                <label>维度自动加权</label>
+                                <select id="autoWeightEnabled"><option value="true">启用</option><option value="false">禁用</option></select>
+                                <div class="hint">根据实时攻击类型频率自动调整评分维度权重</div>
+                            </div>
+                            <div class="form-group">
+                                <label>权重学习率</label>
+                                <input type="number" id="weightLearningRate" min="0.01" max="0.5" step="0.01">
+                                <div class="hint">权重每次调整的幅度，默认0.05</div>
+                            </div>
+                        </div>
+                        <div class="section-title">动态基线</div>
+                        <div class="form-row-2col">
+                            <div class="form-group">
+                                <label>动态基线百分位</label>
+                                <input type="number" id="dynamicBaselinePct" min="50" max="100" step="1">
+                                <div class="hint">基于历史流量P值自动计算基线阈值，默认95（P95）</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="btn-group">
+                    <button class="btn btn-primary" onclick="saveConfig()">保存配置</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 行为画像 -->
+        <div class="tab-content" id="tab-profiles">
+            <div class="card">
+                <div class="card-header">
+                    <h2>访问行为画像</h2>
+                    <div class="filter-bar">
+                        <input class="search-input" id="searchIP" placeholder="搜索IP..." oninput="filterProfiles()">
+                        <button class="filter-btn active" data-risk="all" onclick="filterByRisk('all')">全部</button>
+                        <button class="filter-btn" data-risk="low" onclick="filterByRisk('low')">低风险</button>
+                        <button class="filter-btn" data-risk="mid" onclick="filterByRisk('mid')">中风险</button>
+                        <button class="filter-btn" data-risk="high" onclick="filterByRisk('high')">高风险</button>
+                        <button class="btn btn-sm btn-primary" onclick="loadProfiles()">刷新</button>
+                    </div>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table class="profile-table">
+                        <thead>
+                            <tr>
+                                <th>IP</th>
+                                <th>请求速率</th>
+                                <th>拦截率</th>
+                                <th>信任分</th>
+                                <th>总请求</th>
+                                <th>最后活跃</th>
+                                <th>风险</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="profileBody"></tbody>
+                    </table>
+                </div>
+                <div class="pagination" id="profilePagination"></div>
+            </div>
+        </div>
+    </div>
+
+<script nonce="{{.CSPNonce}}" src="/static/js/smartlimit_page.js"></script>
+</body>
+</html>
+{{end}}

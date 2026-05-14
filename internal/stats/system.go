@@ -11,11 +11,11 @@ import (
 )
 
 var (
-	startTime  time.Time
-	startOnce  sync.Once
-	lastCPUUsage     float64
-	lastCPUUpdate    time.Time
-	cpuUsageMu       sync.RWMutex
+	startTime     time.Time
+	startOnce     sync.Once
+	lastCPUUsage  float64
+	lastCPUUpdate time.Time
+	cpuUsageMu    sync.RWMutex
 )
 
 // getStartTime 获取服务启动时间（只初始化一次）
@@ -51,8 +51,8 @@ type SystemStats struct {
 	StackSys     uint64  `json:"stack_sys"`      // 栈系统内存
 
 	// ===== 系统资源指标 =====
-	NumThread    int    `json:"num_thread"`     // OS 线程数
-	NumFD        int    `json:"num_fd"`         // 文件描述符数量（仅Unix）
+	NumThread int `json:"num_thread"` // OS 线程数
+	NumFD     int `json:"num_fd"`     // 文件描述符数量（仅Unix）
 }
 
 // GetSystemStats 获取系统性能统计
@@ -99,8 +99,8 @@ func GetSystemStats() SystemStats {
 		StackSys:     m.StackSys,
 
 		// 系统资源指标
-		NumThread: runtime.GOMAXPROCS(0), // 当前使用的线程数
-		NumFD:     0,                      // 文件描述符需要平台特定实现
+		NumThread: runtime.GOMAXPROCS(0),
+		NumFD:     getFDCount(),
 	}
 }
 

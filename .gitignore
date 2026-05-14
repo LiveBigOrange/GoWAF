@@ -32,6 +32,13 @@ config.local.yaml
 .env
 .env.local
 
+# Certificates (运行时生成)
+certs/
+
+# AI assistant
+AGENTS.md
+TASKS.md
+
 # IDE
 .idea/
 .vscode/
@@ -44,6 +51,8 @@ config.local.yaml
 tmp/
 temp/
 *.tmp
+*.bak
+smartlimit_config.json
 
 # Vendor
 vendor/
@@ -51,6 +60,7 @@ vendor/
 # CodeArts
 .arts/
 .codeartsdoer/
+.codemate/
 
 # Deployment
 deploy/*.sh

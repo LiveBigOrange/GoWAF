@@ -1,0 +1,122 @@
+{{define "respheader"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>响应头策略 - GoWAF</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <style>
+    </style>
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main scroll-page">
+        <div class="card">
+            <div class="filter-bar">
+                <button class="add-btn" onclick="openAddModal()">+ 添加规则</button>
+            </div>
+            <table>
+                <thead><tr><th>ID</th><th>域名</th><th>路径正则</th><th>Header</th><th>Value</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody id="ruleList"><tr><td colspan="7" style="text-align:center;color:#95a5a6;">加载中...</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">添加响应头规则</h3>
+                <span class="close" onclick="closeModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editId" value="0">
+                <div class="form-group">
+                    <label>域名</label>
+                    <input id="editDomain" placeholder="* 表示所有域名">
+                    <small>目标域名，* 表示匹配所有域名</small>
+                </div>
+                <div class="form-group">
+                    <label>路径正则</label>
+                    <input id="editPathRegex" placeholder="留空表示所有路径">
+                    <small>Go正则表达式，留空匹配所有路径</small>
+                </div>
+                <div class="form-group">
+                    <label>Header名称</label>
+                    <input id="editHeader" placeholder="X-Content-Type-Options">
+                </div>
+                <div class="form-group">
+                    <label>Header值</label>
+                    <input id="editValue" placeholder="nosniff">
+                </div>
+                <div class="form-group">
+                    <label>启用</label>
+                    <select id="editEnabled">
+                        <option value="true">启用</option>
+                        <option value="false">禁用</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closeModal()">取消</button>
+                <button class="btn-submit" onclick="saveRule()">保存</button>
+            </div>
+        </div>
+    </div>
+    <script nonce="{{.CSPNonce}}">
+    var allRules=[];
+    function loadRules(){
+        WAF.withLoading('.card',function(){
+            return fetch('/api/respheader/list').then(r=>r.json()).then(d=>{
+                if(!d.success) return;
+                allRules=d.data||[];
+                var tbody=document.getElementById('ruleList');
+                if(!allRules.length){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:#95a5a6;">暂无规则</td></tr>';return;}
+                tbody.innerHTML=allRules.map(r=>'<tr><td>'+r.id+'</td><td>'+escapeHtml(r.domain||'*')+'</td><td>'+escapeHtml(r.path_regex||'-')+'</td><td><b>'+escapeHtml(r.header)+'</b></td><td>'+escapeHtml(r.value)+'</td><td>'+WAF.renderToggle(r.enabled,r.id)+'</td><td><button class="btn-edit" data-id="'+r.id+'">编辑</button><button class="delete-btn" data-id="'+r.id+'">删除</button></td></tr>').join('');
+            }).catch(e=>showToast('error','加载规则失败'));
+        });
+    }
+    function openAddModal(){
+        document.getElementById('modalTitle').textContent='添加响应头规则';
+        document.getElementById('editId').value='0';
+        document.getElementById('editDomain').value='*';
+        document.getElementById('editPathRegex').value='';
+        document.getElementById('editHeader').value='';
+        document.getElementById('editValue').value='';
+        document.getElementById('editEnabled').value='true';
+        WAF.Modal.open('editModal');
+    }
+    function openEditModal(r){
+        document.getElementById('modalTitle').textContent='编辑响应头规则';
+        document.getElementById('editId').value=r.id;
+        document.getElementById('editDomain').value=r.domain||'';
+        document.getElementById('editPathRegex').value=r.path_regex||'';
+        document.getElementById('editHeader').value=r.header||'';
+        document.getElementById('editValue').value=r.value||'';
+        document.getElementById('editEnabled').value=r.enabled?'true':'false';
+        WAF.Modal.open('editModal');
+    }
+    function closeModal(){WAF.Modal.close('editModal');}
+    function saveRule(){
+        WAF.submitWithLock('.btn-submit',function(){
+            var id=parseInt(document.getElementById('editId').value);
+            var data={domain:document.getElementById('editDomain').value,path_regex:document.getElementById('editPathRegex').value,header:document.getElementById('editHeader').value,value:document.getElementById('editValue').value,enabled:document.getElementById('editEnabled').value==='true'};
+            if(!data.header){showToast('error','请输入Header名称');return Promise.resolve();}
+            var url=id?'/api/respheader/update':'/api/respheader/add';
+            if(id) data.id=id;
+            return WAF.jsonPost(url,data).then(d=>{
+                if(d.success){showToast('success',id?'更新成功':'添加成功');closeModal();loadRules();}else showToast('error',d.error||'操作失败');
+            }).catch(e=>showToast('error','操作失败: '+e.message));
+        });
+    }
+    WAF.setupTableActions('table tbody',{
+        onEdit:function(id){var r=allRules.find(x=>x.id===id);if(r)openEditModal(r);},
+        onDelete:function(id){WAF.confirmDelete('确认删除此规则？','/api/respheader/delete',{id:id},loadRules);}
+    });
+    WAF.setupToggleSwitch('table tbody','/api/respheader/toggle',loadRules);
+    WAF.Modal.clickOutside('editModal',closeModal);
+    loadRules();
+    </script>
+</body>
+</html>
+{{end}}

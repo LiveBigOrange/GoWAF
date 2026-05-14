@@ -291,7 +291,7 @@
         </div>
     </div>
 
-    <script>
+    <script nonce="{{.CSPNonce}}">
         let originalConfig = {};
         let hasChanges = false;
 
@@ -303,12 +303,13 @@
                     if (!r.ok) throw new Error(`HTTP ${r.status}`);
                     return r.json();
                 })
-                .then(data => {
-                    if (data.error) {
-                        showAlert('error', '❌ ' + data.error);
+                .then(resp => {
+                    if (!resp.success) {
+                        showAlert('error', '❌ ' + (resp.error || '加载失败'));
                         return;
                     }
 
+                    var data = resp.data || {};
                     originalConfig = JSON.parse(JSON.stringify(data));
 
                     document.getElementById('health_check').value     = data.health_check || 5;
@@ -347,8 +348,8 @@
                 return r.json();
             })
             .then(data => {
-                if (data.error) {
-                    showAlert('error', '❌ ' + data.error);
+                if (!data.success) {
+                    showAlert('error', '❌ ' + (data.error || '保存失败'));
                 } else {
                     showAlert('success', '✅ 定时任务配置保存成功！指标清理间隔已生效，其他定时任务配置需重启服务生效。');
                     hasChanges = false;
@@ -377,8 +378,8 @@
                 return r.json();
             })
             .then(data => {
-                if (data.error) {
-                    showAlert('error', '❌ ' + data.error);
+                if (!data.success) {
+                    showAlert('error', '❌ ' + (data.error || '恢复失败'));
                 } else {
                     showAlert('success', '✅ 已恢复默认定时任务配置');
                     setTimeout(loadConfig, 500);

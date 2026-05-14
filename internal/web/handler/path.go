@@ -5,99 +5,67 @@ import (
 	"net/http"
 	"strconv"
 
-	"gowaf-demo/internal/web/templates"
+	"gowaf/internal/web/templates"
 )
 
 func PathPage(w http.ResponseWriter, r *http.Request) {
-	// 处理POST请求
 	if r.Method == "POST" {
-		// 解析multipart/form-data
-		err := r.ParseMultipartForm(10 << 20) // 10MB
+		err := r.ParseMultipartForm(10 << 20)
 		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Failed to parse form data"})
+			jsonError(w, "Failed to parse form data", http.StatusBadRequest)
 			return
 		}
-		
+
 		action := r.FormValue("action")
-		
-		// 处理删除操作
+
 		if action == "delete" {
 			ruleType := r.FormValue("type")
 			pattern := r.FormValue("path")
-			
+
 			if pattern == "" {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Pattern is required"})
+				jsonError(w, "Pattern is required", http.StatusBadRequest)
 				return
 			}
-			
-			if RuleEngine == nil {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "RuleEngine not initialized"})
+
+			if !requireManager(w, deps.RuleEngine, "规则引擎") {
 				return
 			}
-			
-			err := RuleEngine.RemovePathRule(ruleType, pattern)
+
+			err := deps.RuleEngine.RemovePathRule(ruleType, pattern)
 			if err != nil {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+				jsonError(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]bool{"success": true})
+
+			jsonSuccess(w, nil)
 			return
 		}
-		
-		// 处理添加操作
+
 		ruleType := r.FormValue("rule_type")
 		matchType := r.FormValue("match_type")
 		pattern := r.FormValue("pattern")
 		description := r.FormValue("description")
-		
+
 		if pattern != "" {
-			if RuleEngine == nil {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "RuleEngine not initialized"})
+			if !requireManager(w, deps.RuleEngine, "规则引擎") {
 				return
 			}
-			
-			err := RuleEngine.AddPathRule(ruleType, matchType, pattern, description)
+
+			err := deps.RuleEngine.AddPathRule(ruleType, matchType, pattern, description)
 			if err != nil {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+				jsonError(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 		}
-		
-		// 返回JSON成功响应
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+
+		jsonSuccess(w, nil)
 		return
 	}
 
-	// 使用模板渲染
-	data := map[string]interface{}{
-		"Active": "path",
-	}
-	templates.PathTmpl.ExecuteTemplate(w, "path", data)
+	renderPage(w, r, templates.PathTmpl, "path", "path")
 }
 
 func PathUpdateAPI(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Method not allowed"})
-		return
-	}
 	var req struct {
 		ID          int    `json:"id"`
 		RuleType    string `json:"rule_type"`
@@ -107,41 +75,54 @@ func PathUpdateAPI(w http.ResponseWriter, r *http.Request) {
 		Enabled     bool   `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if RuleEngine == nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "RuleEngine not initialized"})
+	if !requireManager(w, deps.RuleEngine, "规则引擎") {
 		return
 	}
-	if err := RuleEngine.UpdatePathRule(req.ID, req.RuleType, req.MatchType, req.Pattern, req.Description, req.Enabled); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+	if err := deps.RuleEngine.UpdatePathRule(req.ID, req.RuleType, req.MatchType, req.Pattern, req.Description, req.Enabled); err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	jsonSuccess(w, nil)
 }
 
 func PathToggleAPI(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(r.URL.Query().Get("id"))
 	if id == 0 {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "invalid id"})
+		jsonError(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	if RuleEngine == nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "RuleEngine not initialized"})
+	if !requireManager(w, deps.RuleEngine, "规则引擎") {
 		return
 	}
-	if err := RuleEngine.TogglePathRule(id); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
+	if err := deps.RuleEngine.TogglePathRule(id); err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	jsonSuccess(w, nil)
+}
+
+func PathDeleteAPI(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RuleType string `json:"rule_type"`
+		Pattern  string `json:"pattern"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.Pattern == "" {
+		jsonError(w, "pattern is required", http.StatusBadRequest)
+		return
+	}
+	if !requireManager(w, deps.RuleEngine, "规则引擎") {
+		return
+	}
+	if err := deps.RuleEngine.RemovePathRule(req.RuleType, req.Pattern); err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonSuccess(w, nil)
 }

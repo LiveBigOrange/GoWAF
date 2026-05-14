@@ -1,0 +1,254 @@
+{{define "apischema"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Schema - GoWAF</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <style>
+        .spec-preview { background: #f5f5f5; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 12px; max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
+        textarea { width: 100%; min-height: 200px; padding: 10px; border: 1px solid #dcdfe6; border-radius: 6px; font-family: monospace; font-size: 13px; resize: vertical; }
+        textarea:focus { outline: none; border-color: #409eff; box-shadow: 0 0 0 2px rgba(64,158,255,0.15); }
+        .rule-type-badge {
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            white-space: nowrap;
+            flex-shrink: 0;
+            margin-right: 8px;
+        }
+        .rule-type-badge.builtin {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+        .rule-type-badge.custom {
+            background: #fff3e0;
+            color: #f57c00;
+        }
+        .rule-filter {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 10px;
+        }
+        .filter-btn {
+            padding: 5px 14px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: #fff;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .filter-btn.active {
+            background: #3498db;
+            color: #fff;
+            border-color: #3498db;
+        }
+        .search-bar {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .search-bar input {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            flex: 1;
+            font-size: 13px;
+        }
+        .rule-count {
+            font-size: 13px;
+            color: #7f8c8d;
+            margin-left: 8px;
+        }
+    </style>
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main scroll-page">
+        <div class="card">
+            <div class="filter-bar">
+                <button class="add-btn" onclick="openAddModal()">+ 添加Schema</button>
+                <button class="btn-primary" onclick="openValidateModal()">验证请求</button>
+                <span id="schemaCount" class="rule-count">(加载中)</span>
+            </div>
+            <div class="rule-filter">
+                <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">全部</button>
+                <button class="filter-btn" data-filter="builtin" onclick="setFilter('builtin')">内置Schema</button>
+                <button class="filter-btn" data-filter="custom" onclick="setFilter('custom')">自定义Schema</button>
+            </div>
+            <div class="search-bar">
+                <input type="text" id="searchInput" placeholder="搜索Schema名称..." oninput="renderSchemas()">
+            </div>
+            <table>
+                <thead><tr><th>ID</th><th>类型</th><th>名称</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+                <tbody id="schemaList"><tr><td colspan="6" style="text-align:center;color:#95a5a6;">加载中...</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+    <div id="addModal" class="modal">
+        <div class="modal-content" style="width:700px;">
+            <div class="modal-header">
+                <h3>添加API Schema</h3>
+                <span class="close" onclick="closeAddModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>名称</label>
+                    <input id="addName" placeholder="My API Schema">
+                </div>
+                <div class="form-group">
+                    <label>Schema定义 (JSON)</label>
+                    <textarea id="addSpec" placeholder='{"paths":{"/api/users":{"get":{"parameters":[{"name":"id","required":true}]}}}}'></textarea>
+                    <small>OpenAPI风格的JSON格式，定义路径、方法及必需参数</small>
+                </div>
+                <div class="form-group">
+                    <label>启用</label>
+                    <select id="addEnabled">
+                        <option value="true">启用</option>
+                        <option value="false">禁用</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closeAddModal()">取消</button>
+                <button class="btn-submit" onclick="addSchema()">添加</button>
+            </div>
+        </div>
+    </div>
+    <div id="validateModal" class="modal">
+        <div class="modal-content" style="width:600px;">
+            <div class="modal-header">
+                <h3>验证请求</h3>
+                <span class="close" onclick="closeValidateModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>HTTP方法</label>
+                    <select id="valMethod">
+                        <option value="GET">GET</option>
+                        <option value="POST">POST</option>
+                        <option value="PUT">PUT</option>
+                        <option value="DELETE">DELETE</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>路径</label>
+                    <input id="valPath" placeholder="/api/users">
+                </div>
+                <div class="form-group">
+                    <label>请求体 (JSON)</label>
+                    <textarea id="valBody" style="min-height:100px;" placeholder='{"id": 1}'></textarea>
+                </div>
+                <div id="validateResult" style="display:none;margin-top:10px;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closeValidateModal()">取消</button>
+                <button class="btn-submit" onclick="doValidate()">验证</button>
+            </div>
+        </div>
+    </div>
+    <div id="viewModal" class="modal">
+        <div class="modal-content" style="width:700px;">
+            <div class="modal-header">
+                <h3 id="viewTitle">Schema详情</h3>
+                <span class="close" onclick="closeViewModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="spec-preview" id="viewSpec"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closeViewModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+    <script nonce="{{.CSPNonce}}">
+    var allSchemas=[];
+    var currentFilter='all';
+    function loadSchemas(){
+        WAF.withLoading('.card',function(){
+            return fetch('/api/apischema/list').then(r=>r.json()).then(d=>{
+                if(!d.success) return;
+                allSchemas=d.data||[];
+                renderSchemas();
+            }).catch(e=>showToast('error','加载Schema失败'));
+        });
+    }
+    function renderSchemas(){
+        var keyword=(document.getElementById('searchInput').value||'').toLowerCase().trim();
+        var filtered=allSchemas;
+        if(currentFilter!=='all') filtered=filtered.filter(s=>s.schema_type===currentFilter);
+        if(keyword) filtered=filtered.filter(s=>(s.name||'').toLowerCase().includes(keyword));
+        var builtinCount=allSchemas.filter(s=>s.schema_type==='builtin').length;
+        var customCount=allSchemas.filter(s=>s.schema_type==='custom').length;
+        document.getElementById('schemaCount').textContent='(内置:'+builtinCount+'条-自定义:'+customCount+'条'+(keyword?' 搜索:'+filtered.length+'条':'')+')';
+        var tbody=document.getElementById('schemaList');
+        if(!filtered.length){tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:#95a5a6;">'+(keyword?'未找到匹配的Schema':'暂无Schema')+'</td></tr>';return;}
+        tbody.innerHTML=filtered.map(s=>{
+            var isBuiltin=s.schema_type==='builtin';
+            var badge='<span class="rule-type-badge '+s.schema_type+'">'+(isBuiltin?'内置':'自定义')+'</span>';
+            var actions=isBuiltin
+                ?'<button class="btn-edit" data-id="'+s.id+'">查看</button><span style="color:#bdc3c7;font-size:12px;">不可删除</span>'
+                :'<button class="btn-edit" data-id="'+s.id+'">查看</button><button class="delete-btn" data-id="'+s.id+'">删除</button>';
+            return '<tr><td>'+s.id+'</td><td>'+badge+'</td><td>'+escapeHtml(s.name)+'</td><td>'+WAF.renderToggle(s.enabled,s.id)+'</td><td>'+(s.created_at?new Date(s.created_at*1000).toLocaleString():'-')+'</td><td>'+actions+'</td></tr>';
+        }).join('');
+    }
+    function setFilter(type){
+        currentFilter=type;
+        document.querySelectorAll('.filter-btn').forEach(b=>{b.classList.toggle('active',b.dataset.filter===type);});
+        renderSchemas();
+    }
+    function openAddModal(){document.getElementById('addName').value='';document.getElementById('addSpec').value='';document.getElementById('addEnabled').selectedIndex=0;WAF.Modal.open('addModal');}
+    function closeAddModal(){WAF.Modal.close('addModal');}
+    function addSchema(){
+        WAF.submitWithLock('#addModal .btn-submit',function(){
+            var data={name:document.getElementById('addName').value,spec:document.getElementById('addSpec').value,enabled:document.getElementById('addEnabled').value==='true'};
+            if(!data.name||!data.spec){showToast('error','请填写名称和Schema定义');return Promise.resolve();}
+            return WAF.jsonPost('/api/apischema/add',data).then(d=>{
+                if(d.success){showToast('success','添加成功');closeAddModal();document.getElementById('addName').value='';document.getElementById('addSpec').value='';loadSchemas();}else showToast('error',d.error||'添加失败');
+            }).catch(e=>showToast('error','添加失败: '+e.message));
+        });
+    }
+    function openValidateModal(){document.getElementById('validateResult').style.display='none';WAF.Modal.open('validateModal');}
+    function closeValidateModal(){WAF.Modal.close('validateModal');}
+    function doValidate(){
+        WAF.submitWithLock('#validateModal .btn-submit',function(){
+            var data={method:document.getElementById('valMethod').value,path:document.getElementById('valPath').value,body:document.getElementById('valBody').value};
+            return WAF.jsonPost('/api/apischema/validate',data).then(d=>{
+                var el=document.getElementById('validateResult');el.style.display='block';
+                if(d.success&&d.data){
+                    var v=d.data;
+                    el.innerHTML='<div style="padding:10px;border-radius:4px;background:'+(v.valid?'#d4edda':'#f8d7da')+';color:'+(v.valid?'#155724':'#721c24')+'"><b>'+(v.valid?'验证通过':'验证失败')+'</b>'+(v.errors&&v.errors.length?'<br>'+v.errors.map(e=>'- '+escapeHtml(e)).join('<br>'):'')+'</div>';
+                }else showToast('error',d.error||'验证失败');
+            }).catch(e=>showToast('error','验证失败: '+e.message));
+        });
+    }
+    document.querySelector('table tbody').addEventListener('click',function(e){
+        var editBtn=e.target.closest('.btn-edit');
+        if(editBtn){
+            var id=parseInt(editBtn.dataset.id);
+            var s=allSchemas.find(x=>x.id===id);
+            if(s){document.getElementById('viewTitle').textContent=s.name;try{document.getElementById('viewSpec').textContent=JSON.stringify(JSON.parse(s.spec),null,2);}catch(ex){document.getElementById('viewSpec').textContent=s.spec;}WAF.Modal.open('viewModal');}
+            return;
+        }
+        var delBtn=e.target.closest('.delete-btn');
+        if(delBtn){
+            var id=parseInt(delBtn.dataset.id);
+            var s=allSchemas.find(x=>x.id===id);
+            if(s&&s.schema_type==='builtin'){showToast('error','内置Schema不可删除');return;}
+            WAF.confirmDelete('确认删除此Schema？','/api/apischema/delete',{id:id},loadSchemas);
+        }
+    });
+    WAF.setupToggleSwitch('table tbody','/api/apischema/toggle',loadSchemas);
+    function closeViewModal(){WAF.Modal.close('viewModal');}
+    WAF.Modal.clickOutside('addModal',closeAddModal);
+    WAF.Modal.clickOutside('viewModal',closeViewModal);
+    WAF.Modal.clickOutside('validateModal',closeValidateModal);
+    loadSchemas();
+    </script>
+</body>
+</html>
+{{end}}

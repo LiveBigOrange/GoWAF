@@ -1,28 +1,60 @@
 package middleware
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 // --- IP 白名单 ---
 
+type contextKey string
+
+const cspNonceKey contextKey = "csp_nonce"
+
+func GenerateCSPNonce() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		log.Printf("[Auth] crypto/rand失败，无法安全生成CSP nonce: %v", err)
+		for i := range b {
+			b[i] = byte(i*17 + 37)
+		}
+	}
+	return base64.StdEncoding.EncodeToString(b)
+}
+
+func GetCSPNonce(r *http.Request) string {
+	if v, ok := r.Context().Value(cspNonceKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
 var (
 	adminAllowedNets []*net.IPNet
-	adminAllowAll    = true // 未配置白名单时允许所有
+	adminAllowAll    = false
+	adminNetsMu      sync.RWMutex
 )
 
 // InitAdminAllowedNets 初始化管理后台IP白名单
 func InitAdminAllowedNets(cidrs []string) {
+	adminNetsMu.Lock()
+	defer adminNetsMu.Unlock()
 	if len(cidrs) == 0 {
-		adminAllowAll = true
-		return
+		adminAllowAll = false
+		cidrs = []string{"127.0.0.1/8", "::1/128"}
 	}
-	adminAllowAll = false
+	adminAllowedNets = make([]*net.IPNet, 0, len(cidrs))
 	for _, cidr := range cidrs {
 		if !strings.Contains(cidr, "/") {
 			if strings.Contains(cidr, ":") {
@@ -38,8 +70,20 @@ func InitAdminAllowedNets(cidrs []string) {
 	}
 }
 
-// isIPAllowed 检查IP是否在白名单内
+// GetAdminAllowedNets 获取当前管理后台IP白名单CIDR列表
+func GetAdminAllowedNets() []string {
+	adminNetsMu.RLock()
+	defer adminNetsMu.RUnlock()
+	result := make([]string, 0, len(adminAllowedNets))
+	for _, network := range adminAllowedNets {
+		result = append(result, network.String())
+	}
+	return result
+}
+
 func isIPAllowed(ipStr string) bool {
+	adminNetsMu.RLock()
+	defer adminNetsMu.RUnlock()
 	if adminAllowAll {
 		return true
 	}
@@ -58,23 +102,73 @@ func isIPAllowed(ipStr string) bool {
 // --- API 限流 ---
 
 var (
-	apiRequests   = make(map[string][]time.Time)
-	apiRateMu     sync.Mutex
-	// 移除硬编码,改用配置
-	// apiRateLimit  = 300 // 提高到300次/分钟，适应仪表盘刷新需求（WebSocket连接后仅需要趋势图和检测器状态）
-	// apiRateWindow = 1 * time.Minute
+	apiRequests        = make(map[string][]time.Time)
+	apiRateMu          sync.Mutex
+	globalRateLimiter  *rate.Limiter
+	apiRateExemptPaths = []string{
+		"/api/stats",
+		"/api/events",
+		"/api/system",
+		"/api/top/",
+		"/api/rule-hits",
+		"/api/detector/list",
+		"/api/metrics/",
+		"/api/config/",
+		"/api/intercepts",
+	}
+	apiBodyExemptPaths = []string{
+		"/api/geoip/upload",
+	}
 )
 
-// 配置变量,由外部设置
 var (
 	apiRateLimit  int
 	apiRateWindow time.Duration
 )
 
-// InitRateLimitConfig 初始化限流配置
 func InitRateLimitConfig(limit int, windowMinutes int) {
 	apiRateLimit = limit
 	apiRateWindow = time.Duration(windowMinutes) * time.Minute
+	if globalRateLimiter == nil {
+		globalRateLimiter = rate.NewLimiter(200, 400)
+		go cleanupAPIRateLimit()
+	}
+}
+
+func cleanupAPIRateLimit() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		apiRateMu.Lock()
+		if len(apiRequests) > 5000 {
+			now := time.Now()
+			for k, requests := range apiRequests {
+				valid := make([]time.Time, 0, len(requests))
+				for _, t := range requests {
+					if now.Sub(t) <= apiRateWindow {
+						valid = append(valid, t)
+					}
+				}
+				if len(valid) == 0 {
+					delete(apiRequests, k)
+				} else {
+					apiRequests[k] = valid
+				}
+			}
+		}
+		apiRateMu.Unlock()
+	}
+}
+
+func InitGlobalRateLimit(r rate.Limit, burst int) {
+	globalRateLimiter = rate.NewLimiter(r, burst)
+}
+
+func checkGlobalRateLimit() bool {
+	if globalRateLimiter == nil {
+		return true
+	}
+	return globalRateLimiter.Allow()
 }
 
 // checkAPIRateLimit 检查API请求频率
@@ -162,22 +256,23 @@ func getClientIP(r *http.Request) string {
 
 // --- CSRF 验证（Double Submit Cookie 模式） ---
 
-// validateCSRF 验证CSRF Token：请求头中的token必须与Cookie中的token一致
-func validateCSRF(r *http.Request) bool {
-	// 从Cookie获取CSRF Token
+// validateCSRF 验证CSRF Token：请求头中的token必须与Cookie中的token一致，且绑定到当前Session
+func validateCSRF(r *http.Request, sessionToken string) bool {
 	csrfCookie, err := r.Cookie("csrf_token")
 	if err != nil || csrfCookie.Value == "" {
 		return false
 	}
 
-	// 从请求头或表单获取提交的token
 	csrfToken := r.Header.Get("X-CSRF-Token")
 	if csrfToken == "" {
 		csrfToken = r.FormValue("csrf_token")
 	}
 
-	// 两者必须一致
-	return csrfToken == csrfCookie.Value
+	if csrfToken != csrfCookie.Value {
+		return false
+	}
+
+	return verifyCSRFSessionBinding(sessionToken, csrfToken)
 }
 
 // --- 中间件 ---
@@ -197,11 +292,11 @@ func IPWhitelist(next http.Handler) http.Handler {
 // Auth 认证中间件（Session + CSRF + 限流 + 安全头）
 func Auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 安全响应头
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("X-XSS-Protection", "1; mode=block")
-		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		cspNonce := GenerateCSPNonce()
+		ctx := context.WithValue(r.Context(), cspNonceKey, cspNonce)
+		r = r.WithContext(ctx)
+
+		setCommonSecurityHeaders(w, r)
 
 		// Session 检查
 		cookie, err := r.Cookie("session")
@@ -217,54 +312,72 @@ func Auth(next http.Handler) http.Handler {
 		// Session 自动续期 - 用户活跃时延长Session有效期
 		RenewSession(cookie.Value)
 
+		// 会话安全检查（IP变化/UA变化检测）
+		if alert := CheckSessionSecurity(cookie.Value, getClientIPForSession(r), r.Header.Get("User-Agent")); alert != nil {
+			log.Printf("[SessionSafe] %s: session=%s detail=%s", alert.Type, alert.SessionID, alert.Detail)
+			RemoveSession(cookie.Value)
+			http.SetCookie(w, &http.Cookie{Name: "session", MaxAge: -1, Path: "/"})
+			http.SetCookie(w, &http.Cookie{Name: "csrf_token", MaxAge: -1, Path: "/"})
+			http.Redirect(w, r, "/login?alert=session_hijack", http.StatusFound)
+			return
+		}
+
 		// CSRF Token 自动续期 - 确保与session同步不过期
+		sessionToken := cookie.Value
 		if csrfCookie, csrfErr := r.Cookie("csrf_token"); csrfErr == nil && csrfCookie.Value != "" {
-			// 刷新csrf_token cookie的MaxAge，防止比session先过期
+			// Note(S7): HttpOnly=false 是 Double Submit Cookie 模式的设计要求，
+			// JavaScript需要读取csrf_token放入请求头，因此不能设置HttpOnly=true。
 			http.SetCookie(w, &http.Cookie{
 				Name:     "csrf_token",
 				Value:    csrfCookie.Value,
 				Path:     "/",
 				HttpOnly: false,
-				Secure:   r.TLS != nil,
+				Secure:   true,
 				SameSite: http.SameSiteStrictMode,
 				MaxAge:   int(sessionTTL.Seconds()),
 			})
 		} else {
-			// csrf_token丢失，生成新的
 			newCsrfToken := GenerateSessionToken()
+			if newCsrfToken == "" {
+				http.Error(w, "Failed to generate CSRF token", http.StatusInternalServerError)
+				return
+			}
 			http.SetCookie(w, &http.Cookie{
 				Name:     "csrf_token",
 				Value:    newCsrfToken,
 				Path:     "/",
 				HttpOnly: false,
-				Secure:   r.TLS != nil,
+				Secure:   true,
 				SameSite: http.SameSiteStrictMode,
 				MaxAge:   int(sessionTTL.Seconds()),
 			})
+			bindCSRFToSession(sessionToken, newCsrfToken)
 		}
 
-		// API限流 - 豁免仪表盘关键 API
 		if strings.HasPrefix(r.URL.Path, "/api/") {
-			// 豁免列表：这些 API 是仪表盘必需的，不应该被限流
-			exemptPaths := []string{
-				"/api/stats",
-				"/api/events",
-				"/api/system",
-				"/api/topips",
-				"/api/toppaths",
-				"/api/rulehits",
-				"/api/detector/list",
-				"/api/metrics/",
+			if !checkGlobalRateLimit() {
+				http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+				return
 			}
-			
+			if r.Method != "GET" && r.Method != "HEAD" && r.Body != nil {
+				shouldLimitBody := true
+				for _, exemptPath := range apiBodyExemptPaths {
+					if strings.HasPrefix(r.URL.Path, exemptPath) {
+						shouldLimitBody = false
+						break
+					}
+				}
+				if shouldLimitBody {
+					r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+				}
+			}
 			shouldRateLimit := true
-			for _, exemptPath := range exemptPaths {
+			for _, exemptPath := range apiRateExemptPaths {
 				if strings.HasPrefix(r.URL.Path, exemptPath) {
 					shouldRateLimit = false
 					break
 				}
 			}
-			
 			if shouldRateLimit {
 				clientIP := getClientIP(r)
 				if !checkAPIRateLimit(clientIP) {
@@ -276,7 +389,7 @@ func Auth(next http.Handler) http.Handler {
 
 		// CSRF 验证：对所有写操作验证CSRF Token
 		if r.Method != "GET" && r.Method != "HEAD" && r.Method != "OPTIONS" {
-			if !validateCSRF(r) {
+			if !validateCSRF(r, sessionToken) {
 				http.Error(w, "Invalid CSRF Token", http.StatusForbidden)
 				return
 			}
@@ -286,15 +399,56 @@ func Auth(next http.Handler) http.Handler {
 	})
 }
 
+// setCommonSecurityHeaders 设置公共安全响应头
+func setCommonSecurityHeaders(w http.ResponseWriter, r *http.Request) {
+	scriptSrc := "script-src 'self' 'unsafe-inline'"
+	csp := fmt.Sprintf("default-src 'self'; style-src 'self' 'unsafe-inline'; %s; img-src 'self' data:; connect-src 'self' ws: wss:;", scriptSrc)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+	w.Header().Set("Content-Security-Policy", csp)
+	w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+	if r.TLS != nil {
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+	}
+}
+
 // SecurityHeaders 为非Auth路由添加安全头
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("X-XSS-Protection", "1; mode=block")
-		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		cspNonce := GenerateCSPNonce()
+		ctx := context.WithValue(r.Context(), cspNonceKey, cspNonce)
+		r = r.WithContext(ctx)
+		setCommonSecurityHeaders(w, r)
 		next.ServeHTTP(w, r)
 	})
+}
+
+// bindCSRFToSession 将CSRF Token绑定到Session
+func bindCSRFToSession(sessionToken, csrfToken string) {
+	sessionMu.Lock()
+	if entry, ok := sessionStore[sessionToken]; ok {
+		entry.csrfToken = csrfToken
+		sessionStore[sessionToken] = entry
+	}
+	sessionMu.Unlock()
+}
+
+// verifyCSRFSessionBinding 验证CSRF Token是否与Session绑定
+func verifyCSRFSessionBinding(sessionToken, csrfToken string) bool {
+	sessionMu.RLock()
+	defer sessionMu.RUnlock()
+	if csrfToken == "" {
+		return false
+	}
+	entry, ok := sessionStore[sessionToken]
+	if !ok {
+		return false
+	}
+	if entry.csrfToken != "" && entry.csrfToken != csrfToken {
+		return false
+	}
+	return true
 }
 
 var maxRequestBody int64 = 0
@@ -305,4 +459,20 @@ func SetMaxRequestBody(maxBytes int) {
 
 func GetMaxRequestBody() int64 {
 	return atomic.LoadInt64(&maxRequestBody)
+}
+
+// MaxRequestBodyProvider 最大请求体大小提供者
+// 隐式实现 proxy.MaxRequestBodyProvider 接口，用于依赖注入
+type MaxRequestBodyProvider struct{}
+
+func (MaxRequestBodyProvider) GetMaxRequestBody() int64 {
+	return atomic.LoadInt64(&maxRequestBody)
+}
+
+func getClientIPForSession(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }

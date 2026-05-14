@@ -1,18 +1,17 @@
-﻿package handler
+package handler
 
 import (
-	"encoding/json"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"gowaf-demo/internal/event"
-	"gowaf-demo/internal/rules"
-	"gowaf-demo/internal/stats"
-	"gowaf-demo/internal/web/templates"
+	"gowaf/internal/event"
+	"gowaf/internal/logger"
+	"gowaf/internal/rules"
+	"gowaf/internal/stats"
+	"gowaf/internal/web/templates"
 )
 
 // 缓存结构，用于减少数据库查询压力
@@ -24,19 +23,19 @@ type cachedData struct {
 var (
 	// 缓存锁
 	cacheMu sync.RWMutex
-	
+
 	// API 响应缓存
-	statsCache      cachedData
-	eventsCache     cachedData
-	topIPsCache     cachedData
-	topPathsCache   cachedData
-	ruleHitsCache   cachedData
-	
+	statsCache    cachedData
+	eventsCache   cachedData
+	topIPsCache   cachedData
+	topPathsCache cachedData
+	ruleHitsCache cachedData
+
 	// 缓存有效期
-	statsCacheTTL    = 2 * time.Second  // 统计数据缓存 2 秒
-	eventsCacheTTL   = 3 * time.Second  // 事件数据缓存 3 秒
-	topCacheTTL      = 5 * time.Second  // TOP 数据缓存 5 秒
-	ruleHitsCacheTTL = 5 * time.Second  // 规则命中缓存 5 秒
+	statsCacheTTL    = 5 * time.Second  // 统计数据缓存 5 秒
+	eventsCacheTTL   = 5 * time.Second  // 事件数据缓存 5 秒
+	topCacheTTL      = 10 * time.Second // TOP 数据缓存 10 秒
+	ruleHitsCacheTTL = 10 * time.Second // 规则命中缓存 10 秒
 )
 
 func DashboardPage(w http.ResponseWriter, r *http.Request) {
@@ -46,11 +45,9 @@ func DashboardPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 使用模板渲染
-	data := map[string]interface{}{
-		"Title":  "仪表盘",
-		"Active": "dashboard",
-	}
-	templates.DashboardTmpl.ExecuteTemplate(w, "dashboard", data)
+	renderPage(w, r, templates.DashboardTmpl, "dashboard", "dashboard", PageData{
+		"Title": "仪表盘",
+	})
 }
 
 type StatsResponse struct {
@@ -65,8 +62,7 @@ func APIStats(w http.ResponseWriter, r *http.Request) {
 	if time.Since(statsCache.timestamp) < statsCacheTTL {
 		data := statsCache.data
 		cacheMu.RUnlock()
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(data)
+		jsonSuccess(w, data)
 		return
 	}
 	cacheMu.RUnlock()
@@ -75,11 +71,11 @@ func APIStats(w http.ResponseWriter, r *http.Request) {
 	var useMemoryData bool
 
 	// 优先从 metrics 数据库获取历史数据
-	if MetricsManager != nil {
+	if deps.MetricsManager != nil {
 		start := time.Now().AddDate(0, 0, -7) // 最近7天
 		end := time.Now()
 		var err error
-		total, blocked, err = MetricsManager.GetTotalStats(start, end)
+		total, blocked, err = deps.MetricsManager.GetTotalStats(start, end)
 		if err != nil {
 			useMemoryData = true
 		}
@@ -99,18 +95,17 @@ func APIStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := StatsResponse{
-		Total:   int(total),
+		Total:   int(total + blocked),
 		Blocked: int(blocked),
 		QPS:     stats.GetQPS(),
 	}
-	
+
 	// 更新缓存
 	cacheMu.Lock()
 	statsCache = cachedData{data: resp, timestamp: time.Now()}
 	cacheMu.Unlock()
-	
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+
+	jsonSuccess(w, resp)
 }
 
 func APIEvents(w http.ResponseWriter, r *http.Request) {
@@ -119,20 +114,19 @@ func APIEvents(w http.ResponseWriter, r *http.Request) {
 	if time.Since(eventsCache.timestamp) < eventsCacheTTL {
 		data := eventsCache.data
 		cacheMu.RUnlock()
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(data)
+		jsonSuccess(w, data)
 		return
 	}
 	cacheMu.RUnlock()
 
 	var events []event.InterceptEvent
 	// 优先从 metrics 数据库获取历史数据（最近7天，确保重启后数据不丢失）
-	if MetricsManager != nil {
+	if deps.MetricsManager != nil {
 		startTime := time.Now().AddDate(0, 0, -7) // 最近7天
 		endTime := time.Now()
-		metricsEvents, err := MetricsManager.GetEvents(startTime, endTime, 0, 200)
+		metricsEvents, err := deps.MetricsManager.GetEvents(startTime, endTime, 0, 200)
 		if err != nil {
-			log.Printf("APIEvents: 从metrics获取失败: %v", err)
+			logger.Error("APIEvents: 从metrics获取失败: %v", err)
 		} else if len(metricsEvents) > 0 {
 			// 转换类型
 			events = make([]event.InterceptEvent, len(metricsEvents))
@@ -176,14 +170,13 @@ func APIEvents(w http.ResponseWriter, r *http.Request) {
 	if events == nil {
 		events = make([]event.InterceptEvent, 0)
 	}
-	
+
 	// 更新缓存
 	cacheMu.Lock()
 	eventsCache = cachedData{data: events, timestamp: time.Now()}
 	cacheMu.Unlock()
-	
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(events)
+
+	jsonSuccess(w, events)
 }
 
 // APIIntercepts 获取所有拦截数据（用于拦截数据页面）
@@ -199,34 +192,20 @@ func APIIntercepts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 优先从 metrics 数据库获取历史数据
-	if MetricsManager != nil {
-		// 获取最近7天的数据
+	if deps.MetricsManager != nil {
 		startTime := time.Now().AddDate(0, 0, -7)
 		endTime := time.Now()
-		// 先获取总数用于分页
-		allEvents, err := MetricsManager.GetEvents(startTime, endTime, 0, 10000)
+		offset := (page - 1) * pageSize
+		allEvents, err := deps.MetricsManager.GetEvents(startTime, endTime, offset, pageSize)
 		if err != nil {
-			log.Printf("APIIntercepts: 从metrics获取失败: %v", err)
+			logger.Error("APIIntercepts: 从metrics获取失败: %v", err)
 		}
 		if len(allEvents) > 0 {
-			// 服务端分页
-			total := len(allEvents)
-			start := (page - 1) * pageSize
-			end := start + pageSize
-			if start > total {
-				start = total
+			total, _ := deps.MetricsManager.CountEvents(startTime, endTime)
+			if total == 0 {
+				total = int64(len(allEvents))
 			}
-			if end > total {
-				end = total
-			}
-
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"data":  allEvents[start:end],
-				"total": total,
-				"page":  page,
-				"page_size": pageSize,
-			})
+			jsonSuccessPaged(w, allEvents, total, page, pageSize)
 			return
 		}
 	}
@@ -242,13 +221,7 @@ func APIIntercepts(w http.ResponseWriter, r *http.Request) {
 		end = total
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"data":  events[start:end],
-		"total": total,
-		"page":  page,
-		"page_size": pageSize,
-	})
+	jsonSuccessPaged(w, events[start:end], int64(total), page, pageSize)
 }
 
 type ConfigInfo struct {
@@ -259,16 +232,15 @@ type ConfigInfo struct {
 func APIConfig(w http.ResponseWriter, r *http.Request) {
 	// 获取限流启用状态
 	rateLimitEnabled := false
-	if limiterInstance != nil {
-		rateLimitEnabled = limiterInstance.GetEnabled()
+	if deps.Limiter != nil {
+		rateLimitEnabled = deps.Limiter.GetEnabled()
 	}
-	
+
 	info := ConfigInfo{
-		AdminAddr:        cfg.Admin.Addr,
+		AdminAddr:        deps.Config.Admin.Addr,
 		RateLimitEnabled: rateLimitEnabled,
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(info)
+	jsonSuccess(w, info)
 }
 
 func APIHandler(w http.ResponseWriter, r *http.Request) {
@@ -314,6 +286,46 @@ func APIHandler(w http.ResponseWriter, r *http.Request) {
 		APIBackendUpdate(w, r)
 	case "/backend/delete":
 		APIBackendDelete(w, r)
+	case "/backend/lb-policy":
+		if r.Method == "POST" {
+			APIBackendSetLBPolicy(w, r)
+		} else {
+			APIBackendLBPolicy(w, r)
+		}
+	// 后端组管理 API
+	case "/backend/group/list":
+		APIBackendGroupList(w, r)
+	case "/backend/group/add":
+		APIBackendGroupAdd(w, r)
+	case "/backend/group/update":
+		APIBackendGroupUpdate(w, r)
+	case "/backend/group/delete":
+		APIBackendGroupDelete(w, r)
+	case "/backend/group/members":
+		APIBackendGroupMembers(w, r)
+	case "/backend/group/member/add":
+		APIBackendGroupMemberAdd(w, r)
+	case "/backend/group/member/update":
+		APIBackendGroupMemberUpdate(w, r)
+	case "/backend/group/member/delete":
+		APIBackendGroupMemberDelete(w, r)
+	case "/backend/group/used-backend-ids":
+		APIBackendGroupUsedIDs(w, r)
+	// Bot 管理 API
+	case "/bot/rules":
+		APIBotRules(w, r)
+	case "/bot/rule/add":
+		APIBotRuleAdd(w, r)
+	case "/bot/rule/delete":
+		APIBotRuleDelete(w, r)
+	case "/bot/rule/toggle":
+		APIBotRuleToggle(w, r)
+	case "/bot/known-bots":
+		APIBotKnownBots(w, r)
+	case "/bot/stats":
+		APIBotStats(w, r)
+	case "/bot/classify":
+		APIBotClassify(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -322,8 +334,7 @@ func APIHandler(w http.ResponseWriter, r *http.Request) {
 // APISystem 获取系统性能统计
 func APISystem(w http.ResponseWriter, r *http.Request) {
 	sysStats := stats.GetSystemStats()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(sysStats)
+	jsonSuccess(w, sysStats)
 }
 
 // APITopIPs 获取被拦截最多的 IP
@@ -333,20 +344,19 @@ func APITopIPs(w http.ResponseWriter, r *http.Request) {
 	if time.Since(topIPsCache.timestamp) < topCacheTTL {
 		data := topIPsCache.data
 		cacheMu.RUnlock()
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(data)
+		jsonSuccess(w, data)
 		return
 	}
 	cacheMu.RUnlock()
 
 	var top []stats.TopItem
 	// 优先从 metrics 数据库获取
-	if MetricsManager != nil {
+	if deps.MetricsManager != nil {
 		start := time.Now().AddDate(0, 0, -7)
 		end := time.Now()
-		metricsTop, err := MetricsManager.GetTopStats("blocked_ip", start, end, 10)
+		metricsTop, err := deps.MetricsManager.GetTopStats("blocked_ip", start, end, 10)
 		if err != nil {
-			log.Printf("APITopIPs: 从metrics获取失败: %v", err)
+			logger.Error("APITopIPs: 从metrics获取失败: %v", err)
 		}
 		// 转换类型
 		if len(metricsTop) > 0 {
@@ -371,14 +381,13 @@ func APITopIPs(w http.ResponseWriter, r *http.Request) {
 		// 降级到内存数据
 		top = stats.GetTopBlockedIPs(10)
 	}
-	
+
 	// 更新缓存
 	cacheMu.Lock()
 	topIPsCache = cachedData{data: top, timestamp: time.Now()}
 	cacheMu.Unlock()
-	
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(top)
+
+	jsonSuccess(w, top)
 }
 
 // APITopPaths 获取被攻击最多的路径
@@ -388,20 +397,19 @@ func APITopPaths(w http.ResponseWriter, r *http.Request) {
 	if time.Since(topPathsCache.timestamp) < topCacheTTL {
 		data := topPathsCache.data
 		cacheMu.RUnlock()
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(data)
+		jsonSuccess(w, data)
 		return
 	}
 	cacheMu.RUnlock()
 
 	var top []stats.TopItem
 	// 优先从 metrics 数据库获取
-	if MetricsManager != nil {
+	if deps.MetricsManager != nil {
 		start := time.Now().AddDate(0, 0, -7)
 		end := time.Now()
-		metricsTop, err := MetricsManager.GetTopStats("attacked_path", start, end, 10)
+		metricsTop, err := deps.MetricsManager.GetTopStats("attacked_path", start, end, 10)
 		if err != nil {
-			log.Printf("APITopPaths: 从metrics获取失败: %v", err)
+			logger.Error("APITopPaths: 从metrics获取失败: %v", err)
 		}
 		// 转换类型
 		if len(metricsTop) > 0 {
@@ -426,14 +434,13 @@ func APITopPaths(w http.ResponseWriter, r *http.Request) {
 		// 降级到内存数据
 		top = stats.GetTopBlockedPaths(10)
 	}
-	
+
 	// 更新缓存
 	cacheMu.Lock()
 	topPathsCache = cachedData{data: top, timestamp: time.Now()}
 	cacheMu.Unlock()
-	
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(top)
+
+	jsonSuccess(w, top)
 }
 
 // APIRuleHits 获取规则命中分布
@@ -443,29 +450,28 @@ func APIRuleHits(w http.ResponseWriter, r *http.Request) {
 	if time.Since(ruleHitsCache.timestamp) < ruleHitsCacheTTL {
 		data := ruleHitsCache.data
 		cacheMu.RUnlock()
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(data)
+		jsonSuccess(w, data)
 		return
 	}
 	cacheMu.RUnlock()
 
 	var hits []stats.TopItem
 	// 优先从 metrics 数据库获取
-	if MetricsManager != nil {
+	if deps.MetricsManager != nil {
 		start := time.Now().AddDate(0, 0, -7)
 		end := time.Now()
-		metricsHits, err := MetricsManager.GetRuleHitStats(start, end)
+		metricsHits, err := deps.MetricsManager.GetRuleHitStats(start, end)
 		if err != nil {
-			log.Printf("APIRuleHits: 从metrics获取失败: %v", err)
+			logger.Error("APIRuleHits: 从metrics获取失败: %v", err)
 		}
 		// 转换类型
 		if len(metricsHits) > 0 {
 			hits = make([]stats.TopItem, len(metricsHits))
 			for i, item := range metricsHits {
 				hits[i] = stats.TopItem{
-					Name:        item.Name,
-					Count:       int(item.Count),
-					LastSeen:    item.LastSeen,
+					Name:          item.Name,
+					Count:         int(item.Count),
+					LastSeen:      item.LastSeen,
 					SourceIPCount: item.AffectedIPs, // 使用AffectedIPs字段
 				}
 			}
@@ -475,62 +481,53 @@ func APIRuleHits(w http.ResponseWriter, r *http.Request) {
 		// 降级到内存数据
 		hits = stats.GetRuleHits()
 	}
-	
+
 	// 更新缓存
 	cacheMu.Lock()
 	ruleHitsCache = cachedData{data: hits, timestamp: time.Now()}
 	cacheMu.Unlock()
-	
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(hits)
+
+	jsonSuccess(w, hits)
 }
 
 // APIRules 获取IP规则列表
 func APIRules(w http.ResponseWriter, r *http.Request) {
-	rulesList, err := RuleEngine.ListIPRules()
+	rulesList, err := deps.RuleEngine.ListIPRules()
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	// 确保返回数组而不是null
 	if rulesList == nil {
 		rulesList = []rules.IPRuleRow{}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(rulesList)
+	jsonSuccess(w, rulesList)
 }
 
 // APIUA 获取UA规则列表
 func APIUA(w http.ResponseWriter, r *http.Request) {
-	rulesList, err := RuleEngine.ListUARules()
+	rulesList, err := deps.RuleEngine.ListUARules()
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	// 确保返回数组而不是null
 	if rulesList == nil {
 		rulesList = []rules.UARuleRow{}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(rulesList)
+	jsonSuccess(w, rulesList)
 }
 
 // APIPath 获取路径规则列表
 func APIPath(w http.ResponseWriter, r *http.Request) {
-	rulesList, err := RuleEngine.ListPathRules()
+	rulesList, err := deps.RuleEngine.ListPathRules()
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	// 确保返回数组而不是null
 	if rulesList == nil {
 		rulesList = []rules.PathRuleRow{}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(rulesList)
+	jsonSuccess(w, rulesList)
 }
-
-

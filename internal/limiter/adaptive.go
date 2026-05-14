@@ -1,24 +1,27 @@
 package limiter
 
 import (
+	"math"
 	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
 )
 
+const floatEpsilon = 1e-9
+
 type AdaptiveLimiter struct {
-	mu             sync.RWMutex
-	limiter        *rate.Limiter
-	baseRate       rate.Limit
-	baseBurst      int
-	currentRate    rate.Limit
-	window         time.Duration
-	totalRequests  int64
+	mu              sync.RWMutex
+	limiter         *rate.Limiter
+	baseRate        rate.Limit
+	baseBurst       int
+	currentRate     rate.Limit
+	window          time.Duration
+	totalRequests   int64
 	blockedRequests int64
-	lastReset      time.Time
-	threshold      float64
-	maxMultiplier  float64
+	lastReset       time.Time
+	threshold       float64
+	maxMultiplier   float64
 }
 
 func NewAdaptiveLimiter(r rate.Limit, burst int, window time.Duration, threshold float64) *AdaptiveLimiter {
@@ -77,7 +80,7 @@ func (a *AdaptiveLimiter) checkAndAdjust() {
 		newRate = a.baseRate
 	}
 
-	if newRate != a.currentRate {
+	if math.Abs(float64(newRate)-float64(a.currentRate)) > floatEpsilon {
 		a.currentRate = newRate
 		a.limiter = rate.NewLimiter(newRate, a.baseBurst)
 	}

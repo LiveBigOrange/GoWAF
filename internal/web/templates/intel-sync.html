@@ -1,0 +1,224 @@
+{{define "intel-sync"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>情报中心-同步 - GoWAF</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <style>
+        .card+.card{margin-top:24px}
+        .section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+        .section-header h3{font-size:16px;color:#2c3e50;margin:0}
+        .section-desc{font-size:13px;color:#95a5a6;margin-bottom:16px}
+        .sync-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:20px}
+        .sync-card{background:#fff;border:1px solid #e4e7ed;border-radius:10px;padding:16px}
+        .sync-card .dt{font-size:14px;font-weight:600;color:#2c3e50;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+        .sync-card .meta{font-size:12px;color:#95a5a6;margin-bottom:4px}
+        .sync-card .actions{margin-top:10px;display:flex;gap:6px}
+        .badge{display:inline-flex;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:500}
+        .badge-success{background:#d4edda;color:#155724}
+        .badge-warning{background:#fff3cd;color:#856404}
+        .badge-danger{background:#f8d7da;color:#721c24}
+        .badge-secondary{background:#e2e3e5;color:#383d41}
+        .btn{padding:6px 12px;border-radius:4px;border:1px solid #dcdfe6;background:#fff;cursor:pointer;font-size:12px;transition:all .12s}
+        .btn:hover{background:#f0f2f5}
+        .btn-primary{background:#409eff;color:#fff;border-color:#409eff}
+        .btn-primary:hover{background:#66b1ff}
+        .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+        .sync-table{width:100%;border-collapse:collapse;font-size:13px}
+        .sync-table th{text-align:left;padding:10px 12px;font-weight:600;color:#596275;border-bottom:2px solid #ebeef5;white-space:nowrap;font-size:12px}
+        .sync-table td{padding:10px 12px;border-bottom:1px solid #f0f2f5;vertical-align:middle}
+        .sync-table tr:hover td{background:#fafbfc}
+        .filter-bar{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+        .filter-bar select,.filter-bar input{padding:8px 12px;border:1px solid #dcdfe6;border-radius:4px;font-size:14px}
+        .snapshot-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+        .snapshot-card{background:#fff;border:1px solid #e4e7ed;border-radius:10px;padding:16px}
+        .snapshot-card .desc{font-size:14px;font-weight:500;color:#2c3e50;margin-bottom:6px}
+        .snapshot-card .meta{font-size:12px;color:#95a5a6}
+        .snapshot-card .actions{margin-top:8px;display:flex;gap:6px}
+        .tab-bar{display:flex;gap:0;border-bottom:2px solid #e4e7ed;margin-bottom:20px}
+        .tab-bar .tab{padding:10px 20px;cursor:pointer;font-size:14px;color:#596275;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s}
+        .tab-bar .tab:hover{color:#409eff}
+        .tab-bar .tab.active{color:#409eff;border-bottom-color:#409eff;font-weight:500}
+        .log-detail-row td{padding:0;background:#fafbfc}
+        .log-detail{padding:12px 16px;font-size:12px;color:#596275;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:6px 16px}
+        .log-detail span{display:flex;gap:4px}
+        .log-detail .k{color:#95a5a6;min-width:70px}
+    </style>
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main scroll-page">
+        <h2 style="margin-bottom:24px;font-size:20px;color:#2c3e50;flex-shrink:0">&#127760; 规则同步管理</h2>
+
+        <div class="tab-bar">
+            <div class="tab active" onclick="switchSyncTab('status')">同步状态</div>
+            <div class="tab" onclick="switchSyncTab('logs')">同步日志</div>
+            <div class="tab" onclick="switchSyncTab('snapshots')">快照管理</div>
+        </div>
+
+        <div id="tabStatus">
+            <div class="card">
+                <div class="section-header"><h3>&#128260; 同步状态</h3></div>
+                <div class="section-desc">各数据类型的同步状态与版本信息</div>
+                <div class="sync-grid" id="syncStatusGrid"></div>
+            </div>
+        </div>
+
+        <div id="tabLogs" style="display:none">
+            <div class="card">
+                <div class="section-header">
+                    <h3>&#128196; 同步日志</h3>
+                    <div style="display:flex;gap:6px">
+                        <button class="btn" onclick="exportSyncLogs()">&#128190; 导出 JSON</button>
+                    </div>
+                </div>
+                <div class="filter-bar">
+                    <select id="filterDataType" onchange="loadSyncLogs()">
+                        <option value="">全部类型</option>
+                        <option value="ip_blacklist">IP 黑名单</option>
+                        <option value="ua_rules">UA 规则</option>
+                        <option value="path_rules">路径规则</option>
+                        <option value="bot_ips">Bot IP</option>
+                        <option value="threat_signatures">威胁签名</option>
+                        <option value="geoip">GeoIP 数据</option>
+                    </select>
+                    <button class="btn" onclick="loadSyncLogs()">&#128260; 刷新</button>
+                </div>
+                <div class="table-wrap">
+                    <table class="sync-table">
+                        <thead>
+                            <tr>
+                                <th>时间</th><th>类型</th><th>操作</th><th>新增</th><th>修改</th><th>删除</th><th>版本</th><th>耗时</th><th>状态</th>
+                            </tr>
+                        </thead>
+                        <tbody id="syncLogBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div id="tabSnapshots" style="display:none">
+            <div class="card">
+                <div class="section-header">
+                    <h3>&#128190; 规则快照</h3>
+                    <button class="btn btn-primary" onclick="createSnapshot()">&#10010; 创建快照</button>
+                </div>
+                <div class="snapshot-grid" id="snapshotGrid"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    const dtLabels={'ip_blacklist':'IP 黑名单','ua_rules':'UA 规则','path_rules':'路径规则','bot_ips':'Bot IP','threat_signatures':'威胁签名','geoip':'GeoIP'};
+    var cachedSyncLogs=[];
+
+    function switchSyncTab(tab){
+        document.querySelectorAll('.tab-bar .tab').forEach(function(t){t.classList.remove('active')});
+        var tabs={status:'tabStatus',logs:'tabLogs',snapshots:'tabSnapshots'};
+        Object.values(tabs).forEach(function(id){document.getElementById(id).style.display='none'});
+        document.getElementById(tabs[tab]).style.display='block';
+        event.target.classList.add('active');
+    }
+
+    async function loadSyncStatus(){
+        try{
+            const res=await fetch('/api/intel/sync/status');
+            const d=await res.json();
+            const grid=document.getElementById('syncStatusGrid');
+            grid.innerHTML='';
+            const states=d.data&&d.data.states?d.data.states:[];
+            if(states.length===0){grid.innerHTML='<div style="color:#95a5a6;font-size:13px">暂无同步状态数据</div>';return;}
+            states.forEach(s=>{
+                const label=dtLabels[s.data_type]||s.data_type;
+                const statusBadge=s.status==='success'?'<span class="badge badge-success">成功</span>':s.status==='pending'?'<span class="badge badge-warning">待同步</span>':'<span class="badge badge-danger">'+s.status+'</span>';
+                const card=document.createElement('div');card.className='sync-card';
+                card.innerHTML=`<div class="dt">${label} ${statusBadge}</div>
+                    <div class="meta">版本: ${s.current_version||'--'}</div>
+                    <div class="meta">规则数: ${s.items_count}</div>
+                    <div class="meta">上次全量: ${s.last_full_sync_at||'--'}</div>
+                    <div class="meta">上次增量: ${s.last_incremental_sync_at||'--'}</div>
+                    <div class="actions">
+                        <button class="btn" onclick="triggerSync('${s.data_type}',false)">增量同步</button>
+                        <button class="btn btn-primary" onclick="triggerSync('${s.data_type}',true)">全量同步</button>
+                    </div>`;
+                grid.appendChild(card);
+            });
+        }catch(e){console.error(e)}
+    }
+
+    async function triggerSync(dataType,full){
+        await fetch('/api/intel/sync/trigger',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data_type:dataType,full})});
+        setTimeout(()=>{loadSyncStatus();loadSyncLogs()},2000);
+    }
+
+    async function loadSyncLogs(){
+        try{
+            const dt=document.getElementById('filterDataType').value;
+            const url='/api/intel/sync/logs?limit=50'+(dt?'&data_type='+dt:'');
+            const res=await fetch(url);
+            const d=await res.json();
+            const tbody=document.getElementById('syncLogBody');
+            tbody.innerHTML='';
+            const logs=d.data&&d.data.logs?d.data.logs:[];
+            cachedSyncLogs=logs;
+            logs.forEach((l,idx)=>{
+                const badge=l.success?'<span class="badge badge-success">成功</span>':'<span class="badge badge-danger">失败</span>';
+                tbody.innerHTML+=`<tr style="cursor:pointer" onclick="toggleLogDetail(${idx})"><td>${l.created_at||''}</td><td>${dtLabels[l.data_type]||l.data_type}</td><td>${l.action}</td><td>${l.added_count}</td><td>${l.modified_count}</td><td>${l.deleted_count}</td><td>${l.version_to||'-'}</td><td>${l.duration_ms}ms</td><td>${badge}</td></tr>`;
+                tbody.innerHTML+=`<tr class="log-detail-row" id="logDetail${idx}" style="display:none"><td colspan="9"><div class="log-detail"><span><span class="k">新增:</span>${l.added_count}</span><span><span class="k">修改:</span>${l.modified_count}</span><span><span class="k">删除:</span>${l.deleted_count}</span><span><span class="k">耗时:</span>${l.duration_ms}ms</span>${l.error_message?'<span><span class="k">错误:</span>'+l.error_message+'</span>':''}</div></td></tr>`;
+            });
+        }catch(e){console.error(e)}
+    }
+
+    function toggleLogDetail(idx){
+        var row=document.getElementById('logDetail'+idx);
+        row.style.display=row.style.display==='none'?'':'none';
+    }
+
+    function exportSyncLogs(){
+        if(!cachedSyncLogs.length){alert('暂无日志数据');return;}
+        var json=JSON.stringify(cachedSyncLogs,null,2);
+        var blob=new Blob([json],{type:'application/json'});
+        var url=URL.createObjectURL(blob);
+        var a=document.createElement('a');
+        a.href=url;a.download='sync-logs.json';a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    async function loadSnapshots(){
+        try{
+            const res=await fetch('/api/intel/snapshots?limit=10');
+            const d=await res.json();
+            const grid=document.getElementById('snapshotGrid');
+            grid.innerHTML='';
+            const snaps=d.data&&d.data.snapshots?d.data.snapshots:[];
+            if(snaps.length===0){grid.innerHTML='<div style="color:#95a5a6;font-size:13px">暂无快照</div>';return;}
+            snaps.forEach(s=>{
+                const card=document.createElement('div');card.className='snapshot-card';
+                card.innerHTML=`<div class="desc">${s.description||'自动快照'}</div><div class="meta">规则数: ${s.rules_count} | ${s.auto?'自动':'手动'} | ${s.created_at}</div><div class="actions"><button class="btn" onclick="restoreSnapshot('${s.id}')">&#128260; 恢复</button></div>`;
+                grid.appendChild(card);
+            });
+        }catch(e){console.error(e)}
+    }
+
+    async function restoreSnapshot(id){
+        if(!confirm('确认恢复此快照？当前规则将被替换。')) return;
+        try{
+            await fetch('/api/intel/snapshots/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({snapshot_id:id})});
+            alert('快照已恢复');
+            loadSnapshots();
+        }catch(e){alert('恢复失败: '+e.message)}
+    }
+
+    async function createSnapshot(){
+        await fetch('/api/intel/snapshots/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({description:'手动快照'})});
+        loadSnapshots();
+    }
+
+    loadSyncStatus();loadSyncLogs();loadSnapshots();
+    </script>
+</body>
+</html>
+{{end}}

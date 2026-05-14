@@ -3,7 +3,7 @@ package logger
 import (
 	"time"
 
-	"gowaf-demo/internal/timeutil"
+	"gowaf/internal/timeutil"
 )
 
 // AccessLog 统一的访问日志结构
@@ -30,11 +30,11 @@ type AccessLog struct {
 	Scheme       string `json:"scheme,omitempty"`        // 请求协议 (http, https)
 
 	// ===== 性能指标 =====
-	LatencyMs         float64 `json:"latency_ms"`                     // 总响应延迟(毫秒)
-	LatencyUs         int64   `json:"latency_us,omitempty"`           // 总响应延迟(微秒，可选)
-	UpstreamLatencyMs float64 `json:"upstream_latency_ms,omitempty"`  // 后端响应延迟(毫秒)
-	BodySize          int64   `json:"body_size,omitempty"`            // 响应体大小(字节)
-	RequestSize       int64   `json:"request_size,omitempty"`         // 请求体大小(字节)
+	LatencyMs         float64 `json:"latency_ms"`                    // 总响应延迟(毫秒)
+	LatencyUs         int64   `json:"latency_us,omitempty"`          // 总响应延迟(微秒，可选)
+	UpstreamLatencyMs float64 `json:"upstream_latency_ms,omitempty"` // 后端响应延迟(毫秒)
+	BodySize          int64   `json:"body_size,omitempty"`           // 响应体大小(字节)
+	RequestSize       int64   `json:"request_size,omitempty"`        // 请求体大小(字节)
 
 	// ===== 地理位置信息 =====
 	GeoCountry string `json:"geo_country,omitempty"` // 国家/地区名称
@@ -60,8 +60,8 @@ type LogFieldConfig struct {
 
 // LogFormatConfig 日志格式配置
 type LogFormatConfig struct {
-	TimeFormat string        `yaml:"time_format"` // 时间格式
-	Fields     LogFieldConfig `yaml:"fields"`     // 字段配置
+	TimeFormat string         `yaml:"time_format"` // 时间格式
+	Fields     LogFieldConfig `yaml:"fields"`      // 字段配置
 }
 
 // DefaultLogFieldConfig 返回默认字段配置

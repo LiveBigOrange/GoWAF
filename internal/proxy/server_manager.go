@@ -10,19 +10,20 @@ import (
 	"sync"
 	"time"
 
-	"gowaf-demo/internal/proxyconfig"
+	"gowaf/internal/proxyconfig"
 )
 
 // ProxyServerManager 代理服务器管理器，负责动态管理所有代理服务器
 type ProxyServerManager struct {
 	mu               sync.RWMutex
 	servers          map[string]*http.Server // key: proxy config ID
+	serverAddrs      map[string]string       // key: proxy config ID, value: listen protocol (http/https)
 	proxyConfigMgr   *proxyconfig.Manager
 	wafProxy         *WAFProxy
 	certManager      *CertManager
-	httpsPortCache   string      // HTTPS端口缓存
+	httpsPortCache   string // HTTPS端口缓存
 	httpsPortCacheMu sync.RWMutex
-	httpsPortExpiry  time.Time   // 缓存过期时间
+	httpsPortExpiry  time.Time // 缓存过期时间
 }
 
 // CertManager 证书管理器接口
@@ -64,6 +65,15 @@ func (cm *CertManager) GetCertificate(domainName string) (certPEM, keyPEM string
 			return cert.CertPEM, cert.KeyPEM, true
 		}
 	}
+
+	// 回退: 查找 ACME 自动证书
+	if domainName != "" {
+		cert, err := cm.proxyConfigMgr.GetCertByDomainAndSource(domainName, "acme")
+		if err == nil && cert.NotAfter > time.Now().Unix() {
+			return cert.CertPEM, cert.KeyPEM, true
+		}
+	}
+
 	return "", "", false
 }
 
@@ -79,6 +89,8 @@ func matchWildcard(pattern, host string) bool {
 	remaining := host[:len(host)-len(suffix)]
 	return remaining != "" && !strings.Contains(remaining, ".")
 }
+
+const certCacheMaxSize = 256
 
 // GetTLSCertificate 获取tls.Certificate对象（支持热加载+SNI，按域名缓存）
 func (cm *CertManager) GetTLSCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
@@ -106,6 +118,22 @@ func (cm *CertManager) GetTLSCertificate(hello *tls.ClientHelloInfo) (*tls.Certi
 	}
 
 	cm.certCacheMu.Lock()
+	if cm.certCache == nil {
+		cm.certCache = make(map[string]*certCacheEntry, certCacheMaxSize)
+	}
+	if len(cm.certCache) >= certCacheMaxSize {
+		oldestKey := ""
+		oldestTime := time.Now()
+		for k, v := range cm.certCache {
+			if v.cacheTime.Before(oldestTime) {
+				oldestTime = v.cacheTime
+				oldestKey = k
+			}
+		}
+		if oldestKey != "" {
+			delete(cm.certCache, oldestKey)
+		}
+	}
 	cm.certCache[serverName] = &certCacheEntry{cert: &cert, cacheTime: time.Now()}
 	cm.certCacheMu.Unlock()
 
@@ -122,6 +150,7 @@ func (cm *CertManager) HasValidCertificate() bool {
 func NewProxyServerManager(pcm *proxyconfig.Manager, wafProxy *WAFProxy) *ProxyServerManager {
 	return &ProxyServerManager{
 		servers:        make(map[string]*http.Server),
+		serverAddrs:    make(map[string]string),
 		proxyConfigMgr: pcm,
 		wafProxy:       wafProxy,
 		certManager:    NewCertManager(pcm),
@@ -140,14 +169,13 @@ func (m *ProxyServerManager) buildHTTPSPorts(proxyConfigs []proxyconfig.ProxyCon
 	httpsPorts := make(map[string]string)
 	for i := range proxyConfigs {
 		cfg := &proxyConfigs[i]
-		if cfg.Enabled && cfg.Protocol == "https" {
+		if cfg.Enabled && cfg.ListenProtocol() == "https" {
 			addr := cfg.ListenAddr
 			if strings.HasPrefix(addr, ":") {
 				httpsPorts["default"] = addr
-			} else if strings.Contains(addr, ":") {
-				parts := strings.Split(addr, ":")
-				if len(parts) == 2 {
-					httpsPorts[parts[0]] = ":" + parts[1]
+			} else if idx := strings.LastIndex(addr, ":"); idx != -1 {
+				if !strings.Contains(addr[:idx], ":") {
+					httpsPorts[addr[:idx]] = ":" + addr[idx+1:]
 				}
 			}
 		}
@@ -175,15 +203,14 @@ func (m *ProxyServerManager) getHTTPSPort() string {
 	var port string
 	for i := range proxyConfigs {
 		cfg := &proxyConfigs[i]
-		if cfg.Enabled && cfg.Protocol == "https" {
+		if cfg.Enabled && cfg.ListenProtocol() == "https" {
 			addr := cfg.ListenAddr
 			if strings.HasPrefix(addr, ":") {
 				port = addr
 				break
-			} else if strings.Contains(addr, ":") {
-				parts := strings.Split(addr, ":")
-				if len(parts) == 2 {
-					port = ":" + parts[1]
+			} else if idx := strings.LastIndex(addr, ":"); idx != -1 {
+				if !strings.Contains(addr[:idx], ":") {
+					port = ":" + addr[idx+1:]
 					break
 				}
 			}
@@ -209,33 +236,58 @@ func (m *ProxyServerManager) startServerLocked(cfg *proxyconfig.ProxyConfig, htt
 		return fmt.Errorf("代理服务器 %s 已存在", cfg.ID)
 	}
 
-	for id, srv := range m.servers {
-		if id != cfg.ID && srv.Addr == cfg.ListenAddr {
-			return fmt.Errorf("监听地址 %s 已被代理 %s 占用", cfg.ListenAddr, id)
-		}
-	}
-
 	if cfg.ListenAddr == "" {
 		return fmt.Errorf("监听地址不能为空")
 	}
 
-	if cfg.Protocol != "http" && cfg.Protocol != "https" {
-		return fmt.Errorf("不支持的协议: %s", cfg.Protocol)
+	if err := proxyconfig.ValidateProtocolList(cfg.Protocol); err != nil {
+		return err
 	}
+
+	newListenProto := cfg.ListenProtocol()
+
+	for id, srv := range m.servers {
+		if id != cfg.ID && srv.Addr == cfg.ListenAddr {
+			existingListenProto := m.serverAddrs[id]
+			if existingListenProto == newListenProto {
+				m.servers[cfg.ID] = srv
+				m.serverAddrs[cfg.ID] = newListenProto
+				return nil
+			}
+			return fmt.Errorf("监听地址 %s 已被代理 %s 占用（协议不兼容: 已有%s，新增%s）", cfg.ListenAddr, id, existingListenProto, newListenProto)
+		}
+	}
+
+	listenProto := newListenProto
 
 	var handler http.Handler
 
-	if cfg.Protocol == "http" {
+	if listenProto == "http" {
 		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			host := r.Host
-			if strings.Contains(host, ":") {
-				parts := strings.Split(host, ":")
-				host = parts[0]
+			if idx := strings.LastIndex(host, ":"); idx != -1 {
+				if !strings.Contains(host[:idx], ":") {
+					host = host[:idx]
+				} else if strings.HasPrefix(host, "[") {
+					if end := strings.Index(host, "]"); end != -1 {
+						host = host[1:end]
+					}
+				}
 			}
 
 			domainCfg, err := m.proxyConfigMgr.GetDomainByName(host)
 			if err == nil && domainCfg != nil && domainCfg.ForceHTTPS {
+				connHdr := strings.ToLower(r.Header.Get("Connection"))
+				isWSRequest := (strings.Contains(connHdr, "upgrade") || connHdr == "upgrade") && strings.ToLower(r.Header.Get("Upgrade")) == "websocket"
+				if isWSRequest {
+					m.wafProxy.ServeHTTP(w, r)
+					return
+				}
 				httpsPort := m.getHTTPSPort()
+				if strings.Contains(host, "/") || strings.Contains(host, "\\") || strings.Contains(host, "..") {
+					http.Error(w, "Invalid Host", http.StatusBadRequest)
+					return
+				}
 				httpsURL := "https://" + host
 				if httpsPort != ":443" {
 					httpsURL += httpsPort
@@ -256,35 +308,55 @@ func (m *ProxyServerManager) startServerLocked(cfg *proxyconfig.ProxyConfig, htt
 	}
 
 	srv := &http.Server{
-		Addr:    cfg.ListenAddr,
-		Handler: handler,
+		Addr:         cfg.ListenAddr,
+		Handler:      handler,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	m.servers[cfg.ID] = srv
+	m.serverAddrs[cfg.ID] = listenProto
 
-	if cfg.Protocol == "https" {
+	if listenProto == "https" {
 		srv.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			MaxVersion: tls.VersionTLS13,
+			CurvePreferences: []tls.CurveID{
+				tls.X25519,
+				tls.CurveP256,
+			},
 			GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 				return m.certManager.GetTLSCertificate(hello)
 			},
 		}
 
-		go func(id, addr string, server *http.Server) {
-			log.Printf("HTTPS代理服务监听: %s (支持SNI证书热加载)", addr)
+		go func(id, addr string, server *http.Server, protocol string) {
+			log.Printf("代理服务监听: %s (%s)", addr, protocol)
 			if err := server.ListenAndServeTLS("", ""); err != http.ErrServerClosed {
 				log.Printf("HTTPS代理服务错误 [%s]: %v", addr, err)
 				m.mu.Lock()
-				delete(m.servers, id)
+				for k, v := range m.servers {
+					if v == server {
+						delete(m.servers, k)
+						delete(m.serverAddrs, k)
+					}
+				}
 				m.mu.Unlock()
 			}
-		}(cfg.ID, cfg.ListenAddr, srv)
+		}(cfg.ID, cfg.ListenAddr, srv, cfg.Protocol)
 	} else {
 		go func(id, addr string, server *http.Server, protocol string) {
 			log.Printf("代理服务监听: %s (%s)", addr, protocol)
 			if err := server.ListenAndServe(); err != http.ErrServerClosed {
 				log.Printf("代理服务错误 [%s]: %v", addr, err)
 				m.mu.Lock()
-				delete(m.servers, id)
+				for k, v := range m.servers {
+					if v == server {
+						delete(m.servers, k)
+						delete(m.serverAddrs, k)
+					}
+				}
 				m.mu.Unlock()
 			}
 		}(cfg.ID, cfg.ListenAddr, srv, cfg.Protocol)
@@ -295,6 +367,8 @@ func (m *ProxyServerManager) startServerLocked(cfg *proxyconfig.ProxyConfig, htt
 
 // ReloadAll 重新加载所有代理服务器
 func (m *ProxyServerManager) ReloadAll() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.stopAllLocked()
 	return m.startAllLocked()
 }
@@ -332,6 +406,10 @@ func (m *ProxyServerManager) StopAll() {
 	m.stopAllLocked()
 }
 
+func (m *ProxyServerManager) ShutdownAll() {
+	m.StopAll()
+}
+
 // stopAllLocked 停止所有代理服务器（需要持有锁）
 func (m *ProxyServerManager) stopAllLocked() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -344,6 +422,7 @@ func (m *ProxyServerManager) stopAllLocked() {
 	}
 
 	m.servers = make(map[string]*http.Server)
+	m.serverAddrs = make(map[string]string)
 }
 
 // AddProxy 添加代理服务器
@@ -370,10 +449,13 @@ func (m *ProxyServerManager) UpdateProxy(cfg *proxyconfig.ProxyConfig) error {
 	defer m.mu.Unlock()
 
 	var oldSrv *http.Server
+	var oldListenProto string
 	var oldExists bool
 
 	if oldSrv, oldExists = m.servers[cfg.ID]; oldExists {
+		oldListenProto = m.serverAddrs[cfg.ID]
 		delete(m.servers, cfg.ID)
+		delete(m.serverAddrs, cfg.ID)
 	}
 
 	if cfg.Enabled {
@@ -382,6 +464,7 @@ func (m *ProxyServerManager) UpdateProxy(cfg *proxyconfig.ProxyConfig) error {
 		if err := m.startServerLocked(cfg, httpsPorts); err != nil {
 			if oldExists {
 				m.servers[cfg.ID] = oldSrv
+				m.serverAddrs[cfg.ID] = oldListenProto
 				log.Printf("新代理启动失败，已恢复旧代理服务 [%s]", cfg.ID)
 			}
 			return err
@@ -405,12 +488,25 @@ func (m *ProxyServerManager) DeleteProxy(id string) error {
 	defer m.mu.Unlock()
 
 	if srv, exists := m.servers[id]; exists {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(ctx); err != nil {
-			log.Printf("代理服务关闭错误 [%s]: %v", id, err)
-		}
 		delete(m.servers, id)
+		delete(m.serverAddrs, id)
+
+		sharedByOther := false
+		for otherID, otherSrv := range m.servers {
+			if otherID != id && otherSrv == srv {
+				sharedByOther = true
+				break
+			}
+		}
+		if !sharedByOther {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := srv.Shutdown(ctx); err != nil {
+				log.Printf("代理服务关闭错误 [%s]: %v", id, err)
+			}
+		}
+	} else {
+		delete(m.serverAddrs, id)
 	}
 
 	return nil

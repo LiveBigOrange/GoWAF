@@ -3,7 +3,8 @@ package logdb
 import (
 	"database/sql"
 	"fmt"
-	"sync"
+	"log"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -13,8 +14,7 @@ import (
 type LogDB struct {
 	db    *sql.DB
 	path  string
-	mu    sync.RWMutex
-	cache *QueryCache // 查询缓存
+	cache *QueryCache
 }
 
 // AccessLogRecord 访问日志记录
@@ -50,26 +50,20 @@ func NewLogDB(dbPath string) (*LogDB, error) {
 
 // NewLogDBWithConfig 使用配置创建日志数据库管理器
 func NewLogDBWithConfig(dbPath string, cacheSize int, cacheTTLMinutes int) (*LogDB, error) {
-	db, err := sql.Open("sqlite", dbPath)
+	// 通过 DSN 参数设置 pragma，确保连接池中所有连接都继承这些设置
+	dsn := dbPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=cache_size(10000)&_pragma=temp_store(MEMORY)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
 
-	// SQLite性能优化配置
-	pragmas := []string{
-		"PRAGMA journal_mode=WAL",        // WAL模式，提高并发性能
-		"PRAGMA cache_size=10000",        // 增大缓存（日志数据库需要更大缓存）
-		"PRAGMA synchronous=NORMAL",      // 平衡性能和安全
-		"PRAGMA auto_vacuum=INCREMENTAL", // 自动回收空间
-		"PRAGMA temp_store=MEMORY",       // 临时数据存内存
-		"PRAGMA busy_timeout=5000",       // 忙等待超时5秒
-	}
+	// auto_vacuum 是数据库级别设置，只需执行一次
+	db.Exec("PRAGMA auto_vacuum=INCREMENTAL")
+	db.Exec("PRAGMA wal_autocheckpoint=500")
 
-	for _, pragma := range pragmas {
-		if _, err := db.Exec(pragma); err != nil {
-			continue
-		}
-	}
+	db.SetMaxOpenConns(8)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(30 * time.Minute)
 
 	if cacheSize <= 0 {
 		cacheSize = 1000
@@ -127,16 +121,26 @@ func (l *LogDB) initTables() error {
 		return err
 	}
 
-	migrations := []string{
-		"ALTER TABLE access_logs ADD COLUMN rule_id TEXT DEFAULT ''",
-		"ALTER TABLE access_logs ADD COLUMN match_detail TEXT DEFAULT ''",
-		"ALTER TABLE access_logs ADD COLUMN match_location TEXT DEFAULT ''",
-		"ALTER TABLE access_logs ADD COLUMN geo_country TEXT DEFAULT ''",
-		"ALTER TABLE access_logs ADD COLUMN geo_city TEXT DEFAULT ''",
-		"ALTER TABLE access_logs ADD COLUMN geo_flag TEXT DEFAULT ''",
+	type mig struct {
+		col string
+		sql string
+	}
+	migrations := []mig{
+		{"rule_id", "ALTER TABLE access_logs ADD COLUMN rule_id TEXT DEFAULT ''"},
+		{"match_detail", "ALTER TABLE access_logs ADD COLUMN match_detail TEXT DEFAULT ''"},
+		{"match_location", "ALTER TABLE access_logs ADD COLUMN match_location TEXT DEFAULT ''"},
+		{"geo_country", "ALTER TABLE access_logs ADD COLUMN geo_country TEXT DEFAULT ''"},
+		{"geo_city", "ALTER TABLE access_logs ADD COLUMN geo_city TEXT DEFAULT ''"},
+		{"geo_flag", "ALTER TABLE access_logs ADD COLUMN geo_flag TEXT DEFAULT ''"},
 	}
 	for _, m := range migrations {
-		l.db.Exec(m)
+		var colName string
+		err := l.db.QueryRow("SELECT name FROM pragma_table_info('access_logs') WHERE name = ?", m.col).Scan(&colName)
+		if err != nil {
+			if _, err := l.db.Exec(m.sql); err != nil {
+				log.Printf("migration: access_logs %v", err)
+			}
+		}
 	}
 
 	// 创建索引（提升查询性能）
@@ -161,6 +165,11 @@ func (l *LogDB) initTables() error {
 	}
 
 	return nil
+}
+
+// EnsureTables 确保数据库表已初始化
+func (l *LogDB) EnsureTables() error {
+	return l.initTables()
 }
 
 // InsertLog 插入日志记录
@@ -247,8 +256,9 @@ func (l *LogDB) QueryLogs(limit, offset int, filters map[string]interface{}) ([]
 		args = append(args, action)
 	}
 	if path, ok := filters["path"].(string); ok && path != "" {
-		whereClause += " AND path LIKE ?"
-		args = append(args, "%"+path+"%")
+		whereClause += " AND path LIKE ? ESCAPE '\\'"
+		escapedPath := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(path)
+		args = append(args, "%"+escapedPath+"%")
 	}
 
 	// 查询总数
@@ -283,6 +293,9 @@ func (l *LogDB) QueryLogs(limit, offset int, filters map[string]interface{}) ([]
 		}
 		logs = append(logs, log)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
 
 	return logs, total, nil
 }
@@ -311,6 +324,9 @@ func (l *LogDB) GetRecentLogs(limit int) ([]*AccessLogRecord, error) {
 		}
 		logs = append(logs, log)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 
 	return logs, nil
 }
@@ -318,46 +334,57 @@ func (l *LogDB) GetRecentLogs(limit int) ([]*AccessLogRecord, error) {
 // CleanOldLogs 清理旧日志（保留指定天数）
 func (l *LogDB) CleanOldLogs(retentionDays int) error {
 	cutoff := time.Now().AddDate(0, 0, -retentionDays)
-	deleteSQL := "DELETE FROM access_logs WHERE created_at < ?"
-	_, err := l.db.Exec(deleteSQL, cutoff)
-	return err
+	cutoffStr := cutoff.Format("2006-01-02 15:04:05")
+	// 分批删除避免长时间持锁
+	const batchSize = 10000
+	for {
+		result, err := l.db.Exec(`DELETE FROM access_logs WHERE rowid IN (SELECT rowid FROM access_logs WHERE created_at < ? LIMIT ?)`, cutoffStr, batchSize)
+		if err != nil {
+			return err
+		}
+		affected, _ := result.RowsAffected()
+		if affected < int64(batchSize) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	l.db.Exec(`PRAGMA incremental_vacuum`)
+	return nil
 }
 
-// GetStats 获取统计信息（优化版：单次查询+缓存）
+// GetStats 获取统计信息（优化版：单次查询+缓存+singleflight防击穿，限制7天范围避免全表扫描）
 func (l *LogDB) GetStats() (map[string]interface{}, error) {
-	// 尝试从缓存获取
 	cacheKey := "stats:global"
-	if cached, ok := l.cache.Get(cacheKey); ok {
-		return cached.(map[string]interface{}), nil
-	}
-
-	stats := make(map[string]interface{})
-
-	// 优化：使用单次查询获取所有统计数据
-	query := `
-	SELECT 
-		COUNT(*) as total_count,
-		SUM(CASE WHEN date(created_at) = date('now') THEN 1 ELSE 0 END) as today_count,
-		SUM(CASE WHEN action = 'block' THEN 1 ELSE 0 END) as blocked_count,
-		SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) as error_count
-	FROM access_logs
-	`
-
-	var totalCount, todayCount, blockedCount, errorCount int
-	err := l.db.QueryRow(query).Scan(&totalCount, &todayCount, &blockedCount, &errorCount)
+	data, err := l.cache.GetOrLoad(cacheKey, func() (interface{}, error) {
+		stats := make(map[string]interface{})
+		weekAgo := time.Now().AddDate(0, 0, -7).Format("2006-01-02 15:04:05")
+		todayStart := time.Now().Format("2006-01-02") + " 00:00:00"
+		query := `
+		SELECT
+			COUNT(*) as total_count,
+			COALESCE(SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END), 0) as today_count,
+			COALESCE(SUM(CASE WHEN action = 'block' THEN 1 ELSE 0 END), 0) as blocked_count,
+			COALESCE(SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END), 0) as error_count
+		FROM access_logs
+		WHERE created_at >= ?
+		`
+		var totalCount, todayCount, blockedCount, errorCount int
+		if err := l.db.QueryRow(query, todayStart, weekAgo).Scan(&totalCount, &todayCount, &blockedCount, &errorCount); err != nil {
+			return nil, err
+		}
+		stats["total_count"] = totalCount
+		stats["today_count"] = todayCount
+		stats["blocked_count"] = blockedCount
+		stats["error_count"] = errorCount
+		return stats, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	stats["total_count"] = totalCount
-	stats["today_count"] = todayCount
-	stats["blocked_count"] = blockedCount
-	stats["error_count"] = errorCount
-
-	// 存入缓存
-	l.cache.Set(cacheKey, stats)
-
-	return stats, nil
+	if result, ok := data.(map[string]interface{}); ok {
+		return result, nil
+	}
+	return nil, fmt.Errorf("cache type error")
 }
 
 // GetCacheStats 获取缓存统计信息
@@ -387,42 +414,42 @@ func (l *LogDB) AggregateByField(field string, limit int) ([]AggregationResult, 
 		return nil, fmt.Errorf("invalid field: %s", field)
 	}
 
-	// 尝试从缓存获取
 	cacheKey := fmt.Sprintf("aggregate:%s:%d", field, limit)
-	if cached, ok := l.cache.Get(cacheKey); ok {
-		return cached.([]AggregationResult), nil
-	}
+	data, err := l.cache.GetOrLoad(cacheKey, func() (interface{}, error) {
+		weekAgo := time.Now().AddDate(0, 0, -7).Format("2006-01-02 15:04:05")
+		query := fmt.Sprintf(`
+		SELECT %s as field_value, COUNT(*) as count
+		FROM access_logs
+		WHERE %s IS NOT NULL AND %s != '' AND created_at >= ?
+		GROUP BY %s
+		ORDER BY count DESC
+		LIMIT ?
+		`, field, field, field, field)
 
-	query := fmt.Sprintf(`
-	SELECT %s as field_value, COUNT(*) as count
-	FROM access_logs
-	WHERE %s IS NOT NULL AND %s != ''
-	GROUP BY %s
-	ORDER BY count DESC
-	LIMIT ?
-	`, field, field, field, field)
-
-	rows, err := l.db.Query(query, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var results []AggregationResult
-	for rows.Next() {
-		var result AggregationResult
-		err := rows.Scan(&result.Value, &result.Count)
+		rows, err := l.db.Query(query, weekAgo, limit)
 		if err != nil {
 			return nil, err
 		}
-		result.Field = field
-		results = append(results, result)
+		defer rows.Close()
+
+		var results []AggregationResult
+		for rows.Next() {
+			var result AggregationResult
+			if err := rows.Scan(&result.Value, &result.Count); err != nil {
+				return nil, err
+			}
+			result.Field = field
+			results = append(results, result)
+		}
+		return results, nil
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	// 存入缓存
-	l.cache.Set(cacheKey, results)
-
-	return results, nil
+	if result, ok := data.([]AggregationResult); ok {
+		return result, nil
+	}
+	return nil, fmt.Errorf("cache type assertion failed for key %s", cacheKey)
 }
 
 // TimeSeriesData 时间序列数据
@@ -433,7 +460,6 @@ type TimeSeriesData struct {
 
 // GetTimeSeries 获取时间序列数据
 func (l *LogDB) GetTimeSeries(interval string, hours int) ([]TimeSeriesData, error) {
-	// 验证interval（防止SQL注入）
 	allowedIntervals := map[string]bool{
 		"hour":   true,
 		"day":    true,
@@ -444,51 +470,50 @@ func (l *LogDB) GetTimeSeries(interval string, hours int) ([]TimeSeriesData, err
 		return nil, fmt.Errorf("invalid interval: %s", interval)
 	}
 
-	// 尝试从缓存获取
 	cacheKey := fmt.Sprintf("timeseries:%s:%d", interval, hours)
-	if cached, ok := l.cache.Get(cacheKey); ok {
-		return cached.([]TimeSeriesData), nil
-	}
+	data, err := l.cache.GetOrLoad(cacheKey, func() (interface{}, error) {
+		var dateFormat string
+		switch interval {
+		case "hour":
+			dateFormat = "%Y-%m-%d %H:00"
+		case "day":
+			dateFormat = "%Y-%m-%d"
+		case "minute":
+			dateFormat = "%Y-%m-%d %H:%M"
+		}
 
-	var dateFormat string
-	switch interval {
-	case "hour":
-		dateFormat = "%Y-%m-%d %H:00"
-	case "day":
-		dateFormat = "%Y-%m-%d"
-	case "minute":
-		dateFormat = "%Y-%m-%d %H:%M"
-	}
+		query := `
+		SELECT strftime(?, created_at) as time_bucket, COUNT(*) as count
+		FROM access_logs
+		WHERE created_at >= datetime('now', ?)
+		GROUP BY time_bucket
+		ORDER BY time_bucket ASC
+		`
 
-	query := `
-	SELECT strftime(?, created_at) as time_bucket, COUNT(*) as count
-	FROM access_logs
-	WHERE created_at >= datetime('now', ?)
-	GROUP BY time_bucket
-	ORDER BY time_bucket ASC
-	`
-
-	hoursStr := fmt.Sprintf("-%d hours", hours)
-	rows, err := l.db.Query(query, dateFormat, hoursStr)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var results []TimeSeriesData
-	for rows.Next() {
-		var data TimeSeriesData
-		err := rows.Scan(&data.Timestamp, &data.Count)
+		hoursStr := fmt.Sprintf("-%d hours", hours)
+		rows, err := l.db.Query(query, dateFormat, hoursStr)
 		if err != nil {
 			return nil, err
 		}
-		results = append(results, data)
+		defer rows.Close()
+
+		var results []TimeSeriesData
+		for rows.Next() {
+			var data TimeSeriesData
+			if err := rows.Scan(&data.Timestamp, &data.Count); err != nil {
+				return nil, err
+			}
+			results = append(results, data)
+		}
+		return results, nil
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	// 存入缓存
-	l.cache.Set(cacheKey, results)
-
-	return results, nil
+	if result, ok := data.([]TimeSeriesData); ok {
+		return result, nil
+	}
+	return nil, fmt.Errorf("cache type assertion failed for key %s", cacheKey)
 }
 
 // GetDB 获取数据库连接
@@ -498,5 +523,8 @@ func (l *LogDB) GetDB() *sql.DB {
 
 // Close 关闭数据库连接
 func (l *LogDB) Close() error {
+	if l.cache != nil {
+		l.cache.Stop()
+	}
 	return l.db.Close()
 }

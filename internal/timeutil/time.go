@@ -110,7 +110,7 @@ func ParseTime(s string) (time.Time, error) {
 			return t, nil
 		}
 	}
-	return time.Time{}, nil
+	return time.Time{}, fmt.Errorf("timeutil.ParseTime:无法解析时间字符串: %q", s)
 }
 
 // FromTime 从 time.Time 创建 LocalTime

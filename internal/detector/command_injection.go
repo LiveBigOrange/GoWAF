@@ -134,7 +134,6 @@ func (d *CommandInjectionDetector) compilePatterns() {
 		`(?i)\bcomp\.exe`,
 		`(?i)\bfc\.exe`,
 		`(?i)\btree\.exe`,
-		`(?i)\bdir\s+`,
 		`(?i)\bver\.exe`,
 		`(?i)\bvol\.exe`,
 		`(?i)\blabel\.exe`,
@@ -167,12 +166,6 @@ func (d *CommandInjectionDetector) compilePatterns() {
 		`(?i)\bregini\.exe`,
 		`(?i)\bsetx\.exe`,
 		`(?i)\bset\.exe`,
-		`(?i)\becho\s+`,
-		`(?i)\btype\s+`,
-		`(?i)\bcopy\s+`,
-		`(?i)\bmove\s+`,
-		`(?i)\bdel\s+`,
-		`(?i)\bformat\s+`,
 		`(?i)\bshutdown\.exe`,
 		`(?i)\brestart\.exe`,
 		`(?i)\blogoff\.exe`,
@@ -211,7 +204,7 @@ func (d *CommandInjectionDetector) compilePatterns() {
 	d.patterns = make([]*regexp.Regexp, 0, len(patternStrs))
 	d.patternDescs = make([]string, 0, len(patternStrs))
 	for _, pattern := range patternStrs {
-		re, err := regexp.Compile(pattern)
+		re, err := compileRegex(pattern)
 		if err == nil {
 			d.patterns = append(d.patterns, re)
 			if desc, ok := patternDescMap[pattern]; ok {

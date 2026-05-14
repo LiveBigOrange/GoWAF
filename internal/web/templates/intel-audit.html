@@ -1,0 +1,273 @@
+{{define "intel-audit"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>情报中心-审计 - GoWAF</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <style>
+        .card+.card{margin-top:24px}
+        .section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+        .section-header h3{font-size:16px;color:#2c3e50;margin:0}
+        .section-desc{font-size:13px;color:#95a5a6;margin-bottom:16px}
+        .tab-bar{display:flex;gap:0;border-bottom:2px solid #e4e7ed;margin-bottom:20px}
+        .tab-bar .tab{padding:10px 20px;cursor:pointer;font-size:14px;color:#596275;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s}
+        .tab-bar .tab:hover{color:#409eff}
+        .tab-bar .tab.active{color:#409eff;border-bottom-color:#409eff;font-weight:500}
+        .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+        .audit-table{width:100%;border-collapse:collapse;font-size:13px}
+        .audit-table th{text-align:left;padding:10px 12px;font-weight:600;color:#596275;border-bottom:2px solid #ebeef5;white-space:nowrap;font-size:12px}
+        .audit-table td{padding:10px 12px;border-bottom:1px solid #f0f2f5;vertical-align:middle}
+        .audit-table tr:hover td{background:#fafbfc}
+        .btn{padding:6px 12px;border-radius:4px;border:1px solid #dcdfe6;background:#fff;cursor:pointer;font-size:12px;transition:all .12s;white-space:nowrap}
+        .btn:hover{background:#f0f2f5}
+        .btn-primary{background:#409eff;color:#fff;border-color:#409eff}
+        .btn-primary:hover{background:#66b1ff}
+        .btn-success{background:#67c23a;color:#fff;border-color:#67c23a}
+        .btn-danger{background:#f56c6c;color:#fff;border-color:#f56c6c}
+        .badge{display:inline-flex;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:500}
+        .badge-warning{background:#fff3cd;color:#856404}
+        .badge-success{background:#d4edda;color:#155724}
+        .badge-danger{background:#f8d7da;color:#721c24}
+        .badge-info{background:#d1ecf1;color:#0c5460}
+        .badge-secondary{background:#e2e3e5;color:#383d41}
+        .filter-bar{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+        .filter-bar select{padding:8px 12px;border:1px solid #dcdfe6;border-radius:4px;font-size:14px}
+        .json-preview{background:#f8f9fa;border:1px solid #e4e7ed;border-radius:6px;padding:12px;font-family:monospace;font-size:12px;max-height:200px;overflow:auto;white-space:pre-wrap;word-break:break-all;color:#2c3e50}
+        .risk-high{color:#f56c6c;font-weight:600}
+        .risk-low{color:#67c23a}
+        .checkbox-cell{width:30px;text-align:center}
+        .checkbox-cell input{cursor:pointer}
+    </style>
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main scroll-page">
+        <h2 style="margin-bottom:24px;font-size:20px;color:#2c3e50;flex-shrink:0">&#127760; 上传审计</h2>
+
+        <div class="tab-bar">
+            <div class="tab active" data-tab="queue" onclick="switchTab('queue')">待审队列</div>
+            <div class="tab" data-tab="logs" onclick="switchTab('logs')">上传日志</div>
+            <div class="tab" data-tab="overrides" onclick="switchTab('overrides')">规则覆盖</div>
+            <div class="tab" data-tab="exclusions" onclick="switchTab('exclusions')">排除规则</div>
+        </div>
+
+        <div id="tabQueue" class="tab-content">
+            <div class="card">
+                <div class="section-header">
+                    <h3>&#128203; 待审核数据</h3>
+                    <div style="display:flex;gap:8px">
+                        <button class="btn btn-success" onclick="batchAction('approve')">&#10004; 批量通过</button>
+                        <button class="btn btn-danger" onclick="batchAction('reject')">&#10008; 批量拒绝</button>
+                    </div>
+                </div>
+                <div class="filter-bar">
+                    <select id="queueDataType" onchange="loadQueue()">
+                        <option value="intercept_events">拦截事件</option>
+                        <option value="ip_blacklist">IP 黑名单</option>
+                        <option value="ua_rules">UA 规则</option>
+                        <option value="path_rules">路径规则</option>
+                    </select>
+                    <button class="btn" onclick="loadQueue()">&#128260; 刷新</button>
+                </div>
+                <div class="table-wrap">
+                    <table class="audit-table">
+                        <thead>
+                            <tr><th class="checkbox-cell"><input type="checkbox" id="checkAll" onchange="toggleAll(this.checked)"></th><th>ID</th><th>类型</th><th>风险</th><th>状态</th><th>时间</th><th>操作</th></tr>
+                        </thead>
+                        <tbody id="queueBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div id="tabLogs" class="tab-content" style="display:none">
+            <div class="card">
+                <div class="section-header"><h3>&#128196; 上传日志</h3></div>
+                <div class="table-wrap">
+                    <table class="audit-table">
+                        <thead>
+                            <tr><th>时间</th><th>类型</th><th>条数</th><th>已接收</th><th>已拒绝</th><th>积分</th><th>状态</th></tr>
+                        </thead>
+                        <tbody id="uploadLogBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div id="tabOverrides" class="tab-content" style="display:none">
+            <div class="card">
+                <div class="section-header">
+                    <h3>&#128396; 规则覆盖</h3>
+                    <button class="btn btn-primary" onclick="showAddOverride()">&#10010; 添加覆盖</button>
+                </div>
+                <div class="table-wrap">
+                    <table class="audit-table">
+                        <thead>
+                            <tr><th>ID</th><th>情报规则ID</th><th>类型</th><th>动作</th><th>原因</th><th>操作</th></tr>
+                        </thead>
+                        <tbody id="overrideBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div id="tabExclusions" class="tab-content" style="display:none">
+            <div class="card">
+                <div class="section-header">
+                    <h3>&#128683; 排除规则</h3>
+                    <button class="btn btn-primary" onclick="showAddExclusion()">&#10010; 添加排除</button>
+                </div>
+                <div class="table-wrap">
+                    <table class="audit-table">
+                        <thead>
+                            <tr><th>ID</th><th>匹配类型</th><th>模式</th><th>启用</th><th>说明</th><th>操作</th></tr>
+                        </thead>
+                        <tbody id="exclusionBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    function switchTab(tab){
+        document.querySelectorAll('.tab-bar .tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===tab));
+        document.querySelectorAll('.tab-content').forEach(c=>c.style.display='none');
+        document.getElementById('tab'+tab.charAt(0).toUpperCase()+tab.slice(1)).style.display='';
+        if(tab==='queue') loadQueue();
+        else if(tab==='logs') loadUploadLogs();
+        else if(tab==='overrides') loadOverrides();
+        else if(tab==='exclusions') loadExclusions();
+    }
+
+    function getCheckedIds(){
+        return Array.from(document.querySelectorAll('.queue-check:checked')).map(cb=>parseInt(cb.value));
+    }
+    function toggleAll(checked){
+        document.querySelectorAll('.queue-check').forEach(cb=>cb.checked=checked);
+    }
+
+    async function loadQueue(){
+        try{
+            const dt=document.getElementById('queueDataType').value;
+            const res=await fetch('/api/intel/upload/queue?data_type='+dt+'&limit=50');
+            const d=await res.json();
+            const tbody=document.getElementById('queueBody');
+            tbody.innerHTML='';
+            const items=d.data&&d.data.items?d.data.items:[];
+            items.forEach(i=>{
+                const riskClass=i.sensitive_risk>=2?'risk-high':'risk-low';
+                const statusBadge=i.status==='pending'?'<span class="badge badge-warning">待审核</span>':i.status==='approved'?'<span class="badge badge-success">已通过</span>':i.status==='rejected'?'<span class="badge badge-danger">已拒绝</span>':'<span class="badge badge-secondary">'+i.status+'</span>';
+                tbody.innerHTML+=`<tr><td class="checkbox-cell"><input type="checkbox" class="queue-check" value="${i.id}"></td><td>${i.id}</td><td>${i.data_type}</td><td class="${riskClass}">${i.sensitive_risk}</td><td>${statusBadge}</td><td>${i.created_at||''}</td><td><button class="btn" onclick="toggleDetail(${i.id})">详情</button> <button class="btn btn-success" onclick="approveItem(${i.id})">通过</button> <button class="btn btn-danger" onclick="rejectItem(${i.id})">拒绝</button></td></tr>`;
+                tbody.innerHTML+=`<tr id="detail-${i.id}" style="display:none"><td colspan="7"><div style="display:flex;gap:16px;padding:12px"><div style="flex:1"><div style="font-weight:600;margin-bottom:6px;color:#2c3e50">原始数据</div><pre class="json-preview">${formatJSON(i.original_data)}</pre></div><div style="flex:1"><div style="font-weight:600;margin-bottom:6px;color:#2c3e50">脱敏后数据</div><pre class="json-preview">${formatJSON(i.masked_data)}</pre></div></div></td></tr>`;
+            });
+        }catch(e){console.error(e)}
+    }
+
+    async function approveItem(id){
+        await fetch('/api/intel/upload/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,note:'手动审核通过'})});
+        loadQueue();
+    }
+    async function rejectItem(id){
+        await fetch('/api/intel/upload/reject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,note:'手动审核拒绝'})});
+        loadQueue();
+    }
+    async function batchAction(action){
+        const ids=getCheckedIds();
+        if(ids.length===0) return;
+        if(action==='approve'){
+            await fetch('/api/intel/upload/batch-approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids,note:'批量审核通过'})});
+        }else{
+            for(const id of ids) await fetch('/api/intel/upload/reject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,note:'批量审核拒绝'})});
+        }
+        loadQueue();
+    }
+
+    async function loadUploadLogs(){
+        try{
+            const res=await fetch('/api/intel/upload/logs?limit=50');
+            const d=await res.json();
+            const tbody=document.getElementById('uploadLogBody');
+            tbody.innerHTML='';
+            const logs=d.data&&d.data.logs?d.data.logs:[];
+            logs.forEach(l=>{
+                const badge=l.success?'<span class="badge badge-success">成功</span>':'<span class="badge badge-danger">失败</span>';
+                tbody.innerHTML+=`<tr><td>${l.uploaded_at||''}</td><td>${l.data_type}</td><td>${l.items_count}</td><td>${l.accepted_count}</td><td>${l.rejected_count}</td><td>${l.credits_awarded}</td><td>${badge}</td></tr>`;
+            });
+        }catch(e){console.error(e)}
+    }
+
+    async function loadOverrides(){
+        try{
+            const res=await fetch('/api/intel/overrides');
+            const d=await res.json();
+            const tbody=document.getElementById('overrideBody');
+            tbody.innerHTML='';
+            const items=d.data&&d.data.overrides?d.data.overrides:[];
+            items.forEach(o=>{
+                const actionBadge=o.action==='disable'?'<span class="badge badge-danger">禁用</span>':'<span class="badge badge-info">'+o.action+'</span>';
+                tbody.innerHTML+=`<tr><td>${o.id}</td><td>${o.intel_id}</td><td>${o.data_type}</td><td>${actionBadge}</td><td>${o.reason||''}</td><td><button class="btn btn-danger" onclick="deleteOverride(${o.id})">删除</button></td></tr>`;
+            });
+        }catch(e){console.error(e)}
+    }
+
+    async function deleteOverride(id){
+        await fetch('/api/intel/overrides/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+        loadOverrides();
+    }
+
+    function showAddOverride(){
+        const intelId=prompt('情报规则ID:');
+        if(!intelId) return;
+        const dataType=prompt('数据类型 (ip_blacklist/ua_rules/path_rules):');
+        const action=prompt('动作 (disable/modify):','disable');
+        const reason=prompt('原因:','');
+        fetch('/api/intel/overrides/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({intel_id:intelId,data_type:dataType,action,reason})}).then(()=>loadOverrides());
+    }
+
+    async function loadExclusions(){
+        try{
+            const res=await fetch('/api/intel/exclusions');
+            const d=await res.json();
+            const tbody=document.getElementById('exclusionBody');
+            tbody.innerHTML='';
+            const items=d.data&&d.data.exclusions?d.data.exclusions:[];
+            items.forEach(e=>{
+                const enabledBadge=e.enabled?'<span class="badge badge-success">启用</span>':'<span class="badge badge-secondary">禁用</span>';
+                tbody.innerHTML+=`<tr><td>${e.id}</td><td>${e.match_type}</td><td>${e.pattern}</td><td>${enabledBadge}</td><td>${e.description||''}</td><td><button class="btn btn-danger" onclick="deleteExclusion(${e.id})">删除</button></td></tr>`;
+            });
+        }catch(e){console.error(e)}
+    }
+
+    async function deleteExclusion(id){
+        await fetch('/api/intel/exclusions/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+        loadExclusions();
+    }
+
+    function showAddExclusion(){
+        const matchType=prompt('匹配类型 (ip/ua/path):');
+        if(!matchType) return;
+        const pattern=prompt('模式:');
+        if(!pattern) return;
+        const desc=prompt('说明:','');
+        fetch('/api/intel/exclusions/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({match_type:matchType,pattern,enabled:true,description:desc})}).then(()=>loadExclusions());
+    }
+
+    loadQueue();
+
+    window.toggleDetail=function(id){
+        const row=document.getElementById('detail-'+id);
+        if(row) row.style.display=row.style.display==='none'?'':'none';
+    };
+
+    function formatJSON(data){
+        if(!data) return '(无数据)';
+        try{ return JSON.stringify(typeof data==='string'?JSON.parse(data):data,null,2); }catch(e){ return String(data); }
+    }
+    </script>
+</body>
+</html>
+{{end}}

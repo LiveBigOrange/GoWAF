@@ -1,88 +1,96 @@
-# GoWAF 配置文件
-# 修改配置后需重启服务生效（部分配置支持Web控制台热更新）
-
-# ==================== 管理后台 ====================
 admin:
-    addr: 127.0.0.1:9090          # 管理后台监听地址（IP:端口），默认仅本地访问
-    allowed_cidrs: []              # 允许访问管理后台的CIDR列表，空则不限制，如: ["192.168.1.0/24"]
-    admin_log: ./admin.log        # 管理操作日志文件路径
-
-# ==================== GeoIP数据库 ====================
-geoip:
-    db_path: ./GeoLite2-City.mmdb # MaxMind GeoLite2 城市数据库文件路径
-
-# ==================== 数据库 ====================
+    addr: 127.0.0.1:9090
+    allowed_cidrs: []
+    admin_log: ./admin.log
+    username: admin
+    passwordhash: $2a$10$RfCQNqMF3iwQhK9YmaD5befGDQh0fZtQ3vfrqCC.p3/zQVZncRzzC
 database:
-    config_path: ./config.db      # 系统配置数据库路径（SQLite）
-    metrics_path: ./metrics.db    # 指标监控数据库路径（SQLite）
-    logs_path: ./logs.db          # 拦截日志数据库路径（SQLite）
-
-# ==================== 默认代理 ====================
+    config_path: ./config.db
+    metrics_path: ./metrics.db
+    logs_path: ./logs.db
+geoip:
+    db_path: ./GeoLite2-City.mmdb
 default_proxy:
-    listen_addr: :80              # 默认代理监听地址，:80 表示监听所有网卡80端口
-    protocol: http                # 代理协议: http 或 https（https需在Web控制台配置证书）
-    enabled: true                 # 是否启用默认代理
-
-# ==================== 可信代理 ====================
-trustedproxies: []                # 可信反向代理IP列表，如: ["10.0.0.1","10.0.0.2"]
-
-# ==================== 日志配置 ====================
+    listen_addr: :80
+    protocol: http
+    enabled: true
+trustedproxies: []
 log:
-    file: ./waf.log               # WAF运行日志文件路径
-    level: info                   # 日志级别: debug/info/warn/error
-    rotation:                     # 日志轮转配置
-        maxsize: 100              # 单个日志文件最大大小（MB）
-        maxbackups: 10            # 保留的旧日志文件最大数量
-        maxage: 7                 # 保留旧日志文件的最大天数
-        compress: true            # 是否压缩旧日志文件
-    format:                       # 日志格式配置
-        time_format: 2006-01-02T15:04:05.000Z07:00  # 时间格式（Go时间格式语法）
-        fields:                   # 日志中记录的请求字段
-            host: true            # 记录请求主机名
-            query: true           # 记录查询参数
-            referer: true         # 记录来源页面
-            content_type: true    # 记录内容类型
-            body_size: true       # 记录响应体大小
-            latency_us: false     # 记录微秒级延迟（默认毫秒级）
-
-# ==================== 认证配置 ====================
+    file: ./waf.log
+    level: info
+    rotation:
+        maxsize: 100
+        maxbackups: 10
+        maxage: 7
+        compress: true
+    format:
+        time_format: 2006-01-02T15:04:05.000Z07:00
+        fields:
+            host: true
+            query: true
+            referer: true
+            content_type: true
+            body_size: true
+            latency_us: false
 auth:
-    username: admin               # 管理后台登录用户名
-    password: admin               # 管理后台登录密码（生产环境请务必修改）
-
-# ==================== 安全配置 ====================
-security:
-    login:                        # 登录安全策略
-        max_attempts: 5           # 最大登录尝试次数，超过后锁定IP
-        block_duration: 15        # 登录锁定时长（分钟）
-    session:                      # 会话管理
-        ttl: 8                    # 会话有效期（小时）
-        cleanup_interval: 5       # 过期会话清理间隔（分钟）
-    captcha:                      # 验证码
-        ttl: 5                    # 验证码有效期（分钟）
-    rate_limit:                   # API限流
-        api_limit: 300            # API请求速率限制（次/窗口）
-        api_window: 1             # 限流窗口大小（秒）
-
-# ==================== 性能配置 ====================
-performance:
-    log_channel_size: 10000       # 异步日志通道缓冲区大小
-    cache_size: 1000              # 响应缓存条目数
-    cache_ttl: 5                  # 缓存有效期（分钟）
-    max_request_body: 10          # 最大请求体大小（MB）
-    scan_buffer: 1024             # 请求体扫描缓冲区大小（KB）
-
-# ==================== 定时任务配置 ====================
-scheduler:
-    health_check: 5               # 后端健康检查间隔（秒），0则禁用
-    log_flush: 2                  # 日志刷盘间隔（秒）
-    log_cleanup: 24               # 日志自动清理间隔（小时），0则禁用
-    metrics_cleanup: 1            # 指标数据自动清理间隔（分钟），0则禁用
-    rule_reload: 5                # 规则热重载间隔（秒），0则禁用
-
-# ==================== WebSocket配置 ====================
-websocket:
-    dashboard_push: 2             # 仪表盘数据推送间隔（秒）
-    log_heartbeat: 30             # 日志WebSocket心跳间隔（秒）
-    buffer_size: 1024             # WebSocket消息缓冲区大小（字节）
-    broadcast_channel: 1000       # 广播通道缓冲区大小
+    username: admin
+    password: ""
+tls:
+    cert_dir: ./certs
+    acme_email: ""
+    domains: []
+intel:
+    enabled: false
+    server_url: http://127.0.0.1:8443
+    license_key: community_b905
+    instance_id: ""
+    tls:
+        ca_cert_path: ""
+        insecure_skip_verify: true
+    connect_timeout_secs: 10
+    request_timeout_secs: 30
+    sync:
+        enabled: false
+        interval_secs: 3600
+        data_types:
+            - ip_blacklist
+            - threat_signatures
+            - ua_rules
+            - path_rules
+            - bot_ips
+            - geoip
+        full_sync_on_desync: false
+    upload:
+        enabled: false
+        batch_size: 50
+        interval_secs: 300
+        data_types:
+            - intercept_events
+            - false_positives
+        audit_mode: false
+        auto_approve_patterns: []
+        max_body_length: 4096
+        exclusions:
+            enabled: false
+            paths: []
+            ips: []
+            hosts: []
+    rule:
+        priority: local_first
+        intel_rule_prefix: intel-
+        override_enabled: false
+    sensitive_filter:
+        enabled: false
+        action: mask
+        custom_patterns: []
+    offline:
+        allow_offline: false
+        cache_retention_days: 7
+        max_cache_age_hours: 24
+    alerts:
+        on_connection_lost: false
+        on_sync_failure: false
+        on_license_expiring: false
+        on_upload_failure: false
+        on_emergency_rule: false
+        failure_threshold: 3

@@ -1,0 +1,692 @@
+{{define "intel-config"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>情报中心-配置 - GoWAF</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <style>
+        .card+.card{margin-top:24px}
+        .section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+        .section-header h3{font-size:16px;color:#2c3e50;margin:0}
+        .section-desc{font-size:13px;color:#95a5a6;margin-bottom:16px}
+        .status-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px}
+        .status-card{background:#fff;border:1px solid #e4e7ed;border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:4px}
+        .status-card .label{font-size:12px;color:#95a5a6}
+        .status-card .value{font-size:20px;font-weight:600;color:#2c3e50}
+        .status-card .sub{font-size:11px;color:#b0b9c3}
+        .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid #f0f2f5}
+        .toggle-row:last-child{border-bottom:none}
+        .toggle-row .info{display:flex;flex-direction:column;gap:2px}
+        .toggle-row .info .title{font-size:14px;color:#2c3e50;font-weight:500}
+        .toggle-row .info .desc{font-size:12px;color:#95a5a6}
+        .toggle{position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0}
+        .toggle input{opacity:0;width:0;height:0}
+        .toggle-slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#dcdfe6;border-radius:24px;transition:background .2s}
+        .toggle-slider:before{position:absolute;content:"";height:18px;width:18px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.15)}
+        .toggle input:checked+.toggle-slider{background:#409eff}
+        .toggle input:checked+.toggle-slider:before{transform:translateX(20px)}
+        .badge{display:inline-flex;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:500}
+        .badge-success{background:#d4edda;color:#155724}
+        .badge-warning{background:#fff3cd;color:#856404}
+        .badge-danger{background:#f8d7da;color:#721c24}
+        .badge-info{background:#d1ecf1;color:#0c5460}
+        .badge-secondary{background:#e2e3e5;color:#383d41}
+        .form-row{display:flex;gap:12px;margin-bottom:12px;align-items:center}
+        .form-row label{min-width:100px;font-size:13px;color:#596275}
+        .form-row select,.form-row input[type="text"]{flex:1;padding:8px 12px;border:1px solid #dcdfe6;border-radius:4px;font-size:14px}
+        .btn{padding:8px 16px;border-radius:4px;border:1px solid #dcdfe6;background:#fff;cursor:pointer;font-size:13px;transition:all .12s}
+        .btn:hover{background:#f0f2f5}
+        .btn-primary{background:#409eff;color:#fff;border-color:#409eff}
+        .btn-primary:hover{background:#66b1ff}
+        .credit-display{font-size:28px;font-weight:700;color:#409eff}
+        .credit-unit{font-size:14px;color:#95a5a6;margin-left:4px}
+        .tab-bar{display:flex;gap:0;border-bottom:2px solid #e4e7ed;margin-bottom:20px}
+        .tab-bar .tab{padding:10px 20px;cursor:pointer;font-size:14px;color:#596275;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s}
+        .tab-bar .tab:hover{color:#409eff}
+        .tab-bar .tab.active{color:#409eff;border-bottom-color:#409eff;font-weight:500}
+        .conn-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+        .conn-dot.ok{background:#52c41a}
+        .conn-dot.err{background:#f5222d}
+        .conn-dot.warn{background:#faad14}
+        .btn-outline{padding:6px 12px;background:transparent;color:#409eff;border:1px solid #409eff;border-radius:4px;cursor:pointer;font-size:13px;transition:all .2s}
+        .btn-outline:hover{background:#ecf5ff}
+        .credit-big{font-size:36px;font-weight:700;color:#409eff;text-align:center;margin:20px 0}
+        .credit-label{font-size:14px;color:#95a5a6;text-align:center}
+        .conn-input-row{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+        .conn-input-row label{min-width:90px;font-size:13px;color:#596275}
+        .conn-input-row input{flex:1;padding:8px 12px;border:1px solid #dcdfe6;border-radius:4px;font-size:14px;background:#f5f7fa;cursor:pointer}
+        .conn-input-row input:hover{border-color:#409eff}
+        .conn-status-row{display:flex;align-items:center;gap:10px;margin-top:16px;font-size:13px;color:#596275}
+        .credit-list{margin-top:16px}
+        .credit-list-item{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f0f2f5;font-size:13px}
+        .credit-list-item .amt{font-weight:600}
+        .credit-list-item .amt.pos{color:#52c41a}
+        .credit-list-item .amt.neg{color:#f5222d}
+        .conn-log-table{width:100%;border-collapse:collapse;font-size:13px}
+        .conn-log-table th{text-align:left;padding:10px 12px;font-weight:600;color:#596275;border-bottom:2px solid #ebeef5;white-space:nowrap;font-size:12px}
+        .conn-log-table td{padding:10px 12px;border-bottom:1px solid #f0f2f5;vertical-align:middle}
+        .conn-log-table tr:hover td{background:#fafbfc}
+    </style>
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main scroll-page">
+        <h2 style="margin-bottom:24px;font-size:20px;color:#2c3e50;flex-shrink:0">&#127760; 情报中心配置</h2>
+
+        <div class="tab-bar">
+            <div class="tab active" onclick="switchConfigTab('config')">配置</div>
+            <div class="tab" onclick="switchConfigTab('connection')">连接</div>
+            <div class="tab" onclick="switchConfigTab('credits')">积分</div>
+            <div class="tab" onclick="switchConfigTab('connlogs')">连接日志</div>
+        </div>
+
+        <div id="tabConfig">
+            <div class="card">
+                <div class="section-header"><h3>&#128274; 许可证状态</h3></div>
+                <div class="section-desc">情报中心连接与许可证信息</div>
+                <div class="status-grid">
+                    <div class="status-card">
+                        <span class="label">连接状态</span>
+                        <span class="value" id="licenseStatus">--</span>
+                    </div>
+                    <div class="status-card">
+                        <span class="label">许可证层级</span>
+                        <span class="value" id="licenseTier">--</span>
+                    </div>
+                    <div class="status-card">
+                        <span class="label">积分余额</span>
+                        <span class="value" id="creditBalance">--</span>
+                    </div>
+                    <div class="status-card">
+                        <span class="label">数据类型</span>
+                        <span class="value" id="dataTypesCount">--</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="section-header"><h3>&#9881;&#65039; 功能开关</h3></div>
+                <div class="section-desc">控制情报中心各子功能的启用状态</div>
+                <div class="toggle-row">
+                    <div class="info">
+                        <span class="title">情报中心总开关</span>
+                        <span class="desc">启用或禁用整个情报中心模块</span>
+                    </div>
+                    <label class="toggle"><input type="checkbox" id="toggleEnabled" onchange="toggleIntelEnabled(this.checked)"><span class="toggle-slider"></span></label>
+                </div>
+                <div class="toggle-row">
+                    <div class="info">
+                        <span class="title">规则同步</span>
+                        <span class="desc">从云端同步威胁情报规则到本地</span>
+                    </div>
+                    <label class="toggle"><input type="checkbox" id="toggleSync" onchange="updateConfig()"><span class="toggle-slider"></span></label>
+                </div>
+                <div class="toggle-row">
+                    <div class="info">
+                        <span class="title">事件上传</span>
+                        <span class="desc">将拦截事件上传到情报云平台</span>
+                    </div>
+                    <label class="toggle"><input type="checkbox" id="toggleUpload" onchange="updateConfig()"><span class="toggle-slider"></span></label>
+                </div>
+                <div class="toggle-row">
+                    <div class="info">
+                        <span class="title">上传审计模式</span>
+                        <span class="desc">启用后敏感数据需人工审核才可上传</span>
+                    </div>
+                    <label class="toggle"><input type="checkbox" id="toggleAudit" onchange="updateConfig()"><span class="toggle-slider"></span></label>
+                </div>
+                <div class="toggle-row">
+                    <div class="info">
+                        <span class="title">规则覆盖</span>
+                        <span class="desc">允许对情报规则设置本地覆盖策略</span>
+                    </div>
+                    <label class="toggle"><input type="checkbox" id="toggleOverride" onchange="updateConfig()"><span class="toggle-slider"></span></label>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="section-header"><h3>&#128273; 脱敏配置</h3></div>
+                <div class="section-desc">控制上传事件的敏感数据脱敏级别</div>
+                <div class="toggle-row">
+                    <div class="info">
+                        <span class="title">脱敏开关</span>
+                        <span class="desc">启用后上传前将自动脱敏敏感数据</span>
+                    </div>
+                    <label class="toggle"><input type="checkbox" id="toggleMask" onchange="updateMaskConfig()"><span class="toggle-slider"></span></label>
+                </div>
+                <div class="form-row" style="margin-top:12px">
+                    <label>脱敏级别</label>
+                    <select id="maskLevel" onchange="updateMaskConfig()">
+                        <option value="minimal">最小 - 仅移除凭证</option>
+                        <option value="standard">标准 - 移除IP后段+凭证+Cookie</option>
+                        <option value="strict">严格 - 移除所有PII+路径参数</option>
+                    </select>
+                </div>
+                <div class="form-row" style="margin-top:8px">
+                    <label>自定义脱敏正则</label>
+                    <textarea id="customPatterns" rows="2" style="flex:1;padding:8px 12px;border:1px solid #dcdfe6;border-radius:4px;font-size:13px;font-family:monospace" placeholder="每行一个正则表达式，如: \d{11}"></textarea>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="section-header"><h3>&#128204; 规则优先级</h3></div>
+                <div class="section-desc">控制情报规则与本地规则的优先级策略</div>
+                <div class="form-row">
+                    <label>优先级模式</label>
+                    <select id="rulePriority" onchange="updateConfig()">
+                        <option value="local_first">本地优先 - 本地规则优先于情报规则</option>
+                        <option value="intel_first">情报优先 - 情报规则优先于本地规则</option>
+                        <option value="merge">合并 - 同时应用本地和情报规则</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label>情报规则前缀</label>
+                    <input type="text" id="intelRulePrefix" style="flex:1;padding:8px 12px;border:1px solid #dcdfe6;border-radius:4px;font-size:14px" onchange="updateConfig()" placeholder="如: intel-">
+                    <span style="margin-left:12px;font-size:12px;color:#95a5a6">标识情报来源的规则名前缀</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="section-header"><h3>&#128260; 同步参数</h3></div>
+                <div class="section-desc">规则同步的间隔和数据类型</div>
+                <div class="form-row">
+                    <label>同步间隔</label>
+                    <input type="number" id="syncInterval" min="60" max="86400" style="width:100px" onchange="updateSyncParams()"> 秒
+                    <span style="margin-left:12px;font-size:12px;color:#95a5a6">License下发后自动调整</span>
+                </div>
+                <div class="form-row">
+                    <label>同步数据类型</label>
+                    <div id="syncDataTypes" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+                </div>
+                <div class="toggle-row" style="margin-top:8px">
+                    <div class="info">
+                        <span class="title">版本不一致时全量同步</span>
+                        <span class="desc">检测到版本偏移时触发完整同步</span>
+                    </div>
+                    <label class="toggle"><input type="checkbox" id="toggleFullSyncOnDesync" onchange="updateSyncParams()"><span class="toggle-slider"></span></label>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="section-header"><h3>&#128228; 上传参数</h3></div>
+                <div class="section-desc">拦截事件上传的频率和批量</div>
+                <div class="form-row">
+                    <label>上传间隔</label>
+                    <input type="number" id="uploadInterval" min="30" max="3600" style="width:100px" onchange="updateUploadParams()"> 秒
+                </div>
+                <div class="form-row">
+                    <label>批量大小</label>
+                    <input type="number" id="uploadBatchSize" min="10" max="500" style="width:100px" onchange="updateUploadParams()"> 条/批
+                </div>
+                <div class="form-row">
+                    <label>最大请求体</label>
+                    <input type="number" id="uploadMaxBodyLength" min="1024" max="65536" style="width:100px" onchange="updateUploadParams()"> 字节
+                </div>
+                <div class="form-row">
+                    <label>上传数据类型</label>
+                    <div id="uploadDataTypes" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+                </div>
+                <div class="form-row" style="margin-top:8px">
+                    <label>自动审批路径</label>
+                    <textarea id="autoApprovePatterns" rows="2" style="flex:1;padding:8px 12px;border:1px solid #dcdfe6;border-radius:4px;font-size:13px;font-family:monospace" placeholder="每行一个路径匹配模式，如: /api/*"></textarea>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="section-header"><h3>&#128276; 告警配置</h3></div>
+                <div class="section-desc">控制各类异常事件的告警通知</div>
+                <div class="toggle-row">
+                    <div class="info"><span class="title">连接断开告警</span><span class="desc">与IntelCenter连接丢失时通知</span></div>
+                    <label class="toggle"><input type="checkbox" id="alertConnLost" onchange="updateAlertConfig()"><span class="toggle-slider"></span></label>
+                </div>
+                <div class="toggle-row">
+                    <div class="info"><span class="title">同步失败告警</span><span class="desc">规则同步失败时通知</span></div>
+                    <label class="toggle"><input type="checkbox" id="alertSyncFail" onchange="updateAlertConfig()"><span class="toggle-slider"></span></label>
+                </div>
+                <div class="toggle-row">
+                    <div class="info"><span class="title">License到期告警</span><span class="desc">许可证即将到期时通知</span></div>
+                    <label class="toggle"><input type="checkbox" id="alertLicExp" onchange="updateAlertConfig()"><span class="toggle-slider"></span></label>
+                </div>
+                <div class="toggle-row">
+                    <div class="info"><span class="title">上传失败告警</span><span class="desc">事件上传失败时通知</span></div>
+                    <label class="toggle"><input type="checkbox" id="alertUploadFail" onchange="updateAlertConfig()"><span class="toggle-slider"></span></label>
+                </div>
+                <div class="toggle-row">
+                    <div class="info"><span class="title">紧急规则告警</span><span class="desc">收到紧急规则时通知</span></div>
+                    <label class="toggle"><input type="checkbox" id="alertEmergency" onchange="updateAlertConfig()"><span class="toggle-slider"></span></label>
+                </div>
+                <div class="form-row" style="margin-top:8px">
+                    <label>连续失败阈值</label>
+                    <input type="number" id="alertFailThreshold" min="1" max="20" style="width:80px" onchange="updateAlertConfig()"> 次
+                    <span style="margin-left:12px;font-size:12px;color:#95a5a6">连续N次失败触发告警</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="section-header"><h3>&#128268; 离线配置</h3></div>
+                <div class="section-desc">与IntelCenter断连时的容灾策略</div>
+                <div class="toggle-row">
+                    <div class="info"><span class="title">允许离线运行</span><span class="desc">断线时不阻断WAF流量</span></div>
+                    <label class="toggle"><input type="checkbox" id="toggleAllowOffline" onchange="updateOfflineConfig()"><span class="toggle-slider"></span></label>
+                </div>
+                <div class="form-row">
+                    <label>缓存保留</label>
+                    <input type="number" id="cacheRetentionDays" min="1" max="30" style="width:80px" onchange="updateOfflineConfig()"> 天
+                </div>
+                <div class="form-row">
+                    <label>最大缓存时效</label>
+                    <input type="number" id="maxCacheAgeHours" min="1" max="168" style="width:80px" onchange="updateOfflineConfig()"> 小时
+                </div>
+            </div>
+        </div>
+
+        <div id="tabConnection" style="display:none">
+            <div class="card">
+                <div class="section-header"><h3>&#128279; 连接设置</h3></div>
+                <div class="section-desc">配置情报中心服务器连接参数</div>
+                <div class="conn-input-row">
+                    <label>服务器 URL</label>
+                    <input type="text" id="connServerUrl" readonly onclick="editConnField('server_url',this)" placeholder="点击编辑">
+                </div>
+                <div class="conn-input-row">
+                    <label>订阅凭证</label>
+                    <input type="text" id="connLicenseKey" readonly onclick="editConnField('license_key',this)" placeholder="点击编辑">
+                </div>
+                <div class="conn-input-row">
+                    <label>实例 ID</label>
+                    <input type="text" id="connInstanceId" readonly onclick="editConnField('instance_id',this)" placeholder="点击编辑，留空自动生成">
+                </div>
+                <button class="btn btn-primary" onclick="saveConnectionSettings()">&#128190; 保存连接设置</button>
+                <button class="btn btn-outline" onclick="testConnection()" style="margin-left:8px">&#128274; 测试连接</button>
+                <div class="conn-status-row">
+                    <span class="conn-dot" id="connDot"></span>
+                    <span id="connStatusText">检测中...</span>
+                    <span id="connLastError" style="margin-left:8px;color:#e6a23c;font-size:12px"></span>
+                    <span id="connLastTime" style="margin-left:auto;color:#b0b9c3"></span>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="section-header"><h3>&#9201; 超时配置</h3></div>
+                <div class="section-desc">网络连接与请求超时参数</div>
+                <div class="form-row">
+                    <label>连接超时</label>
+                    <input type="number" id="connTimeout" min="1" max="60" style="width:80px" onchange="updateConnTimeouts()"> 秒
+                    <span style="margin-left:12px;font-size:12px;color:#95a5a6">建立TCP连接的超时</span>
+                </div>
+                <div class="form-row">
+                    <label>请求超时</label>
+                    <input type="number" id="reqTimeout" min="5" max="120" style="width:80px" onchange="updateConnTimeouts()"> 秒
+                    <span style="margin-left:12px;font-size:12px;color:#95a5a6">完整HTTP请求的超时</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="section-header"><h3>&#128274; TLS 配置</h3></div>
+                <div class="section-desc">IntelCenter 使用 License Key 认证，此处仅配置单向TLS（服务端证书验证）</div>
+                <div class="conn-input-row">
+                    <label>CA 证书路径</label>
+                    <input type="text" id="connCaCertPath" readonly onclick="editConnField('ca_cert_path',this)" placeholder="留空使用系统证书">
+                </div>
+                <div class="toggle-row" style="margin-top:8px">
+                    <div class="info">
+                        <span class="title">跳过证书验证</span>
+                        <span class="desc">InsecureSkipVerify，仅测试环境使用</span>
+                    </div>
+                    <label class="toggle"><input type="checkbox" id="toggleInsecureSkipVerify" onchange="updateTlsConfig()"><span class="toggle-slider"></span></label>
+                </div>
+            </div>
+        </div>
+
+        <div id="tabCredits" style="display:none">
+            <div class="card">
+                <div class="section-header"><h3>&#128176; 积分余额</h3></div>
+                <div class="credit-label">当前可用积分</div>
+                <div class="credit-big" id="creditBig">--</div>
+                <div class="credit-list" id="creditList"></div>
+            </div>
+        </div>
+
+        <div id="tabConnlogs" style="display:none">
+            <div class="card">
+                <div class="section-header">
+                    <h3>&#128203; 连接日志</h3>
+                    <button class="btn" onclick="loadConnLogs()">&#128260; 刷新</button>
+                </div>
+                <div class="table-wrap">
+                    <table class="conn-log-table">
+                        <thead>
+                            <tr><th>时间</th><th>类型</th><th>消息</th></tr>
+                        </thead>
+                        <tbody id="connLogBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    function switchConfigTab(tab){
+        document.querySelectorAll('.tab-bar .tab').forEach(function(t){t.classList.remove('active')});
+        var tabs={config:'tabConfig',connection:'tabConnection',credits:'tabCredits',connlogs:'tabConnlogs'};
+        Object.values(tabs).forEach(function(id){document.getElementById(id).style.display='none'});
+        document.getElementById(tabs[tab]).style.display='block';
+        event.target.classList.add('active');
+        if(tab==='credits') loadCreditDetail();
+        if(tab==='connlogs') loadConnLogs();
+        if(tab==='connection') loadConnectionStatus();
+    }
+
+    async function loadConfig(){
+        try{
+            const res=await fetch('/api/intel/config');
+            const d=await res.json();
+            if(!d.data) return;
+            const c=d.data;
+            document.getElementById('toggleEnabled').checked=c.enabled;
+            document.getElementById('toggleSync').checked=c.sync_enabled;
+            document.getElementById('toggleUpload').checked=c.upload_enabled;
+            document.getElementById('toggleAudit').checked=c.upload_audit_mode;
+            document.getElementById('toggleOverride').checked=c.rule_override_enabled;
+            if(c.rule_priority) document.getElementById('rulePriority').value=c.rule_priority;
+
+            if(c.license){
+                const s=c.license.status;
+                const el=document.getElementById('licenseStatus');
+                if(s==='active') el.innerHTML='<span class="badge badge-success">已激活</span>';
+                else if(s==='grace') el.innerHTML='<span class="badge badge-warning">宽限期</span>';
+                else if(s==='expired') el.innerHTML='<span class="badge badge-danger">已过期</span>';
+                else el.innerHTML='<span class="badge badge-secondary">'+s+'</span>';
+                document.getElementById('licenseTier').textContent=c.license.tier||'free';
+            }
+            if(c.sync_data_types) document.getElementById('dataTypesCount').textContent=c.sync_data_types.length+' 种';
+
+            if(c.server_url) document.getElementById('connServerUrl').value=c.server_url;
+            if(c.license_key) document.getElementById('connLicenseKey').value=c.license_key;
+            if(c.instance_id) document.getElementById('connInstanceId').value=c.instance_id;
+
+            document.getElementById('syncInterval').value=c.sync_interval_secs||3600;
+            document.getElementById('uploadInterval').value=c.upload_interval_secs||300;
+            document.getElementById('uploadBatchSize').value=c.upload_batch_size||50;
+            document.getElementById('uploadMaxBodyLength').value=c.upload_max_body_length||4096;
+            document.getElementById('connTimeout').value=c.connect_timeout_secs||10;
+            document.getElementById('reqTimeout').value=c.request_timeout_secs||30;
+            document.getElementById('toggleFullSyncOnDesync').checked=!!c.full_sync_on_desync;
+            if(c.ca_cert_path) document.getElementById('connCaCertPath').value=c.ca_cert_path;
+            document.getElementById('toggleInsecureSkipVerify').checked=!!c.insecure_skip_verify;
+
+            renderDataTypesCheckboxes('syncDataTypes',allSyncTypes,c.sync_data_types||allSyncTypes);
+            renderDataTypesCheckboxes('uploadDataTypes',allUploadTypes,c.upload_data_types||allUploadTypes);
+
+            document.getElementById('alertConnLost').checked=c.alerts_on_connection_lost!==false;
+            document.getElementById('alertSyncFail').checked=c.alerts_on_sync_failure!==false;
+            document.getElementById('alertLicExp').checked=c.alerts_on_license_expiring!==false;
+            document.getElementById('alertUploadFail').checked=c.alerts_on_upload_failure!==false;
+            document.getElementById('alertEmergency').checked=c.alerts_on_emergency_rule!==false;
+            document.getElementById('alertFailThreshold').value=c.alerts_failure_threshold||3;
+
+            document.getElementById('toggleAllowOffline').checked=c.offline_allow_offline!==false;
+            document.getElementById('cacheRetentionDays').value=c.offline_cache_retention_days||7;
+            document.getElementById('maxCacheAgeHours').value=c.offline_max_cache_age_hours||24;
+
+            if(c.intel_rule_prefix) document.getElementById('intelRulePrefix').value=c.intel_rule_prefix;
+            if(c.custom_patterns) document.getElementById('customPatterns').value=c.custom_patterns.join('\n');
+            if(c.auto_approve_patterns) document.getElementById('autoApprovePatterns').value=c.auto_approve_patterns.join('\n');
+        }catch(e){console.error(e)}
+    }
+
+    async function loadCredits(){
+        try{
+            const res=await fetch('/api/intel/credits');
+            const d=await res.json();
+            if(d.data) document.getElementById('creditBalance').textContent=d.data.balance;
+        }catch(e){console.error(e)}
+    }
+
+    async function loadCreditDetail(){
+        try{
+            const res=await fetch('/api/intel/credits');
+            const d=await res.json();
+            if(!d.data) return;
+            document.getElementById('creditBig').textContent=d.data.balance;
+            const list=document.getElementById('creditList');
+            list.innerHTML='';
+            const records=d.data.records||[];
+            if(records.length===0){list.innerHTML='<div style="color:#95a5a6;font-size:13px;text-align:center">暂无积分记录</div>';return;}
+            records.forEach(function(r){
+                const cls=r.amount>=0?'pos':'neg';
+                const sign=r.amount>=0?'+':'';
+                list.innerHTML+='<div class="credit-list-item"><span>'+r.created_at+'</span><span class="amt '+cls+'">'+sign+r.amount+' - '+(r.description||'')+'</span></div>';
+            });
+        }catch(e){console.error(e)}
+    }
+
+    async function loadConnectionStatus(){
+        try{
+            const res=await fetch('/api/intel/config');
+            const d=await res.json();
+            if(!d.data) return;
+            const c=d.data;
+            const dot=document.getElementById('connDot');
+            const txt=document.getElementById('connStatusText');
+            const errEl=document.getElementById('connLastError');
+            const timeEl=document.getElementById('connLastTime');
+            errEl.textContent='';
+            if(!c.enabled){
+                dot.className='conn-dot warn';txt.textContent='未启用（请开启情报中心总开关）';
+            }else if(c.license&&c.license.status==='active'){
+                dot.className='conn-dot ok';txt.textContent='已连接';
+            }else{
+                dot.className='conn-dot err';txt.textContent='未连接';
+                if(c.license&&c.license.status==='inactive'){
+                    errEl.textContent='点击"测试连接"验证配置是否正确';
+                }
+            }
+            timeEl.textContent=c.last_connected_at?'最后连接: '+c.last_connected_at:'';
+        }catch(e){console.error(e)}
+    }
+
+    async function testConnection(){
+        var dot=document.getElementById('connDot');
+        var txt=document.getElementById('connStatusText');
+        var errEl=document.getElementById('connLastError');
+        dot.className='conn-dot';txt.textContent='测试中...';errEl.textContent='';
+        try{
+            var body={
+                server_url:document.getElementById('connServerUrl').value,
+                instance_id:document.getElementById('connInstanceId').value
+            };
+            var lkEl=document.getElementById('connLicenseKey');
+            if(lkEl.dataset.dirty==='true'){
+                body.license_key=lkEl.value;
+            }
+            var res=await fetch('/api/intel/config/test-connection',{
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify(body)
+            });
+            var d=await res.json();
+            if(!res.ok){
+                dot.className='conn-dot err';txt.textContent='连接失败';
+                errEl.textContent=d.error||('HTTP '+res.status);
+                return;
+            }
+            var r=d.data;
+            if(r.connected){
+                dot.className='conn-dot ok';txt.textContent='已连接 ('+r.tier+')';
+            }else{
+                dot.className='conn-dot err';txt.textContent='连接失败';
+                errEl.textContent=r.error||'凭证无效或服务器不可达';
+            }
+        }catch(e){
+            dot.className='conn-dot err';txt.textContent='连接失败';
+            errEl.textContent=e.message;
+        }
+    }
+
+    async function loadConnLogs(){
+        try{
+            const res=await fetch('/api/intel/connection-logs');
+            const d=await res.json();
+            const tbody=document.getElementById('connLogBody');
+            tbody.innerHTML='';
+            const logs=d.data&&d.data.logs?d.data.logs:[];
+            if(logs.length===0){tbody.innerHTML='<tr><td colspan="3" style="text-align:center;color:#95a5a6">暂无连接日志</td></tr>';return;}
+            logs.forEach(function(l){
+                tbody.innerHTML+='<tr><td>'+l.created_at+'</td><td>'+l.event_type+'</td><td>'+l.detail+'</td></tr>';
+            });
+        }catch(e){console.error(e)}
+    }
+
+    function editConnField(field,el){
+        var val=prompt('请输入新的 '+field+' 值:',el.value);
+        if(val===null) return;
+        el.value=val;
+        el.dataset.dirty='true';
+    }
+
+    async function saveConnectionSettings(){
+        const body={
+            server_url:document.getElementById('connServerUrl').value,
+            instance_id:document.getElementById('connInstanceId').value
+        };
+        var lkEl=document.getElementById('connLicenseKey');
+        if(lkEl.dataset.dirty==='true'){
+            body.license_key=lkEl.value;
+        }
+        try{
+            var res=await fetch('/api/intel/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+            if(!res.ok) throw new Error('HTTP '+res.status);
+            delete lkEl.dataset.dirty;
+            await loadConfig();
+            alert('连接设置已保存，正在测试连接...');
+            await testConnection();
+        }catch(e){alert('保存失败: '+e.message)}
+    }
+
+    async function updateConnTimeouts(){
+        const body={
+            connect_timeout_secs:parseInt(document.getElementById('connTimeout').value)||10,
+            request_timeout_secs:parseInt(document.getElementById('reqTimeout').value)||30
+        };
+        await fetch('/api/intel/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    }
+
+    async function updateTlsConfig(){
+        const body={
+            ca_cert_path:document.getElementById('connCaCertPath').value,
+            insecure_skip_verify:document.getElementById('toggleInsecureSkipVerify').checked
+        };
+        await fetch('/api/intel/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    }
+
+    var allSyncTypes=['ip_blacklist','threat_signatures','ua_rules','path_rules','bot_ips','geoip'];
+    var allUploadTypes=['intercept_events','false_positives'];
+    var syncTypeLabels={'ip_blacklist':'IP黑名单','threat_signatures':'威胁签名','ua_rules':'UA规则','path_rules':'路径规则','bot_ips':'Bot IP','geoip':'GeoIP'};
+    var uploadTypeLabels={'intercept_events':'拦截事件','false_positives':'误报'};
+
+    function renderDataTypesCheckboxes(containerId,allTypes,selectedTypes){
+        var c=document.getElementById(containerId);
+        c.innerHTML='';
+        allTypes.forEach(function(t){
+            var labels=containerId==='syncDataTypes'?syncTypeLabels:uploadTypeLabels;
+            var lbl=labels[t]||t;
+            var checked=selectedTypes.indexOf(t)>=0?'checked':'';
+            c.innerHTML+='<label style="display:inline-flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;background:#f5f7fa;padding:4px 10px;border-radius:4px"><input type="checkbox" value="'+t+'" '+checked+'> '+lbl+'</label>';
+        });
+    }
+
+    function getCheckedTypes(containerId){
+        var checks=document.getElementById(containerId).querySelectorAll('input[type=checkbox]:checked');
+        return Array.from(checks).map(function(c){return c.value});
+    }
+
+    async function updateSyncParams(){
+        const body={
+            sync_interval_secs:parseInt(document.getElementById('syncInterval').value)||3600,
+            sync_data_types:getCheckedTypes('syncDataTypes'),
+            full_sync_on_desync:document.getElementById('toggleFullSyncOnDesync').checked
+        };
+        await fetch('/api/intel/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    }
+
+    async function updateUploadParams(){
+        const autoApproveText=document.getElementById('autoApprovePatterns').value.trim();
+        const autoApprovePatterns=autoApproveText?autoApproveText.split('\n').filter(function(l){return l.trim()}):[];
+        const body={
+            upload_interval_secs:parseInt(document.getElementById('uploadInterval').value)||300,
+            upload_batch_size:parseInt(document.getElementById('uploadBatchSize').value)||50,
+            upload_max_body_length:parseInt(document.getElementById('uploadMaxBodyLength').value)||4096,
+            upload_data_types:getCheckedTypes('uploadDataTypes'),
+            auto_approve_patterns:autoApprovePatterns
+        };
+        await fetch('/api/intel/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    }
+
+    async function updateAlertConfig(){
+        const body={
+            alerts_on_connection_lost:document.getElementById('alertConnLost').checked,
+            alerts_on_sync_failure:document.getElementById('alertSyncFail').checked,
+            alerts_on_license_expiring:document.getElementById('alertLicExp').checked,
+            alerts_on_upload_failure:document.getElementById('alertUploadFail').checked,
+            alerts_on_emergency_rule:document.getElementById('alertEmergency').checked,
+            alerts_failure_threshold:parseInt(document.getElementById('alertFailThreshold').value)||3
+        };
+        await fetch('/api/intel/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    }
+
+    async function updateOfflineConfig(){
+        const body={
+            offline_allow_offline:document.getElementById('toggleAllowOffline').checked,
+            offline_cache_retention_days:parseInt(document.getElementById('cacheRetentionDays').value)||7,
+            offline_max_cache_age_hours:parseInt(document.getElementById('maxCacheAgeHours').value)||24
+        };
+        await fetch('/api/intel/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    }
+
+    async function loadMaskConfig(){
+        try{
+            const res=await fetch('/api/intel/mask');
+            const d=await res.json();
+            if(d.data){
+                document.getElementById('toggleMask').checked=d.data.enabled;
+                if(d.data.level) document.getElementById('maskLevel').value=d.data.level;
+            }
+        }catch(e){console.error(e)}
+    }
+
+    async function toggleIntelEnabled(enabled){
+        await fetch('/api/intel/config/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})});
+    }
+
+    async function updateConfig(){
+        const body={
+            sync_enabled:document.getElementById('toggleSync').checked,
+            upload_enabled:document.getElementById('toggleUpload').checked,
+            upload_audit_mode:document.getElementById('toggleAudit').checked,
+            rule_override_enabled:document.getElementById('toggleOverride').checked,
+            rule_priority:document.getElementById('rulePriority').value,
+            intel_rule_prefix:document.getElementById('intelRulePrefix').value
+        };
+        await fetch('/api/intel/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    }
+
+    async function updateMaskConfig(){
+        const customPatternsText=document.getElementById('customPatterns').value.trim();
+        const patterns=customPatternsText?customPatternsText.split('\n').filter(function(l){return l.trim()}):[];
+        const body={
+            enabled:document.getElementById('toggleMask').checked,
+            level:document.getElementById('maskLevel').value,
+            custom_patterns:patterns
+        };
+        await fetch('/api/intel/mask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    }
+
+    loadConfig(); loadCredits(); loadMaskConfig();
+    </script>
+</body>
+</html>
+{{end}}

@@ -7,312 +7,115 @@
     <title>后端服务 - GoWAF</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/common.css">
-    <style>
-        .add-btn {
-            background: #409eff;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-            transition: all 0.3s;
-        }
-        .add-btn:hover {
-            background: #66b1ff;
-            transform: translateY(-1px);
-        }
-        .header-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-        
-        /* 模态框样式 */
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.5);
-            animation: fadeIn 0.3s;
-        }
-        .modal.show {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-        .modal-content {
-            background-color: #fff;
-            padding: 30px;
-            border-radius: 8px;
-            width: 500px;
-            max-width: 90%;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-            animation: slideIn 0.3s;
-        }
-        @keyframes slideIn {
-            from { transform: translateY(-50px); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
-        }
-        .modal-header {
-            margin-bottom: 20px;
-            padding-bottom: 15px;
-            border-bottom: 1px solid #e8e9ed;
-        }
-        .modal-header h2 {
-            margin: 0;
-            color: #2c3e50;
-            font-size: 18px;
-        }
-        .form-group {
-            margin-bottom: 20px;
-        }
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            color: #596275;
-            font-weight: 500;
-            font-size: 14px;
-        }
-        .form-group input[type="text"],
-        .form-group input[type="number"] {
-            width: 100%;
-            padding: 10px 12px;
-            border: 1px solid #dce1e8;
-            border-radius: 6px;
-            font-size: 14px;
-            transition: border-color 0.3s, box-shadow 0.3s;
-            box-sizing: border-box;
-        }
-        .form-group input:focus {
-            outline: none;
-            border-color: #409eff;
-            box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.1);
-        }
-        .form-group .hint {
-            font-size: 12px;
-            color: #95a5a6;
-            margin-top: 5px;
-        }
-        .form-row {
-            display: flex;
-            gap: 15px;
-            flex-wrap: wrap;
-        }
-        .form-row .form-group {
-            flex: 1;
-        }
-        .checkbox-group {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .checkbox-group input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
-            cursor: pointer;
-        }
-        .checkbox-group label {
-            margin: 0;
-            cursor: pointer;
-        }
-        .modal-footer {
-            margin-top: 25px;
-            padding-top: 20px;
-            border-top: 1px solid #e8e9ed;
-            display: flex;
-            justify-content: flex-end;
-            gap: 10px;
-        }
-        .btn {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-            transition: all 0.3s;
-        }
-        .btn-primary {
-            background: #409eff;
-            color: white;
-        }
-        .btn-primary:hover {
-            background: #66b1ff;
-        }
-        .btn-secondary {
-            background: #f5f6fa;
-            color: #596275;
-        }
-        .btn-secondary:hover {
-            background: #e8e9ed;
-        }
-        
-        /* 表格样式优化 */
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 0;
-        }
-        th {
-            background: #f8f9fa;
-            color: #596275;
-            padding: 12px;
-            text-align: left;
-            font-weight: 500;
-            border-bottom: 2px solid #e8e9ed;
-        }
-        td {
-            padding: 12px;
-            border-bottom: 1px solid #f0f0f0;
-        }
-        tr:hover {
-            background-color: #f8f9fa;
-        }
-        .status-healthy {
-            color: #27ae60;
-            font-weight: 500;
-        }
-        .status-unhealthy {
-            color: #e74c3c;
-            font-weight: 500;
-        }
-        .delete-btn {
-            color: #e74c3c;
-            text-decoration: none;
-            padding: 4px 12px;
-            border-radius: 4px;
-            transition: all 0.3s;
-            border: none;
-            background: transparent;
-            cursor: pointer;
-            font-size: 13px;
-        }
-        .delete-btn:hover {
-            background-color: #e74c3c;
-            color: white;
-        }
-        .edit-btn {
-            color: #409eff;
-            text-decoration: none;
-            padding: 4px 12px;
-            border-radius: 4px;
-            transition: all 0.3s;
-            border: none;
-            background: transparent;
-            cursor: pointer;
-            font-size: 13px;
-        }
-        .edit-btn:hover {
-            background-color: #409eff;
-            color: white;
-        }
-        .toggle-btn {
-            color: #f39c12;
-            text-decoration: none;
-            padding: 4px 12px;
-            border-radius: 4px;
-            transition: all 0.3s;
-            border: none;
-            background: transparent;
-            cursor: pointer;
-            font-size: 13px;
-        }
-        .toggle-btn:hover {
-            background-color: #f39c12;
-            color: white;
-        }
-    </style>
+    <link rel="stylesheet" href="/static/css/backend.css">
 </head>
 <body>
     {{template "sidebar" .}}
     <div class="main">
-        <div class="card">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:8px;">
-                <h3>后端服务列表</h3>
-                <button class="btn btn-primary" onclick="openModal()">+ 添加后端服务</button>
-            </div>
-            <div class="list-container">
-            <table>
-                <thead>
-                    <tr><th>服务名称</th><th>后端地址</th><th>健康状态</th><th>状态</th><th>健康检查</th><th>检查间隔</th><th>操作</th></tr>
-                </thead>
-                <tbody id="tableBody">
-                </tbody>
-            </table>
-            <div class="pagination" id="pagination" style="display:none;">
-                <div class="pagination-info">
-                    <span id="pageInfo">第1 页 / 第1 页</span>
-                    <select class="page-size-select" id="pageSize" onchange="changePageSize()">
-                        <option value="5">5 条</option>
-                        <option value="10" selected>10 条</option>
-                        <option value="20">20 条</option>
-                        <option value="50">50 条</option>
-                    </select>
+        <div class="backend-layout">
+            <div class="group-panel" id="groupPanel">
+                <div class="group-panel-header">
+                    <span>服务组</span>
+                    <button class="panel-toggle-btn" onclick="toggleGroupPanel()" title="收起面板">◀</button>
                 </div>
-                <div class="pagination-btns">
-                    <button class="pagination-btn" id="prevBtn" onclick="prevPage()">上一页</button>
-                    <button class="pagination-btn" id="nextBtn" onclick="nextPage()">下一页</button>
+                <div class="group-panel-body" id="groupPanelBody">
+                    <div class="group-list" id="groupList"></div>
+                    <div class="group-add-section">
+                        <button class="group-add-btn" id="groupAddBtn" onclick="openAddGroupModal()">+ 添加服务组</button>
+                    </div>
                 </div>
             </div>
+            <div class="group-panel-collapsed" id="groupPanelCollapsed" style="display:none;">
+                <button class="panel-expand-btn" onclick="toggleGroupPanel()" title="展开面板">▶</button>
+                <div class="collapsed-group-list" id="collapsedGroupList"></div>
+            </div>
+            <div class="backend-panel" id="backendPanel">
+                <div class="backend-toolbar">
+                    <span></span>
+                    <button class="btn btn-primary" onclick="openModal()">+ 添加后端</button>
+                </div>
+                <div class="card">
+                    <div class="list-container">
+                        <table>
+                            <thead>
+                                <tr><th>备注</th><th>后端地址</th><th>协议</th><th>所属组</th><th>权重</th><th>健康状态</th><th>状态</th><th>操作</th></tr>
+                            </thead>
+                            <tbody id="tableBody"></tbody>
+                        </table>
+                        <div class="pagination" id="pagination">
+                            <div class="pagination-info">
+                                <span id="pageInfo">第1 页 / 第1 页</span>
+                                <select class="page-size-select" id="pageSize" onchange="changePageSize()">
+                                    <option value="5">5 条</option>
+                                    <option value="10" selected>10 条</option>
+                                    <option value="20">20 条</option>
+                                    <option value="50">50 条</option>
+                                </select>
+                            </div>
+                            <div class="pagination-btns">
+                                <button class="pagination-btn" id="prevBtn" onclick="prevPage()">上一页</button>
+                                <button class="pagination-btn" id="nextBtn" onclick="nextPage()">下一页</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
-    
-    <!-- 添加后端服务模态框 -->
+
     <div class="modal" id="addModal">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>添加后端服务</h2>
+                <h2 class="modal-title">添加后端服务</h2>
             </div>
             <form id="addForm">
                 <div class="form-group">
-                    <label for="backendName">服务名称 *</label>
-                    <input type="text" id="backendName" name="name" required placeholder="例如: API服务">
-                    <div class="hint">用于标识后端服务的名称</div>
+                    <label for="backendName">备注 <span class="hint-inline">(可选)</span></label>
+                    <input type="text" id="backendName" name="name" placeholder="例如: 生产环境API">
                 </div>
-                
-                <div class="form-group">
-                    <label for="backendAddress">后端地址 *</label>
-                    <input type="text" id="backendAddress" name="address" required placeholder="例如: 192.168.1.100:8080">
-                    <div class="hint">后端服务地址，格式 host:port</div>
-                </div>
-                
-                <div class="form-group">
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="healthCheck" name="health_check" checked>
-                        <label for="healthCheck">启用健康检查</label>
-                    </div>
-                </div>
-                
-                <div id="healthCheckConfig">
+                <div class="form-row">
                     <div class="form-group">
-                        <label for="checkPath">健康检查路径</label>
-                        <input type="text" id="checkPath" name="check_path" value="/health" placeholder="例如: /health">
-                        <div class="hint">健康检查的HTTP路径</div>
+                        <label for="backendAddress">后端地址 * <span class="hint-inline">格式 host:port</span></label>
+                        <input type="text" id="backendAddress" name="address" required placeholder="例如: 192.168.1.100:8080">
                     </div>
-                    
+                    <div class="form-group">
+                        <label for="backendWeight">权重 <span class="hint-inline">默认1</span></label>
+                        <input type="number" id="backendWeight" name="weight" value="1" min="1" max="100">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>协议 * <span class="hint-inline" id="schemeHint">HTTP+WS / HTTPS+WSS</span></label>
+                    <div class="scheme-checkboxes">
+                        <label class="scheme-option"><input type="checkbox" id="schemeHttp" value="http" checked onchange="onSchemeChange()"> HTTP</label>
+                        <label class="scheme-option"><input type="checkbox" id="schemeHttps" value="https" onchange="onSchemeChange()"> HTTPS</label>
+                        <label class="scheme-option"><input type="checkbox" id="schemeWs" value="ws" onchange="onSchemeChange()"> WS</label>
+                        <label class="scheme-option"><input type="checkbox" id="schemeWss" value="wss" onchange="onSchemeChange()"> WSS</label>
+                    </div>
+                    <div class="scheme-error" id="schemeError" style="display:none;"></div>
+                </div>
+                <div class="section-divider"></div>
+                <div class="form-group">
+                    <div class="scheme-checkboxes" style="justify-content:center;">
+                        <label class="scheme-option" style="min-width:140px;justify-content:center;">
+                            <input type="checkbox" id="healthCheck" name="health_check" checked> 启用健康检查
+                        </label>
+                    </div>
+                </div>
+                <div id="healthCheckConfig">
                     <div class="form-row">
                         <div class="form-group">
-                            <label for="checkInterval">检查间隔(秒)</label>
-                            <input type="number" id="checkInterval" name="check_interval" value="30" min="5" max="300">
+                            <label for="checkPath">健康检查路径</label>
+                            <input type="text" id="checkPath" name="check_path" value="/health" placeholder="/health">
                         </div>
                         <div class="form-group">
-                            <label for="checkTimeout">超时时间(秒)</label>
+                            <label for="checkInterval">检查间隔(秒)</label>
+                            <input type="number" id="checkInterval" name="check_interval" value="10" min="5" max="300">
+                        </div>
+                        <div class="form-group">
+                            <label for="checkTimeout">超时(秒)</label>
                             <input type="number" id="checkTimeout" name="check_timeout" value="5" min="1" max="60">
                         </div>
                     </div>
-                    
                     <div class="form-row">
                         <div class="form-group">
                             <label for="failThreshold">失败阈值</label>
@@ -324,7 +127,6 @@
                         </div>
                     </div>
                 </div>
-                
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">取消</button>
                     <button type="submit" class="btn btn-primary">添加</button>
@@ -332,208 +134,72 @@
             </form>
         </div>
     </div>
-    
-    <script>
-        (function() {
-            var allData = [];
-            var currentPage = 1;
-            var pageSize = 10;
 
-            function escapeHtml(text) {
-                if (text == null) return '';
-                var div = document.createElement('div');
-                div.textContent = text;
-                return div.innerHTML;
-            }
+    <div class="modal" id="editGroupModal">
+        <div class="modal-content" style="width:400px;">
+            <div class="modal-header">
+                <h2>编辑服务组</h2>
+            </div>
+            <form id="editGroupForm">
+                <div class="form-group">
+                    <label for="editGroupName">组名称 *</label>
+                    <input type="text" id="editGroupName" required placeholder="组名称">
+                </div>
+                <div class="form-group">
+                    <label for="editGroupLbPolicy">负载均衡策略</label>
+                    <select id="editGroupLbPolicy">
+                        <option value="round_robin">轮询</option>
+                        <option value="weighted_round_robin">加权轮询</option>
+                        <option value="least_connections">最少连接</option>
+                        <option value="ip_hash">IP Hash</option>
+                        <option value="url_hash">URL Hash</option>
+                        <option value="random">加权随机</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="toggle-label">
+                        <label class="group-toggle-switch"><input type="checkbox" id="editGroupEnabled"><span class="group-toggle-slider"></span></label>
+                        <span id="editGroupEnabledText">已启用</span>
+                    </label>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeEditGroupModal()">取消</button>
+                    <button type="submit" class="btn btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
 
-            window.openModal = function() {
-                document.getElementById('addModal').classList.add('show');
-            };
+    <div class="modal" id="addGroupModal">
+        <div class="modal-content" style="width:400px;">
+            <div class="modal-header">
+                <h2>添加服务组</h2>
+            </div>
+            <form id="addGroupForm">
+                <div class="form-group">
+                    <label for="addGroupName">组名称 *</label>
+                    <input type="text" id="addGroupName" required placeholder="组名称">
+                </div>
+                <div class="form-group">
+                    <label for="addGroupLbPolicy">负载均衡策略</label>
+                    <select id="addGroupLbPolicy">
+                        <option value="round_robin">轮询</option>
+                        <option value="weighted_round_robin" selected>加权轮询</option>
+                        <option value="least_connections">最少连接</option>
+                        <option value="ip_hash">IP Hash</option>
+                        <option value="url_hash">URL Hash</option>
+                        <option value="random">加权随机</option>
+                    </select>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeAddGroupModal()">取消</button>
+                    <button type="submit" class="btn btn-primary">添加</button>
+                </div>
+            </form>
+        </div>
+    </div>
 
-            window.closeModal = function() {
-                document.getElementById('addModal').classList.remove('show');
-                document.getElementById('addForm').reset();
-                document.querySelector('.modal-header h2').textContent = '添加后端服务';
-                var submitBtn = document.querySelector('.btn-primary');
-                submitBtn.textContent = '添加';
-                submitBtn.removeAttribute('data-edit-id');
-                document.getElementById('healthCheckConfig').style.display = 'block';
-            };
-
-            document.getElementById('addModal').addEventListener('click', function(e) {
-                if (e.target === this) closeModal();
-            });
-
-            document.getElementById('healthCheck').addEventListener('change', function() {
-                document.getElementById('healthCheckConfig').style.display = this.checked ? 'block' : 'none';
-            });
-
-            document.getElementById('addForm').addEventListener('submit', function(e) {
-                e.preventDefault();
-                
-                var submitBtn = document.querySelector('.btn-primary');
-                var editId = submitBtn.getAttribute('data-edit-id');
-                submitBtn.disabled = true;
-                
-                var formData = {
-                    name: document.getElementById('backendName').value.trim(),
-                    address: document.getElementById('backendAddress').value.trim(),
-                    health_check: document.getElementById('healthCheck').checked,
-                    check_path: document.getElementById('checkPath').value.trim(),
-                    check_interval: parseInt(document.getElementById('checkInterval').value) || 30,
-                    check_timeout: parseInt(document.getElementById('checkTimeout').value) || 5,
-                    fail_threshold: parseInt(document.getElementById('failThreshold').value) || 3,
-                    recover_threshold: parseInt(document.getElementById('recoverThreshold').value) || 2,
-                    enabled: true
-                };
-
-                if (!formData.name) { alert('请输入服务名称'); return; }
-                if (!formData.address) { alert('请输入后端地址'); return; }
-
-                var url = '/api/backend/add';
-                if (editId) {
-                    url = '/api/backend/update';
-                    formData.id = editId;
-                }
-
-                fetch(url, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(formData)
-                })
-                .then(r => r.json())
-                .then(d => {
-                    if (d.success) {
-                        closeModal();
-                        loadData();
-                    } else {
-                        alert(d.message || '操作失败');
-                    }
-                })
-                .catch(e => {
-                    console.error('操作失败', e);
-                    alert('操作失败');
-                })
-                .finally(function() { submitBtn.disabled = false; });
-            });
-
-            function loadData() {
-                fetch('/api/backend/list')
-                    .then(r => r.json())
-                    .then(d => {
-                        allData = d || [];
-                        renderData();
-                    })
-                    .catch(e => console.error('获取数据失败', e));
-            }
-
-            function renderData() {
-                var tbody = document.getElementById('tableBody');
-                var pagination = document.getElementById('pagination');
-
-                if (!allData || allData.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#95a5a6; padding:20px;">暂无后端服务，请添加</td></tr>';
-                    pagination.style.display = 'none';
-                    return;
-                }
-
-                var totalPages = Math.ceil(allData.length / pageSize);
-                if (currentPage > totalPages) currentPage = totalPages;
-                if (currentPage < 1) currentPage = 1;
-
-                var start = (currentPage - 1) * pageSize;
-                var end = Math.min(start + pageSize, allData.length);
-                var pageData = allData.slice(start, end);
-
-                tbody.innerHTML = '';
-                pageData.forEach(function(item) {
-                    var tr = document.createElement('tr');
-                    var escapedName = escapeHtml(item.name || item.id);
-                    var escapedAddress = escapeHtml(item.address);
-                    var statusClass = item.healthy ? 'status-healthy' : 'status-unhealthy';
-                    var statusText = item.healthy ? '健康' : '异常';
-                    var healthCheckText = item.health_check ? '已启用' : '未启用';
-                    var checkInterval = item.check_interval || 30;
-                    var enabledClass = item.enabled ? 'status-healthy' : 'status-unhealthy';
-                    var enabledText = item.enabled ? '已启用' : '已禁用';
-                    var toggleText = item.enabled ? '禁用' : '启用';
-                    
-                    tr.innerHTML = '<td><strong>' + escapedName + '</strong></td>' +
-                        '<td><code>' + escapedAddress + '</code></td>' +
-                        '<td><span class="' + statusClass + '">' + statusText + '</span></td>' +
-                        '<td><span class="' + enabledClass + '">' + enabledText + '</span></td>' +
-                        '<td>' + healthCheckText + '</td>' +
-                        '<td>' + checkInterval + '秒</td>' +
-                        '<td>' +
-                            '<button class="edit-btn" data-id="' + escapeHtml(item.id) + '">编辑</button> ' +
-                            '<button class="toggle-btn" data-id="' + escapeHtml(item.id) + '" data-enabled="' + !item.enabled + '">' + toggleText + '</button> ' +
-                            '<button class="delete-btn" data-id="' + escapeHtml(item.id) + '">删除</button>' +
-                        '</td>';
-                    tbody.appendChild(tr);
-                });
-
-                document.getElementById('pageInfo').textContent = '第' + currentPage + ' 页 / 第' + totalPages + ' 页（共' + allData.length + ' 条）';
-                document.getElementById('prevBtn').disabled = currentPage <= 1;
-                document.getElementById('nextBtn').disabled = currentPage >= totalPages;
-                pagination.style.display = 'flex';
-            }
-
-            document.getElementById('tableBody').addEventListener('click', function(e) {
-                    var target = e.target;
-                    var id = target.dataset.id;
-                    if (!id) return;
-                    
-                    if (target.classList.contains('delete-btn')) {
-                        if (confirm('确认删除该后端服务？')) {
-                            fetch('/api/backend/delete?id=' + encodeURIComponent(id), { method: 'POST' })
-                                .then(r => r.json())
-                                .then(d => { if (d.success) loadData(); else alert(d.message || '删除失败'); })
-                                .catch(e => { console.error('删除失败', e); alert('删除失败'); });
-                        }
-                    } else if (target.classList.contains('edit-btn')) {
-                        var item = allData.find(b => b.id === id);
-                        if (item) editBackend(item);
-                    } else if (target.classList.contains('toggle-btn')) {
-                        var enabled = target.dataset.enabled === 'true';
-                        var item = allData.find(b => b.id === id);
-                        if (item) {
-                            var data = Object.assign({}, item, { enabled: enabled });
-                            fetch('/api/backend/update', {
-                                method: 'POST',
-                                headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify(data)
-                            })
-                            .then(r => r.json())
-                            .then(d => { if (d.success) loadData(); else alert(d.message || '操作失败'); })
-                            .catch(e => { console.error('操作失败', e); alert('操作失败'); });
-                        }
-                    }
-                });
-
-            function editBackend(item) {
-                document.getElementById('backendName').value = item.name || '';
-                document.getElementById('backendAddress').value = item.address || '';
-                document.getElementById('healthCheck').checked = item.health_check;
-                document.getElementById('checkPath').value = item.check_path || '/health';
-                document.getElementById('checkInterval').value = item.check_interval || 30;
-                document.getElementById('checkTimeout').value = item.check_timeout || 5;
-                document.getElementById('failThreshold').value = item.fail_threshold || 3;
-                document.getElementById('recoverThreshold').value = item.recover_threshold || 2;
-                document.getElementById('healthCheckConfig').style.display = item.health_check ? 'block' : 'none';
-                document.querySelector('.modal-header h2').textContent = '编辑后端服务';
-                var submitBtn = document.querySelector('.btn-primary');
-                submitBtn.textContent = '保存';
-                submitBtn.setAttribute('data-edit-id', item.id);
-                openModal();
-            }
-
-            window.prevPage = function() { if (currentPage > 1) { currentPage--; renderData(); } };
-            window.nextPage = function() { var totalPages = Math.ceil(allData.length / pageSize); if (currentPage < totalPages) { currentPage++; renderData(); } };
-            window.changePageSize = function() { pageSize = parseInt(document.getElementById('pageSize').value); currentPage = 1; renderData(); };
-
-            loadData();
-        })();
-    </script>
+    <script nonce="{{.CSPNonce}}" src="/static/js/backend.js"></script>
 </body>
 </html>
 {{end}}

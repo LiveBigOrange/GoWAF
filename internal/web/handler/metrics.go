@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"sync"
@@ -15,8 +14,8 @@ type trendCacheEntry struct {
 }
 
 var (
-	trendCacheMu sync.RWMutex
-	trendCache   = make(map[string]trendCacheEntry)
+	trendCacheMu  sync.RWMutex
+	trendCache    = make(map[string]trendCacheEntry)
 	trendCacheTTL = 2 * time.Second
 )
 
@@ -57,8 +56,7 @@ type MetricsHistoryRequest struct {
 
 // GetMetricsEvents 获取拦截事件历史
 func GetMetricsEvents(w http.ResponseWriter, r *http.Request) {
-	if MetricsManager == nil {
-		jsonError(w, "metrics not initialized", http.StatusInternalServerError)
+	if !requireManager(w, deps.MetricsManager, "指标管理器") {
 		return
 	}
 
@@ -101,31 +99,24 @@ func GetMetricsEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	end = end.Add(24*time.Hour - time.Second)
 
-	events, err := MetricsManager.GetEvents(start, end, (page-1)*pageSize, pageSize)
+	events, err := deps.MetricsManager.GetEvents(start, end, (page-1)*pageSize, pageSize)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	total, err := MetricsManager.GetEventCount(start, end)
+	total, err := deps.MetricsManager.GetEventCount(start, end)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"events": events,
-		"total":  total,
-		"page":   page,
-		"size":   pageSize,
-	})
+	jsonSuccessPaged(w, events, total, page, pageSize)
 }
 
 // GetMetricsMinuteStats 获取分钟统计（实时数据）
 func GetMetricsMinuteStats(w http.ResponseWriter, r *http.Request) {
-	if MetricsManager == nil {
-		jsonError(w, "metrics not initialized", http.StatusInternalServerError)
+	if !requireManager(w, deps.MetricsManager, "指标管理器") {
 		return
 	}
 
@@ -166,26 +157,23 @@ func GetMetricsMinuteStats(w http.ResponseWriter, r *http.Request) {
 
 	cacheKey := "minute:" + start.Format(time.RFC3339) + ":" + end.Format(time.RFC3339)
 	if cached, ok := getTrendCache(cacheKey); ok {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(cached)
+		jsonSuccess(w, cached)
 		return
 	}
 
-	stats, err := MetricsManager.GetMinuteStats(start, end)
+	stats, err := deps.MetricsManager.GetMinuteStats(start, end)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	setTrendCache(cacheKey, stats)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	jsonSuccess(w, stats)
 }
 
 // GetMetricsHourlyStats 获取小时统计
 func GetMetricsHourlyStats(w http.ResponseWriter, r *http.Request) {
-	if MetricsManager == nil {
-		jsonError(w, "metrics not initialized", http.StatusInternalServerError)
+	if !requireManager(w, deps.MetricsManager, "指标管理器") {
 		return
 	}
 
@@ -226,26 +214,232 @@ func GetMetricsHourlyStats(w http.ResponseWriter, r *http.Request) {
 
 	cacheKey := "hourly:" + start.Format(time.RFC3339) + ":" + end.Format(time.RFC3339)
 	if cached, ok := getTrendCache(cacheKey); ok {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(cached)
+		jsonSuccess(w, cached)
 		return
 	}
 
-	stats, err := MetricsManager.GetHourlyStats(start, end)
+	stats, err := deps.MetricsManager.GetHourlyStats(start, end)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	setTrendCache(cacheKey, stats)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	jsonSuccess(w, stats)
+}
+
+// GetMetricsTrend 获取趋势数据（支持长期历史，自动选择合适粒度）
+func GetMetricsTrend(w http.ResponseWriter, r *http.Request) {
+	if !requireManager(w, deps.MetricsManager, "指标管理器") {
+		return
+	}
+
+	rangeStr := r.URL.Query().Get("range")
+	startStr := r.URL.Query().Get("start")
+	endStr := r.URL.Query().Get("end")
+
+	var start, end time.Time
+	var startErr, endErr error
+
+	if startStr != "" {
+		start, startErr = time.Parse(time.RFC3339, startStr)
+		if startErr != nil {
+			start, _ = time.Parse("2006-01-02", startStr)
+		}
+	}
+	if endStr != "" {
+		end, endErr = time.Parse(time.RFC3339, endStr)
+		if endErr != nil {
+			end, _ = time.Parse("2006-01-02", endStr)
+		}
+	}
+
+	_ = startErr
+	_ = endErr
+
+	switch rangeStr {
+	case "15m":
+		if startStr == "" {
+			start = time.Now().UTC().Add(-15 * time.Minute)
+		}
+		if endStr == "" {
+			end = time.Now().UTC()
+		}
+		start = start.Truncate(time.Second)
+		end = end.Truncate(time.Second)
+		cacheKey := "trend:15m:" + start.Format(time.RFC3339) + ":" + end.Format(time.RFC3339)
+		if cached, ok := getTrendCache(cacheKey); ok {
+			jsonSuccess(w, cached)
+			return
+		}
+		stats, err := deps.MetricsManager.GetMinuteStats(start, end)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result := map[string]interface{}{"granularity": "minute", "data": stats}
+		setTrendCache(cacheKey, result)
+		jsonSuccess(w, result)
+	case "1h":
+		if startStr == "" {
+			start = time.Now().UTC().Add(-1 * time.Hour)
+		}
+		if endStr == "" {
+			end = time.Now().UTC()
+		}
+		start = start.Truncate(time.Second)
+		end = end.Truncate(time.Second)
+		cacheKey := "trend:1h:" + start.Format(time.RFC3339) + ":" + end.Format(time.RFC3339)
+		if cached, ok := getTrendCache(cacheKey); ok {
+			jsonSuccess(w, cached)
+			return
+		}
+		stats, err := deps.MetricsManager.GetMinuteStats(start, end)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result := map[string]interface{}{"granularity": "minute", "data": stats}
+		setTrendCache(cacheKey, result)
+		jsonSuccess(w, result)
+	case "12h":
+		if startStr == "" {
+			start = time.Now().UTC().Add(-12 * time.Hour)
+		}
+		if endStr == "" {
+			end = time.Now().UTC()
+		}
+		start = start.Truncate(time.Second)
+		end = end.Truncate(time.Second)
+		cacheKey := "trend:12h:" + start.Format(time.RFC3339) + ":" + end.Format(time.RFC3339)
+		if cached, ok := getTrendCache(cacheKey); ok {
+			jsonSuccess(w, cached)
+			return
+		}
+		stats, err := deps.MetricsManager.GetHourlyStats(start, end)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result := map[string]interface{}{"granularity": "hourly", "data": stats}
+		setTrendCache(cacheKey, result)
+		jsonSuccess(w, result)
+	case "24h":
+		if startStr == "" {
+			start = time.Now().UTC().AddDate(0, 0, -1)
+		}
+		if endStr == "" {
+			end = time.Now().UTC()
+		}
+		start = start.Truncate(time.Second)
+		end = end.Truncate(time.Second)
+		cacheKey := "trend:24h:" + start.Format(time.RFC3339) + ":" + end.Format(time.RFC3339)
+		if cached, ok := getTrendCache(cacheKey); ok {
+			jsonSuccess(w, cached)
+			return
+		}
+		stats, err := deps.MetricsManager.GetHourlyStats(start, end)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result := map[string]interface{}{"granularity": "hourly", "data": stats}
+		setTrendCache(cacheKey, result)
+		jsonSuccess(w, result)
+	case "7d":
+		if startStr == "" {
+			start = time.Now().UTC().AddDate(0, 0, -7)
+		}
+		if endStr == "" {
+			end = time.Now().UTC()
+		}
+		start = start.Truncate(time.Second)
+		end = end.Truncate(time.Second)
+		cacheKey := "trend:7d:" + start.Format(time.RFC3339) + ":" + end.Format(time.RFC3339)
+		if cached, ok := getTrendCache(cacheKey); ok {
+			jsonSuccess(w, cached)
+			return
+		}
+		stats, err := deps.MetricsManager.GetHourlyStatsFromTable(start, end)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result := map[string]interface{}{"granularity": "hourly", "data": stats}
+		setTrendCache(cacheKey, result)
+		jsonSuccess(w, result)
+	case "30d":
+		if startStr == "" {
+			start = time.Now().UTC().AddDate(0, 0, -30)
+		}
+		if endStr == "" {
+			end = time.Now().UTC()
+		}
+		start = start.Truncate(time.Second)
+		end = end.Truncate(time.Second)
+		cacheKey := "trend:30d:" + start.Format(time.RFC3339) + ":" + end.Format(time.RFC3339)
+		if cached, ok := getTrendCache(cacheKey); ok {
+			jsonSuccess(w, cached)
+			return
+		}
+		stats, err := deps.MetricsManager.GetHourlyStatsFromTable(start, end)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result := map[string]interface{}{"granularity": "hourly", "data": stats}
+		setTrendCache(cacheKey, result)
+		jsonSuccess(w, result)
+	case "90d":
+		if startStr == "" {
+			start = time.Now().UTC().AddDate(0, 0, -90)
+		}
+		if endStr == "" {
+			end = time.Now().UTC()
+		}
+		start = start.Truncate(time.Second)
+		end = end.Truncate(time.Second)
+		cacheKey := "trend:90d:" + start.Format(time.RFC3339) + ":" + end.Format(time.RFC3339)
+		if cached, ok := getTrendCache(cacheKey); ok {
+			jsonSuccess(w, cached)
+			return
+		}
+		stats, err := deps.MetricsManager.GetHourlyStatsFromTable(start, end)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result := map[string]interface{}{"granularity": "hourly", "data": stats}
+		setTrendCache(cacheKey, result)
+		jsonSuccess(w, result)
+	default:
+		if startStr == "" {
+			start = time.Now().UTC().Add(-15 * time.Minute)
+		}
+		if endStr == "" {
+			end = time.Now().UTC()
+		}
+		start = start.Truncate(time.Second)
+		end = end.Truncate(time.Second)
+		cacheKey := "trend:default:" + start.Format(time.RFC3339) + ":" + end.Format(time.RFC3339)
+		if cached, ok := getTrendCache(cacheKey); ok {
+			jsonSuccess(w, cached)
+			return
+		}
+		stats, err := deps.MetricsManager.GetMinuteStats(start, end)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result := map[string]interface{}{"granularity": "minute", "data": stats}
+		setTrendCache(cacheKey, result)
+		jsonSuccess(w, result)
+	}
 }
 
 // GetMetricsTopStats 获取TOP统计
 func GetMetricsTopStats(w http.ResponseWriter, r *http.Request) {
-	if MetricsManager == nil {
-		jsonError(w, "metrics not initialized", http.StatusInternalServerError)
+	if !requireManager(w, deps.MetricsManager, "指标管理器") {
 		return
 	}
 
@@ -277,20 +471,73 @@ func GetMetricsTopStats(w http.ResponseWriter, r *http.Request) {
 		end = end.UTC()
 	}
 
-	stats, err := MetricsManager.GetTopStats(statType, start, end, limit)
+	stats, err := deps.MetricsManager.GetTopStats(statType, start, end, limit)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	jsonSuccess(w, stats)
+}
+
+// GetSystemTrend 获取系统资源趋势数据
+func GetSystemTrend(w http.ResponseWriter, r *http.Request) {
+	if !requireManager(w, deps.MetricsManager, "指标管理器") {
+		return
+	}
+
+	rangeStr := r.URL.Query().Get("range")
+	var start, end time.Time
+
+	switch rangeStr {
+	case "15m":
+		start = time.Now().UTC().Add(-15 * time.Minute)
+		end = time.Now().UTC()
+	case "1h":
+		start = time.Now().UTC().Add(-1 * time.Hour)
+		end = time.Now().UTC()
+	case "12h":
+		start = time.Now().UTC().Add(-12 * time.Hour)
+		end = time.Now().UTC()
+	case "24h":
+		start = time.Now().UTC().Add(-24 * time.Hour)
+		end = time.Now().UTC()
+	case "7d":
+		start = time.Now().UTC().AddDate(0, 0, -7)
+		end = time.Now().UTC()
+	case "30d":
+		start = time.Now().UTC().AddDate(0, 0, -30)
+		end = time.Now().UTC()
+	case "90d":
+		start = time.Now().UTC().AddDate(0, 0, -90)
+		end = time.Now().UTC()
+	default:
+		start = time.Now().UTC().Add(-15 * time.Minute)
+		end = time.Now().UTC()
+	}
+
+	start = start.Truncate(time.Second)
+	end = end.Truncate(time.Second)
+	cacheKey := "system_trend:" + rangeStr + ":" + start.Format(time.RFC3339) + ":" + end.Format(time.RFC3339)
+	if cached, ok := getTrendCache(cacheKey); ok {
+		jsonSuccess(w, cached)
+		return
+	}
+
+	stats, err := deps.MetricsManager.GetSystemStatsTrend(start, end)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	result := map[string]interface{}{"data": stats}
+	setTrendCache(cacheKey, result)
+	jsonSuccess(w, result)
 }
 
 // GetMetricsRuleHitStats 获取规则命中统计
 func GetMetricsRuleHitStats(w http.ResponseWriter, r *http.Request) {
-	if MetricsManager == nil {
-		jsonError(w, "metrics not initialized", http.StatusInternalServerError)
+	if !requireManager(w, deps.MetricsManager, "指标管理器") {
 		return
 	}
 
@@ -317,12 +564,11 @@ func GetMetricsRuleHitStats(w http.ResponseWriter, r *http.Request) {
 		end = end.UTC()
 	}
 
-	stats, err := MetricsManager.GetRuleHitStats(start, end)
+	stats, err := deps.MetricsManager.GetRuleHitStats(start, end)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	jsonSuccess(w, stats)
 }

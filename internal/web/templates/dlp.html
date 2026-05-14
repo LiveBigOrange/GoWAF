@@ -1,0 +1,217 @@
+{{define "dlp"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DLP策略 - GoWAF</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <style>
+    .rule-type-badge {
+        padding: 3px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+        flex-shrink: 0;
+        margin-right: 8px;
+    }
+    .rule-type-badge.builtin {
+        background: #e3f2fd;
+        color: #1976d2;
+    }
+    .rule-type-badge.custom {
+        background: #fff3e0;
+        color: #f57c00;
+    }
+    .rule-filter {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 10px;
+    }
+    .filter-btn {
+        padding: 5px 14px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        background: #fff;
+        cursor: pointer;
+        font-size: 13px;
+    }
+    .filter-btn.active {
+        background: #3498db;
+        color: #fff;
+        border-color: #3498db;
+    }
+    .search-bar {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 12px;
+    }
+    .search-bar input {
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        flex: 1;
+        font-size: 13px;
+    }
+    .rule-count {
+        font-size: 13px;
+        color: #7f8c8d;
+        margin-left: 8px;
+    }
+    </style>
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main scroll-page">
+        <div class="card">
+            <div class="filter-bar">
+                <button class="add-btn" onclick="openAddModal()">+ 添加规则</button>
+                <span id="ruleCount" class="rule-count">(加载中)</span>
+            </div>
+            <div class="rule-filter">
+                <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">全部</button>
+                <button class="filter-btn" data-filter="builtin" onclick="setFilter('builtin')">内置规则</button>
+                <button class="filter-btn" data-filter="custom" onclick="setFilter('custom')">自定义规则</button>
+            </div>
+            <div class="search-bar">
+                <input type="text" id="searchInput" placeholder="搜索规则名称或正则模式..." oninput="renderRules()">
+            </div>
+            <table>
+                <thead><tr><th>ID</th><th>类型</th><th>名称</th><th>正则模式</th><th>动作</th><th>分类</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody id="ruleList"><tr><td colspan="8" style="text-align:center;color:#95a5a6;">加载中...</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">添加DLP规则</h3>
+                <span class="close" onclick="closeModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editId" value="0">
+                <div class="form-group">
+                    <label>规则名称</label>
+                    <input id="editName" placeholder="身份证号检测">
+                </div>
+                <div class="form-group">
+                    <label>正则模式</label>
+                    <input id="editPattern" placeholder="\d{17}[\dXx]">
+                    <small>Go正则表达式，用于匹配敏感数据</small>
+                </div>
+                <div class="form-group">
+                    <label>动作</label>
+                    <select id="editAction">
+                        <option value="detect">仅检测</option>
+                        <option value="mask">脱敏处理</option>
+                        <option value="block">阻断请求</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>分类</label>
+                    <select id="editCategory">
+                        <option value="pii">个人身份信息(PII)</option>
+                        <option value="finance">金融信息</option>
+                        <option value="health">健康信息</option>
+                        <option value="credential">凭证信息</option>
+                        <option value="other">其他</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>启用</label>
+                    <select id="editEnabled">
+                        <option value="true">启用</option>
+                        <option value="false">禁用</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closeModal()">取消</button>
+                <button class="btn-submit" onclick="saveRule()">保存</button>
+            </div>
+        </div>
+    </div>
+    <script nonce="{{.CSPNonce}}">
+    var allRules=[];
+    var currentFilter='all';
+    var actionMap={detect:'仅检测',mask:'脱敏',block:'阻断'};
+    var catMap={pii:'PII',finance:'金融',health:'健康',credential:'凭证',other:'其他'};
+    function loadRules(){
+        WAF.withLoading('.card',function(){
+            return fetch('/api/dlp/list').then(r=>r.json()).then(d=>{
+                if(!d.success) return;
+                allRules=d.data||[];
+                renderRules();
+            }).catch(e=>showToast('error','加载规则失败'));
+        });
+    }
+    function renderRules(){
+        var keyword=(document.getElementById('searchInput').value||'').toLowerCase().trim();
+        var filtered=allRules;
+        if(currentFilter!=='all') filtered=filtered.filter(r=>r.rule_type===currentFilter);
+        if(keyword) filtered=filtered.filter(r=>(r.name||'').toLowerCase().includes(keyword)||(r.pattern||'').toLowerCase().includes(keyword));
+        var builtinCount=allRules.filter(r=>r.rule_type==='builtin').length;
+        var customCount=allRules.filter(r=>r.rule_type==='custom').length;
+        document.getElementById('ruleCount').textContent='(内置:'+builtinCount+'条-自定义:'+customCount+'条'+(keyword?' 搜索:'+filtered.length+'条':'')+')';
+        var tbody=document.getElementById('ruleList');
+        if(!filtered.length){tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:#95a5a6;">'+(keyword?'未找到匹配的规则':'暂无规则')+'</td></tr>';return;}
+        tbody.innerHTML=filtered.map(r=>{
+            var isBuiltin=r.rule_type==='builtin';
+            var badge='<span class="rule-type-badge '+r.rule_type+'">'+(isBuiltin?'内置':'自定义')+'</span>';
+            var actions=isBuiltin?'<span style="color:#bdc3c7;font-size:12px;">不可编辑</span>':'<button class="btn-edit" data-id="'+r.id+'">编辑</button><button class="delete-btn" data-id="'+r.id+'">删除</button>';
+            return '<tr><td>'+r.id+'</td><td>'+badge+'</td><td>'+escapeHtml(r.name)+'</td><td><code>'+escapeHtml(r.pattern)+'</code></td><td>'+(actionMap[r.action]||escapeHtml(r.action))+'</td><td>'+(catMap[r.category]||escapeHtml(r.category))+'</td><td>'+WAF.renderToggle(r.enabled,r.id)+'</td><td>'+actions+'</td></tr>';
+        }).join('');
+    }
+    function setFilter(type){
+        currentFilter=type;
+        document.querySelectorAll('.filter-btn').forEach(b=>{b.classList.toggle('active',b.dataset.filter===type);});
+        renderRules();
+    }
+    function openAddModal(){
+        document.getElementById('modalTitle').textContent='添加DLP规则';
+        document.getElementById('editId').value='0';
+        document.getElementById('editName').value='';
+        document.getElementById('editPattern').value='';
+        document.getElementById('editAction').value='detect';
+        document.getElementById('editCategory').value='pii';
+        document.getElementById('editEnabled').value='true';
+        WAF.Modal.open('editModal');
+    }
+    function openEditModal(r){
+        if(r.rule_type==='builtin'){showToast('error','内置规则不可编辑');return;}
+        document.getElementById('modalTitle').textContent='编辑DLP规则';
+        document.getElementById('editId').value=r.id;
+        document.getElementById('editName').value=r.name||'';
+        document.getElementById('editPattern').value=r.pattern||'';
+        document.getElementById('editAction').value=r.action||'detect';
+        document.getElementById('editCategory').value=r.category||'other';
+        document.getElementById('editEnabled').value=r.enabled?'true':'false';
+        WAF.Modal.open('editModal');
+    }
+    function closeModal(){WAF.Modal.close('editModal');}
+    function saveRule(){
+        WAF.submitWithLock('.btn-submit',function(){
+            var id=parseInt(document.getElementById('editId').value);
+            var data={name:document.getElementById('editName').value,pattern:document.getElementById('editPattern').value,action:document.getElementById('editAction').value,category:document.getElementById('editCategory').value,enabled:document.getElementById('editEnabled').value==='true'};
+            if(!data.name||!data.pattern){showToast('error','请填写名称和正则模式');return Promise.resolve();}
+            var url=id?'/api/dlp/update':'/api/dlp/add';
+            if(id) data.id=id;
+            return WAF.jsonPost(url,data).then(d=>{
+                if(d.success){showToast('success',id?'更新成功':'添加成功');closeModal();loadRules();}else showToast('error',d.error||'操作失败');
+            }).catch(e=>showToast('error','操作失败: '+e.message));
+        });
+    }
+    WAF.setupTableActions('table tbody',{
+        onEdit:function(id){var r=allRules.find(x=>x.id===id);if(r)openEditModal(r);},
+        onDelete:function(id){var r=allRules.find(x=>x.id===id);if(r&&r.rule_type==='builtin'){showToast('error','内置规则不可删除');return;}WAF.confirmDelete('确认删除此规则？','/api/dlp/delete',{id:id},loadRules);}
+    });
+    WAF.setupToggleSwitch('table tbody','/api/dlp/toggle',loadRules);
+    WAF.Modal.clickOutside('editModal',closeModal);
+    loadRules();
+    </script>
+</body>
+</html>
+{{end}}

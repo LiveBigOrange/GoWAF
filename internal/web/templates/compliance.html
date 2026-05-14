@@ -1,0 +1,177 @@
+{{define "compliance"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>合规报告 - GoWAF</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <style>
+        .report-bar { display: flex; gap: 15px; margin-bottom: 20px; align-items: flex-end; flex-wrap: wrap; flex-shrink: 0; }
+        .report-bar .form-group { margin-bottom: 0; }
+        .report-bar input[type="date"] { padding: 8px 12px; border: 1px solid #dcdfe6; border-radius: 4px; font-size: 14px; }
+        .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .summary-item { background: #fff; border-radius: 8px; padding: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); text-align: center; }
+        .summary-item .label { font-size: 12px; color: #95a5a6; margin-bottom: 4px; }
+        .summary-item .value { font-size: 22px; font-weight: 600; color: #2c3e50; }
+        .compliance-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; border-bottom: 1px solid #f0f0f0; }
+        .compliance-item:last-child { border-bottom: none; }
+        .compliance-pass { color: #27ae60; font-weight: 600; }
+        .compliance-fail { color: #e74c3c; font-weight: 600; }
+        .compliance-warn { color: #f39c12; font-weight: 600; }
+        .score-big { font-size: 48px; font-weight: 700; text-align: center; margin: 10px 0; }
+        .score-big.good { color: #27ae60; }
+        .score-big.fair { color: #f39c12; }
+        .score-big.poor { color: #e74c3c; }
+        .score-bar { height: 8px; background: #ecf0f1; border-radius: 4px; overflow: hidden; margin-top: 8px; }
+        .score-fill { height: 100%; border-radius: 4px; transition: width 0.5s; }
+        .audit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 20px; }
+        .audit-item { background: #fff; border-radius: 6px; padding: 12px; border: 1px solid #edf0f4; display: flex; justify-content: space-between; align-items: center; }
+        .audit-item .key { font-size: 13px; color: #596275; }
+        .audit-item .val { font-size: 13px; font-weight: 600; }
+        .audit-item .val.on { color: #27ae60; }
+        .audit-item .val.off { color: #e74c3c; }
+        #htmlReport { border: 1px solid #e0e0e0; border-radius: 8px; min-height: 400px; background: #fff; padding: 20px; display: none; }
+    </style>
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main scroll-page">
+        <div class="card">
+            <div class="report-bar">
+                <div class="form-group">
+                    <label>开始日期</label>
+                    <input type="date" id="startDate">
+                </div>
+                <div class="form-group">
+                    <label>结束日期</label>
+                    <input type="date" id="endDate">
+                </div>
+                <button class="primary" onclick="generateReport()" style="padding:8px 20px;background:#409eff;color:#fff;border:none;border-radius:4px;cursor:pointer;">生成报告</button>
+                <button onclick="generateHTML()" style="padding:8px 20px;border:1px solid #dcdfe6;background:#fff;border-radius:4px;cursor:pointer;">HTML预览</button>
+            </div>
+        </div>
+        <div id="reportContent" style="display:none;">
+            <div class="card" style="margin-bottom:15px;text-align:center;">
+                <h3>合规评分</h3>
+                <div id="scoreBig" class="score-big"></div>
+                <div id="scoreLevel" style="font-size:14px;color:#95a5a6;"></div>
+            </div>
+            <div class="card" style="margin-bottom:15px;">
+                <h3 style="margin-bottom:15px;">安全概览</h3>
+                <div class="summary-grid" id="summaryGrid"></div>
+            </div>
+            <div class="card" style="margin-bottom:15px;">
+                <h3 style="margin-bottom:15px;">配置审计</h3>
+                <div class="audit-grid" id="auditGrid"></div>
+            </div>
+            <div class="card" style="margin-bottom:15px;">
+                <h3 style="margin-bottom:15px;">合规状态</h3>
+                <div id="complianceList"></div>
+            </div>
+            <div class="card" style="margin-bottom:15px;">
+                <h3 style="margin-bottom:15px;">规则覆盖</h3>
+                <div class="summary-grid" id="coverageGrid"></div>
+            </div>
+            <div class="card" style="margin-bottom:15px;" id="attackCard" style="display:none;">
+                <h3 style="margin-bottom:15px;">攻击类型分布</h3>
+                <div id="attackDist"></div>
+            </div>
+            <div class="card" style="margin-bottom:15px;" id="topIPCard" style="display:none;">
+                <h3 style="margin-bottom:15px;">TOP 被拦截 IP</h3>
+                <div id="topIPList"></div>
+            </div>
+        </div>
+        <div id="htmlReport"></div>
+    </div>
+<script nonce="{{.CSPNonce}}">
+function setDateDefaults(){
+    var now=new Date(),month=new Date(now.getFullYear(),now.getMonth()-1,now.getDate());
+    document.getElementById('endDate').value=now.toISOString().slice(0,10);
+    document.getElementById('startDate').value=month.toISOString().slice(0,10);
+}
+function generateReport(){
+    var s=document.getElementById('startDate').value,e=document.getElementById('endDate').value;
+    fetch('/api/compliance/report?start='+s+'&end='+e).then(r=>r.json()).then(d=>{
+        if(!d.success){showToast('error',d.error||'生成失败');return;}
+        var r=d.data;
+        document.getElementById('reportContent').style.display='block';
+        document.getElementById('htmlReport').style.display='none';
+
+        var cs=r.compliance_status;
+        var scoreClass=cs.overall_score>=80?'good':cs.overall_score>=60?'fair':'poor';
+        document.getElementById('scoreBig').className='score-big '+scoreClass;
+        document.getElementById('scoreBig').textContent=cs.overall_score.toFixed(0)+'/100';
+        document.getElementById('scoreLevel').textContent='等级：'+cs.level;
+
+        var sm=r.security_summary;
+        document.getElementById('summaryGrid').innerHTML=
+            '<div class="summary-item"><div class="label">总请求</div><div class="value">'+sm.total_requests+'</div></div>'+
+            '<div class="summary-item"><div class="label">拦截数</div><div class="value">'+sm.total_blocked+'</div></div>'+
+            '<div class="summary-item"><div class="label">拦截率</div><div class="value">'+sm.block_rate.toFixed(1)+'%</div></div>'+
+            '<div class="summary-item"><div class="label">独立拦截IP</div><div class="value">'+sm.unique_blocked_ips+'</div></div>'+
+            '<div class="summary-item"><div class="label">主要攻击</div><div class="value" style="font-size:16px;">'+(sm.top_attack_type||'-')+'</div></div>'+
+            '<div class="summary-item"><div class="label">平均延迟</div><div class="value">'+sm.avg_latency_ms.toFixed(1)+'ms</div></div>';
+
+        var ca=r.config_audit;
+        document.getElementById('auditGrid').innerHTML=
+            auditRow('CSRF防护',ca.csrf_enabled)+auditRow('安全响应头',ca.security_headers)+
+            auditRow('HTTPS强制',ca.https_enforced)+auditRow('限流防护',ca.rate_limit_enabled)+
+            auditRow('观察模式',ca.observation_mode)+
+            '<div class="audit-item"><span class="key">密码存储</span><span class="val">'+(ca.password_strength==='hashed'?'已哈希':'未哈希')+'</span></div>'+
+            '<div class="audit-item"><span class="key">Session TTL</span><span class="value">'+(ca.session_ttl_secs||1800)+'s</span></div>';
+
+        var html='';
+        for(var i=0;i<cs.items.length;i++){
+            var item=cs.items[i];
+            var cls=item.status==='pass'?'compliance-pass':item.status==='fail'?'compliance-fail':'compliance-warn';
+            var stxt=item.status==='pass'?'通过':item.status==='fail'?'未通过':'警告';
+            html+='<div class="compliance-item"><div><span style="color:#95a5a6;font-size:12px;margin-right:6px;">'+item.id+'</span><strong>'+item.name+'</strong><div style="font-size:12px;color:#95a5a6;">'+item.description+'</div></div><div><span class="'+cls+'">'+stxt+'</span> <span style="font-size:12px;color:#95a5a6;">'+item.score.toFixed(0)+'分</span></div></div>';
+        }
+        document.getElementById('complianceList').innerHTML=html;
+
+        var cv=r.rule_coverage;
+        document.getElementById('coverageGrid').innerHTML=
+            '<div class="summary-item"><div class="label">检测器启用</div><div class="value">'+cv.detectors_enabled+'/'+cv.detectors_total+'</div></div>'+
+            '<div class="summary-item"><div class="label">IP规则</div><div class="value">'+cv.ip_rules_count+'</div></div>'+
+            '<div class="summary-item"><div class="label">UA规则</div><div class="value">'+cv.ua_rules_count+'</div></div>'+
+            '<div class="summary-item"><div class="label">路径规则</div><div class="value">'+cv.path_rules_count+'</div></div>'+
+            '<div class="summary-item"><div class="label">GeoIP规则</div><div class="value">'+cv.geo_rules_count+'</div></div>'+
+            '<div class="summary-item"><div class="label">自定义规则</div><div class="value">'+cv.custom_rules_count+'</div></div>'+
+            '<div class="summary-item"><div class="label">覆盖率</div><div class="value">'+cv.coverage_percent.toFixed(1)+'%</div></div>';
+
+        var ad=r.attack_distribution||[];
+        var ac=document.getElementById('attackCard');
+        if(ad.length>0){ac.style.display='';var ah='<table class="log-table"><thead><tr><th>攻击类型</th><th>次数</th><th>占比</th></tr></thead><tbody>';
+            for(var j=0;j<ad.length;j++) ah+='<tr><td>'+ad[j].attack_type+'</td><td>'+ad[j].count+'</td><td>'+ad[j].percent.toFixed(1)+'%</td></tr>';
+            ah+='</tbody></table>';document.getElementById('attackDist').innerHTML=ah;}else{ac.style.display='none';}
+
+        var tp=r.top_blocked_ips||[];
+        var tc=document.getElementById('topIPCard');
+        if(tp.length>0){tc.style.display='';var th='<table class="log-table"><thead><tr><th>IP</th><th>拦截次数</th><th>最后出现</th></tr></thead><tbody>';
+            for(var k=0;k<tp.length;k++) th+='<tr><td>'+tp[k].ip+'</td><td>'+tp[k].count+'</td><td>'+tp[k].last_seen+'</td></tr>';
+            th+='</tbody></table>';document.getElementById('topIPList').innerHTML=th;}else{tc.style.display='none';}
+
+        showToast('success','报告已生成');
+    }).catch(function(){showToast('error','生成报告失败');});
+}
+function auditRow(label,on){
+    return '<div class="audit-item"><span class="key">'+label+'</span><span class="val '+(on?'on':'off')+'">'+(on?'已启用':'未启用')+'</span></div>';
+}
+function generateHTML(){
+    var s=document.getElementById('startDate').value,e=document.getElementById('endDate').value;
+    fetch('/api/compliance/html?start='+s+'&end='+e).then(r=>{
+        if(!r.ok){throw new Error('HTTP '+r.status);}return r.text();
+    }).then(html=>{
+        document.getElementById('reportContent').style.display='none';
+        var el=document.getElementById('htmlReport');
+        el.style.display='block';
+        el.innerHTML=html;
+    }).catch(function(){showToast('error','生成HTML预览失败');});
+}
+setDateDefaults();
+</script>
+</body>
+</html>
+{{end}}

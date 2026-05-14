@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"gowaf-demo/internal/logger"
-	"gowaf-demo/internal/timeutil"
+	"gowaf/internal/logger"
+	"gowaf/internal/timeutil"
 )
 
 // LogEntry 日志条目结构 - 使用统一的AccessLog结构
@@ -23,32 +23,32 @@ type LogEntry = logger.AccessLog
 
 // LogQueryRequest 日志查询请求
 type LogQueryRequest struct {
-	StartTime   string `json:"start_time"`
-	EndTime     string `json:"end_time"`
-	ClientIP    string `json:"client_ip"`
-	Method      string `json:"method"`
-	StatusCode  string `json:"status_code"`
-	Action      string `json:"action"`
-	Path        string `json:"path"`
-	Keyword     string `json:"keyword"`
-	Page        int    `json:"page"`
-	PageSize    int    `json:"page_size"`
-	SortField   string `json:"sort_field"`
-	SortOrder   string `json:"sort_order"`
+	StartTime  string `json:"start_time"`
+	EndTime    string `json:"end_time"`
+	ClientIP   string `json:"client_ip"`
+	Method     string `json:"method"`
+	StatusCode string `json:"status_code"`
+	Action     string `json:"action"`
+	Path       string `json:"path"`
+	Keyword    string `json:"keyword"`
+	Page       int    `json:"page"`
+	PageSize   int    `json:"page_size"`
+	SortField  string `json:"sort_field"`
+	SortOrder  string `json:"sort_order"`
 }
 
 // LogStatsResponse 日志统计响应
 type LogStatsResponse struct {
-	TotalRequests   int64            `json:"total_requests"`
-	TotalBlocked    int64            `json:"total_blocked"`
-	TotalErrors     int64            `json:"total_errors"`
-	AvgLatency      float64          `json:"avg_latency"`
-	StatusCodeDist  map[string]int64 `json:"status_code_dist"`
-	MethodDist      map[string]int64 `json:"method_dist"`
-	ActionDist      map[string]int64 `json:"action_dist"`
-	TopIPs          []IPCount        `json:"top_ips"`
-	TopPaths        []PathCount      `json:"top_paths"`
-	TrendData       []TrendPoint     `json:"trend_data"`
+	TotalRequests  int64            `json:"total_requests"`
+	TotalBlocked   int64            `json:"total_blocked"`
+	TotalErrors    int64            `json:"total_errors"`
+	AvgLatency     float64          `json:"avg_latency"`
+	StatusCodeDist map[string]int64 `json:"status_code_dist"`
+	MethodDist     map[string]int64 `json:"method_dist"`
+	ActionDist     map[string]int64 `json:"action_dist"`
+	TopIPs         []IPCount        `json:"top_ips"`
+	TopPaths       []PathCount      `json:"top_paths"`
+	TrendData      []TrendPoint     `json:"trend_data"`
 }
 
 // IPCount IP计数
@@ -65,10 +65,10 @@ type PathCount struct {
 
 // TrendPoint 趋势数据点
 type TrendPoint struct {
-	Time      string `json:"time"`
-	Requests  int64  `json:"requests"`
-	Blocked   int64  `json:"blocked"`
-	Errors    int64  `json:"errors"`
+	Time     string `json:"time"`
+	Requests int64  `json:"requests"`
+	Blocked  int64  `json:"blocked"`
+	Errors   int64  `json:"errors"`
 }
 
 // SimpleStats 简单统计（用于页面显示）
@@ -93,10 +93,31 @@ type LogFileInfo struct {
 
 // getLogFilePath 获取日志文件路径
 func getLogFilePath() string {
-	if cfg != nil && cfg.Log.File != "" {
-		return cfg.Log.File
+	if deps.Config != nil && deps.Config.Log.File != "" {
+		return deps.Config.Log.File
 	}
 	return "waf.log" // 默认路径
+}
+
+func validateLogFilePath(logFile string) (string, error) {
+	if strings.Contains(logFile, "..") {
+		return "", fmt.Errorf("invalid file path: path traversal detected")
+	}
+	absPath, err := filepath.Abs(filepath.Clean(logFile))
+	if err != nil {
+		return "", fmt.Errorf("invalid file path: %w", err)
+	}
+	var baseDir string
+	if deps.Config != nil && deps.Config.Log.File != "" {
+		baseDir, _ = filepath.Abs(filepath.Dir(deps.Config.Log.File))
+	}
+	if baseDir == "" {
+		baseDir, _ = os.Getwd()
+	}
+	if !strings.HasPrefix(absPath, baseDir) {
+		return "", fmt.Errorf("invalid file path: access denied")
+	}
+	return absPath, nil
 }
 
 // GetLogsList 获取日志列表
@@ -105,59 +126,39 @@ func GetLogsList(w http.ResponseWriter, r *http.Request) {
 	logFile := getLogFilePath()
 	entries, total, err := readAndFilterLogs(logFile, query)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": err.Error(),
-			"logs":  []LogEntry{},
-			"total": 0,
-			"page":  query.Page,
-			"size":  query.PageSize,
-		})
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// 为每条日志填充地理位置
-	if MetricsManager != nil {
+	if deps.MetricsManager != nil {
 		for i := range entries {
-			geo := MetricsManager.GetGeoLocation(entries[i].ClientIP)
+			geo := deps.MetricsManager.GetGeoLocation(entries[i].ClientIP)
 			entries[i].GeoCountry = geo.Country
 			entries[i].GeoCity = geo.City
 			entries[i].GeoFlag = geo.Flag
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"logs":  entries,
-		"total": total,
-		"page":  query.Page,
-		"size":  query.PageSize,
-	})
+	jsonSuccessPaged(w, entries, int64(total), query.Page, query.PageSize)
 }
 
 // GetLogDetail 获取日志详情
 func GetLogDetail(w http.ResponseWriter, r *http.Request) {
 	requestID := r.URL.Query().Get("request_id")
 	if requestID == "" {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": "request_id is required",
-		})
+		jsonError(w, "request_id is required", http.StatusBadRequest)
 		return
 	}
 
 	logFile := getLogFilePath()
 	entry, err := findLogByRequestID(logFile, requestID)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": err.Error(),
-		})
+		jsonError(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(entry)
+	jsonSuccess(w, entry)
 }
 
 // GetLogsStats 获取日志统计
@@ -175,15 +176,11 @@ func GetLogsStats(w http.ResponseWriter, r *http.Request) {
 	logFile := getLogFilePath()
 	stats, err := calculateLogStats(logFile, startTime, endTime)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": err.Error(),
-		})
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	jsonSuccess(w, stats)
 }
 
 // ExportLogs 导出日志
@@ -197,10 +194,7 @@ func ExportLogs(w http.ResponseWriter, r *http.Request) {
 	logFile := getLogFilePath()
 	entries, _, err := readAndFilterLogs(logFile, query)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": err.Error(),
-		})
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -210,10 +204,7 @@ func ExportLogs(w http.ResponseWriter, r *http.Request) {
 	case "json":
 		exportLogsJSON(w, entries)
 	default:
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": "unsupported format",
-		})
+		jsonError(w, "unsupported format", http.StatusBadRequest)
 	}
 }
 
@@ -221,16 +212,11 @@ func ExportLogs(w http.ResponseWriter, r *http.Request) {
 func GetLogFiles(w http.ResponseWriter, r *http.Request) {
 	files, err := listLogFiles()
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": err.Error(),
-			"files": []map[string]interface{}{},
-		})
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(files)
+	jsonSuccess(w, files)
 }
 
 // GetLogFileInfo 获取日志文件信息
@@ -240,61 +226,31 @@ func GetLogFileInfo(w http.ResponseWriter, r *http.Request) {
 		logFile = getLogFilePath()
 	}
 
-	// 安全检查：防止路径遍历攻击
-	if strings.Contains(logFile, "..") {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": "invalid file path: path traversal detected",
-		})
-		return
-	}
-
-	// 清理路径并获取绝对路径
-	absPath, err := filepath.Abs(filepath.Clean(logFile))
+	validatedPath, err := validateLogFilePath(logFile)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": "invalid file path: " + err.Error(),
-		})
+		if strings.Contains(err.Error(), "path traversal") {
+			jsonError(w, err.Error(), http.StatusBadRequest)
+		} else {
+			jsonError(w, err.Error(), http.StatusForbidden)
+		}
 		return
 	}
-
-	// 获取当前工作目录，确保文件在项目根目录或日志目录下
-	wd, _ := os.Getwd()
-	// 简单校验：确保路径不以 .. 开头且是绝对路径
-	if !strings.HasPrefix(absPath, wd) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": "invalid file path: access denied",
-		})
-		return
-	}
-	logFile = absPath
+	logFile = validatedPath
 
 	info, err := os.Stat(logFile)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": "file not found: " + err.Error(),
-		})
+		jsonError(w, "file not found: "+err.Error(), http.StatusNotFound)
 		return
 	}
 
-	// 检查是否是普通文件
 	if info.IsDir() {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": "path is a directory, not a file",
-		})
+		jsonError(w, "path is a directory, not a file", http.StatusBadRequest)
 		return
 	}
 
 	file, err := os.Open(logFile)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": "cannot open file: " + err.Error(),
-		})
+		jsonError(w, "cannot open file: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer file.Close()
@@ -336,8 +292,7 @@ func GetLogFileInfo(w http.ResponseWriter, r *http.Request) {
 		ModifiedTime:  timeutil.FormatRFC3339(info.ModTime()),
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(fileInfo)
+	jsonSuccess(w, fileInfo)
 }
 
 // GetSimpleStats 获取简单统计
@@ -347,32 +302,27 @@ func GetSimpleStats(w http.ResponseWriter, r *http.Request) {
 		logFile = getLogFilePath()
 	}
 
-	// 安全检查：防止路径遍历攻击
-	if strings.Contains(logFile, "..") {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": "invalid file path: path traversal detected",
-		})
+	validatedPath, err := validateLogFilePath(logFile)
+	if err != nil {
+		if strings.Contains(err.Error(), "path traversal") {
+			jsonError(w, err.Error(), http.StatusBadRequest)
+		} else {
+			jsonError(w, err.Error(), http.StatusForbidden)
+		}
 		return
 	}
-
-	// 清理路径
-	logFile = filepath.Clean(logFile)
+	logFile = validatedPath
 
 	query := parseLogQuery(r)
 	entries, _, err := readAndFilterLogs(logFile, query)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": err.Error(),
-		})
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	stats := calculateSimpleStats(entries)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	jsonSuccess(w, stats)
 }
 
 // ReadRecentLogs 读取最近N条日志
@@ -382,19 +332,16 @@ func ReadRecentLogs(w http.ResponseWriter, r *http.Request) {
 		logFile = getLogFilePath()
 	}
 
-	// 安全检查：防止路径遍历攻击
-	if strings.Contains(logFile, "..") {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": "invalid file path: path traversal detected",
-			"logs":  []LogEntry{},
-			"count": 0,
-		})
+	validatedPath, err := validateLogFilePath(logFile)
+	if err != nil {
+		if strings.Contains(err.Error(), "path traversal") {
+			jsonError(w, err.Error(), http.StatusBadRequest)
+		} else {
+			jsonError(w, err.Error(), http.StatusForbidden)
+		}
 		return
 	}
-
-	// 清理路径
-	logFile = filepath.Clean(logFile)
+	logFile = validatedPath
 
 	limitStr := r.URL.Query().Get("limit")
 	limit := 1000
@@ -406,17 +353,11 @@ func ReadRecentLogs(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := readRecentLogsFromFile(logFile, limit)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": err.Error(),
-			"logs":  []LogEntry{},
-			"count": 0,
-		})
+		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonSuccess(w, map[string]interface{}{
 		"logs":  entries,
 		"count": len(entries),
 	})
@@ -611,7 +552,7 @@ func readAndFilterLogs(filename string, query *LogQueryRequest) ([]LogEntry, int
 
 	var entries []LogEntry
 	scanner := bufio.NewScanner(file)
-	
+
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 
@@ -809,21 +750,21 @@ func calculateLogStats(filename, startTime, endTime string) (*LogStatsResponse, 
 		}
 
 		stats.TotalRequests++
-		
+
 		statusCode := strconv.Itoa(entry.Status)
 		stats.StatusCodeDist[statusCode]++
-		
+
 		stats.MethodDist[entry.Method]++
-		
+
 		stats.ActionDist[entry.Action]++
-		
+
 		totalLatency += entry.LatencyMs
 		latencyCount++
-		
+
 		ipCount[entry.ClientIP]++
-		
+
 		pathCount[entry.Path]++
-		
+
 		if entry.Action == "block" {
 			stats.TotalBlocked++
 		}
@@ -863,9 +804,9 @@ func calculateLogStats(filename, startTime, endTime string) (*LogStatsResponse, 
 	}
 
 	stats.TopIPs = getTopN(ipCount, 10)
-	
+
 	stats.TopPaths = getTopNPath(pathCount, 10)
-	
+
 	for _, trend := range trendMap {
 		stats.TrendData = append(stats.TrendData, *trend)
 	}
@@ -939,15 +880,14 @@ func exportLogsCSV(w http.ResponseWriter, entries []LogEntry) {
 
 // exportLogsJSON 导出JSON格式
 func exportLogsJSON(w http.ResponseWriter, entries []LogEntry) {
-	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", "attachment; filename=logs.json")
-	json.NewEncoder(w).Encode(entries)
+	jsonSuccess(w, entries)
 }
 
 // listLogFiles 列出日志文件
 func listLogFiles() ([]map[string]interface{}, error) {
 	var files []map[string]interface{}
-	
+
 	matches, err := filepath.Glob("*.log")
 	if err != nil {
 		return nil, err

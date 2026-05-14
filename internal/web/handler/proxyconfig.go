@@ -1,30 +1,62 @@
 package handler
 
 import (
+	"crypto/x509"
 	"encoding/json"
-	"log"
+	"encoding/pem"
+	"net"
 	"net/http"
+	"regexp"
+	"strings"
 
-	"gowaf-demo/internal/proxyconfig"
+	"gowaf/internal/logger"
+	"gowaf/internal/proxyconfig"
 
 	"github.com/google/uuid"
 )
+
+var validAddrPattern = regexp.MustCompile(`^(\[[^\]]+\]|[^\[:]+)?:\d+$`)
+
+func isValidListenAddr(addr string) bool {
+	if !validAddrPattern.MatchString(addr) {
+		return false
+	}
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	for _, c := range port {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	p := 0
+	for _, c := range port {
+		p = p*10 + int(c-'0')
+	}
+	return p >= 1 && p <= 65535
+}
 
 // ========== 代理配置 API ==========
 
 // APIProxyList 获取代理列表
 func APIProxyList(w http.ResponseWriter, r *http.Request) {
-	proxies, err := ProxyConfigManager.ListProxies()
+	if !requireManager(w, deps.ProxyConfigManager, "代理配置管理器") {
+		return
+	}
+	proxies, err := deps.ProxyConfigManager.ListProxies()
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(proxies)
+	jsonSuccess(w, proxies)
 }
 
 // APIProxyAdd 添加代理
 func APIProxyAdd(w http.ResponseWriter, r *http.Request) {
+	if !requireManager(w, deps.ProxyConfigManager, "代理配置管理器") {
+		return
+	}
 	var req struct {
 		ListenAddr string `json:"listen_addr"`
 		Protocol   string `json:"protocol"`
@@ -39,8 +71,12 @@ func APIProxyAdd(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "listen_addr不能为空", http.StatusBadRequest)
 		return
 	}
-	if req.Protocol != "http" && req.Protocol != "https" {
-		jsonError(w, "protocol必须为http或https", http.StatusBadRequest)
+	if !isValidListenAddr(req.ListenAddr) {
+		jsonError(w, "listen_addr格式无效，需为host:port且端口1-65535", http.StatusBadRequest)
+		return
+	}
+	if err := proxyconfig.ValidateProtocolList(req.Protocol); err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -51,27 +87,29 @@ func APIProxyAdd(w http.ResponseWriter, r *http.Request) {
 		Enabled:    req.Enabled,
 	}
 
-	if err := ProxyConfigManager.AddProxy(cfg); err != nil {
+	if err := deps.ProxyConfigManager.AddProxy(cfg); err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	if ProxyServerManager != nil {
-		if err := ProxyServerManager.AddProxy(cfg); err != nil {
-			ProxyConfigManager.DeleteProxy(cfg.ID)
-			jsonError(w, "启动代理服务器失败: "+err.Error(), http.StatusInternalServerError)
+	if deps.ProxyServerManager != nil {
+		if err := deps.ProxyServerManager.AddProxy(cfg); err != nil {
+			deps.ProxyConfigManager.DeleteProxy(cfg.ID)
+			dbError(w, "启动代理服务器", err)
 			return
 		}
 	} else {
-		log.Printf("警告: ProxyServerManager未初始化，代理配置已保存但监听器未启动，请重启服务生效")
+		logger.Error("警告: ProxyServerManager未初始化，代理配置已保存但监听器未启动，请重启服务生效")
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "id": cfg.ID})
+	jsonSuccess(w, map[string]interface{}{"id": cfg.ID})
 }
 
 // APIProxyUpdate 更新代理
 func APIProxyUpdate(w http.ResponseWriter, r *http.Request) {
+	if !requireManager(w, deps.ProxyConfigManager, "代理配置管理器") {
+		return
+	}
 	var req struct {
 		ID         string `json:"id"`
 		ListenAddr string `json:"listen_addr"`
@@ -91,14 +129,18 @@ func APIProxyUpdate(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "listen_addr不能为空", http.StatusBadRequest)
 		return
 	}
-	if req.Protocol != "http" && req.Protocol != "https" {
-		jsonError(w, "protocol必须为http或https", http.StatusBadRequest)
+	if !isValidListenAddr(req.ListenAddr) {
+		jsonError(w, "listen_addr格式无效，需为host:port且端口1-65535", http.StatusBadRequest)
+		return
+	}
+	if err := proxyconfig.ValidateProtocolList(req.Protocol); err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	var oldCfg *proxyconfig.ProxyConfig
-	if ProxyServerManager != nil {
-		if existing, err := ProxyConfigManager.GetProxy(req.ID); err == nil {
+	if deps.ProxyServerManager != nil {
+		if existing, err := deps.ProxyConfigManager.GetProxy(req.ID); err == nil {
 			oldCfg = existing
 		}
 	}
@@ -110,34 +152,36 @@ func APIProxyUpdate(w http.ResponseWriter, r *http.Request) {
 		Enabled:    req.Enabled,
 	}
 
-	if err := ProxyConfigManager.UpdateProxy(cfg); err != nil {
+	if err := deps.ProxyConfigManager.UpdateProxy(cfg); err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	if ProxyServerManager != nil {
-		if err := ProxyServerManager.UpdateProxy(cfg); err != nil {
-			log.Printf("警告: 更新代理服务器失败 [%s]: %v", cfg.ListenAddr, err)
+	if deps.ProxyServerManager != nil {
+		if err := deps.ProxyServerManager.UpdateProxy(cfg); err != nil {
+			logger.Error("警告: 更新代理服务器失败 [%s]: %v", cfg.ListenAddr, err)
 			if oldCfg != nil {
-				if rollbackErr := ProxyConfigManager.UpdateProxy(oldCfg); rollbackErr != nil {
-					log.Printf("警告: 回滚数据库配置失败 [%s]: %v", req.ID, rollbackErr)
+				if rollbackErr := deps.ProxyConfigManager.UpdateProxy(oldCfg); rollbackErr != nil {
+					logger.Error("警告: 回滚数据库配置失败 [%s]: %v", req.ID, rollbackErr)
 				} else {
-					log.Printf("已回滚数据库配置至更新前状态 [%s]", req.ID)
+					logger.Error("已回滚数据库配置至更新前状态 [%s]", req.ID)
 				}
 			}
-			jsonError(w, "更新代理服务器失败: "+err.Error(), http.StatusInternalServerError)
+			dbError(w, "更新代理服务器", err)
 			return
 		}
 	} else {
-		log.Printf("警告: ProxyServerManager未初始化，配置已更新但监听器未刷新，请重启服务生效")
+		logger.Error("警告: ProxyServerManager未初始化，配置已更新但监听器未刷新，请重启服务生效")
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	jsonSuccess(w, nil)
 }
 
 // APIProxyDelete 删除代理
 func APIProxyDelete(w http.ResponseWriter, r *http.Request) {
+	if !requireManager(w, deps.ProxyConfigManager, "代理配置管理器") {
+		return
+	}
 	var req struct {
 		ID string `json:"id"`
 	}
@@ -146,42 +190,47 @@ func APIProxyDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := ProxyConfigManager.DeleteProxy(req.ID); err != nil {
+	if err := deps.ProxyConfigManager.DeleteProxy(req.ID); err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	if ProxyServerManager != nil {
-		if err := ProxyServerManager.DeleteProxy(req.ID); err != nil {
-			log.Printf("警告: 停止代理服务器失败 [%s]: %v", req.ID, err)
+	if deps.ProxyServerManager != nil {
+		if err := deps.ProxyServerManager.DeleteProxy(req.ID); err != nil {
+			logger.Error("警告: 停止代理服务器失败 [%s]: %v", req.ID, err)
 		}
 	} else {
-		log.Printf("警告: ProxyServerManager未初始化，配置已删除但监听器未停止，请重启服务生效")
+		logger.Error("警告: ProxyServerManager未初始化，配置已删除但监听器未停止，请重启服务生效")
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	jsonSuccess(w, nil)
 }
 
 // ========== 域名配置 API ==========
 
 // APIDomainList 获取域名列表
 func APIDomainList(w http.ResponseWriter, r *http.Request) {
-	domains, err := ProxyConfigManager.ListDomains()
+	if !requireManager(w, deps.ProxyConfigManager, "代理配置管理器") {
+		return
+	}
+	domains, err := deps.ProxyConfigManager.ListDomains()
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(domains)
+	jsonSuccess(w, domains)
 }
 
 // APIDomainAdd 添加域名
 func APIDomainAdd(w http.ResponseWriter, r *http.Request) {
+	if !requireManager(w, deps.ProxyConfigManager, "代理配置管理器") {
+		return
+	}
 	var req struct {
 		Domain     string   `json:"domain"`
 		ProxyIDs   []string `json:"proxy_ids"`
 		BackendIDs []string `json:"backend_ids"`
+		GroupID    string   `json:"group_id"`
 		CertID     string   `json:"cert_id"`
 		Enabled    bool     `json:"enabled"`
 		ForceHTTPS bool     `json:"force_https"`
@@ -196,27 +245,31 @@ func APIDomainAdd(w http.ResponseWriter, r *http.Request) {
 		Domain:     req.Domain,
 		ProxyIDs:   req.ProxyIDs,
 		BackendIDs: req.BackendIDs,
+		GroupID:    req.GroupID,
 		CertID:     req.CertID,
 		Enabled:    req.Enabled,
 		ForceHTTPS: req.ForceHTTPS,
 	}
 
-	if err := ProxyConfigManager.AddDomain(cfg); err != nil {
+	if err := deps.ProxyConfigManager.AddDomain(cfg); err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "id": cfg.ID})
+	jsonSuccess(w, map[string]interface{}{"id": cfg.ID})
 }
 
 // APIDomainUpdate 更新域名
 func APIDomainUpdate(w http.ResponseWriter, r *http.Request) {
+	if !requireManager(w, deps.ProxyConfigManager, "代理配置管理器") {
+		return
+	}
 	var req struct {
 		ID         string   `json:"id"`
 		Domain     string   `json:"domain"`
 		ProxyIDs   []string `json:"proxy_ids"`
 		BackendIDs []string `json:"backend_ids"`
+		GroupID    string   `json:"group_id"`
 		CertID     string   `json:"cert_id"`
 		Enabled    bool     `json:"enabled"`
 		ForceHTTPS bool     `json:"force_https"`
@@ -231,22 +284,25 @@ func APIDomainUpdate(w http.ResponseWriter, r *http.Request) {
 		Domain:     req.Domain,
 		ProxyIDs:   req.ProxyIDs,
 		BackendIDs: req.BackendIDs,
+		GroupID:    req.GroupID,
 		CertID:     req.CertID,
 		Enabled:    req.Enabled,
 		ForceHTTPS: req.ForceHTTPS,
 	}
 
-	if err := ProxyConfigManager.UpdateDomain(cfg); err != nil {
+	if err := deps.ProxyConfigManager.UpdateDomain(cfg); err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	jsonSuccess(w, nil)
 }
 
 // APIDomainDelete 删除域名
 func APIDomainDelete(w http.ResponseWriter, r *http.Request) {
+	if !requireManager(w, deps.ProxyConfigManager, "代理配置管理器") {
+		return
+	}
 	var req struct {
 		ID string `json:"id"`
 	}
@@ -255,48 +311,112 @@ func APIDomainDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := ProxyConfigManager.DeleteDomain(req.ID); err != nil {
+	if err := deps.ProxyConfigManager.DeleteDomain(req.ID); err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	jsonSuccess(w, nil)
 }
 
 // ========== 证书管理 API ==========
 
 // APICertList 获取证书列表
 func APICertList(w http.ResponseWriter, r *http.Request) {
-	certs, err := ProxyConfigManager.ListCerts()
+	if !requireManager(w, deps.ProxyConfigManager, "代理配置管理器") {
+		return
+	}
+	certs, err := deps.ProxyConfigManager.ListCerts()
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// 添加状态信息
 	result := make([]map[string]interface{}, len(certs))
 	for i, cert := range certs {
-		result[i] = map[string]interface{}{
-			"id":            cert.ID,
-			"name":          cert.Name,
-			"domains":       cert.Domains,
-			"not_before":    cert.NotBefore,
-			"not_after":     cert.NotAfter,
-			"issuer":        cert.Issuer,
-			"subject":       cert.Subject,
-			"days_left":     cert.DaysLeft,
-			"status":        proxyconfig.GetCertExpiryStatus(cert.DaysLeft),
-			"created_at":    cert.CreatedAt,
-		}
+		result[i] = buildCertResponse(cert)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	jsonSuccess(w, result)
+}
+
+func APIUnifiedCerts(w http.ResponseWriter, r *http.Request) {
+	if !requireManager(w, deps.ProxyConfigManager, "代理配置管理器") {
+		return
+	}
+
+	certs, err := deps.ProxyConfigManager.ListCerts()
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	result := make([]map[string]interface{}, len(certs))
+	for i, cert := range certs {
+		if cert.Source == "acme" && (cert.Issuer == "" || isDomainLikeIssuer(cert.Issuer, cert.Domains)) {
+			fillIssuerFromPEM(&cert)
+		}
+		result[i] = buildCertResponse(cert)
+	}
+
+	jsonSuccess(w, result)
+}
+
+// isDomainLikeIssuer 判断 issuer 是否为域名而非 CA 名称（如 R3、Certum 等）
+func isDomainLikeIssuer(issuer string, domains []string) bool {
+	if issuer == "" {
+		return false
+	}
+	for _, d := range domains {
+		if issuer == d {
+			return true
+		}
+	}
+	if strings.Contains(issuer, ".") && !strings.Contains(strings.ToLower(issuer), "encrypt") && !strings.Contains(strings.ToLower(issuer), "certum") && !strings.Contains(strings.ToLower(issuer), "digicert") {
+		return true
+	}
+	return false
+}
+
+// fillIssuerFromPEM 对 issuer 为空或为域名的证书，从数据库读取 PEM 解析颁发者并回填
+func fillIssuerFromPEM(cert *proxyconfig.SSLCert) {
+	if cert.ID == "" || deps.ProxyConfigManager == nil {
+		return
+	}
+	full, err := deps.ProxyConfigManager.GetCert(cert.ID)
+	if err != nil || full.CertPEM == "" {
+		return
+	}
+	block, _ := pem.Decode([]byte(full.CertPEM))
+	if block == nil {
+		return
+	}
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil || leaf == nil {
+		return
+	}
+	issuer := leaf.Issuer.CommonName
+	subject := leaf.Subject.CommonName
+	if issuer == subject {
+		for _, d := range cert.Domains {
+			if issuer == d {
+				issuer = "GoWAF 自签名"
+				break
+			}
+		}
+	}
+	cert.Issuer = issuer
+	cert.Subject = subject
+	if full.Issuer != issuer || full.Subject != subject {
+		_ = deps.ProxyConfigManager.UpdateCertIssuer(cert.ID, issuer, subject)
+	}
 }
 
 // APICertUpload 上传证书
 func APICertUpload(w http.ResponseWriter, r *http.Request) {
+	if !requireManager(w, deps.ProxyConfigManager, "代理配置管理器") {
+		return
+	}
 	var req struct {
 		Name    string `json:"name"`
 		CertPEM string `json:"cert_pem"`
@@ -325,15 +445,17 @@ func APICertUpload(w http.ResponseWriter, r *http.Request) {
 		cert.Name = req.Name
 	}
 
+	// 上传证书标记为手动管理
+	cert.Source = "manual"
+	cert.AutoRenew = false
+
 	// 保存证书
-	if err := ProxyConfigManager.AddCert(cert); err != nil {
+	if err := deps.ProxyConfigManager.AddCert(cert); err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":   true,
+	jsonSuccess(w, map[string]interface{}{
 		"id":        cert.ID,
 		"days_left": cert.DaysLeft,
 		"status":    proxyconfig.GetCertExpiryStatus(cert.DaysLeft),
@@ -342,6 +464,9 @@ func APICertUpload(w http.ResponseWriter, r *http.Request) {
 
 // APICertUpdate 更新证书
 func APICertUpdate(w http.ResponseWriter, r *http.Request) {
+	if !requireManager(w, deps.ProxyConfigManager, "代理配置管理器") {
+		return
+	}
 	var req struct {
 		ID      string `json:"id"`
 		Name    string `json:"name"`
@@ -358,6 +483,12 @@ func APICertUpdate(w http.ResponseWriter, r *http.Request) {
 
 	// 如果提供了新的证书文件，则验证并解析
 	if req.CertPEM != "" && req.KeyPEM != "" {
+		existing, getErr := deps.ProxyConfigManager.GetCert(req.ID)
+		if getErr != nil {
+			dbError(w, "获取证书", getErr)
+			return
+		}
+
 		// 验证证书
 		if err := proxyconfig.ValidateCert(req.CertPEM, req.KeyPEM); err != nil {
 			jsonError(w, "证书验证失败: "+err.Error(), http.StatusBadRequest)
@@ -371,11 +502,16 @@ func APICertUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cert.ID = req.ID
+		cert.Source = existing.Source
+		cert.AutoRenew = existing.AutoRenew
+		if req.Name == "" {
+			cert.Name = existing.Name
+		}
 	} else {
 		// 仅更新名称，获取现有证书
-		cert, err = ProxyConfigManager.GetCert(req.ID)
+		cert, err = deps.ProxyConfigManager.GetCert(req.ID)
 		if err != nil {
-			jsonError(w, "获取证书失败: "+err.Error(), http.StatusInternalServerError)
+			dbError(w, "获取证书", err)
 			return
 		}
 	}
@@ -386,14 +522,12 @@ func APICertUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 更新证书
-	if err := ProxyConfigManager.UpdateCert(cert); err != nil {
+	if err := deps.ProxyConfigManager.UpdateCert(cert); err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":   true,
+	jsonSuccess(w, map[string]interface{}{
 		"days_left": cert.DaysLeft,
 		"status":    proxyconfig.GetCertExpiryStatus(cert.DaysLeft),
 	})
@@ -401,6 +535,9 @@ func APICertUpdate(w http.ResponseWriter, r *http.Request) {
 
 // APICertDelete 删除证书
 func APICertDelete(w http.ResponseWriter, r *http.Request) {
+	if !requireManager(w, deps.ProxyConfigManager, "代理配置管理器") {
+		return
+	}
 	var req struct {
 		ID string `json:"id"`
 	}
@@ -409,55 +546,46 @@ func APICertDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := ProxyConfigManager.DeleteCert(req.ID); err != nil {
+	if err := deps.ProxyConfigManager.DeleteCert(req.ID); err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	jsonSuccess(w, nil)
 }
 
 // APICertGet 获取单个证书详情
 func APICertGet(w http.ResponseWriter, r *http.Request) {
+	if !requireManager(w, deps.ProxyConfigManager, "代理配置管理器") {
+		return
+	}
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		jsonError(w, "missing id parameter", http.StatusBadRequest)
 		return
 	}
 
-	cert, err := ProxyConfigManager.GetCert(id)
+	cert, err := deps.ProxyConfigManager.GetCert(id)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":         cert.ID,
-		"name":       cert.Name,
-		"not_before": cert.NotBefore,
-		"not_after":  cert.NotAfter,
-		"issuer":     cert.Issuer,
-		"subject":    cert.Subject,
-		"days_left":  cert.DaysLeft,
-		"status":     proxyconfig.GetCertExpiryStatus(cert.DaysLeft),
-		"created_at": cert.CreatedAt,
-		"cert_pem":   cert.CertPEM,
-		"key_pem":    cert.KeyPEM,
-	})
+	jsonSuccess(w, buildCertDetailResponse(*cert))
 }
 
 // APICertCheck 检查证书有效期
 func APICertCheck(w http.ResponseWriter, r *http.Request) {
-	certs, err := ProxyConfigManager.CheckCertExpiry()
+	if !requireManager(w, deps.ProxyConfigManager, "代理配置管理器") {
+		return
+	}
+	certs, err := deps.ProxyConfigManager.CheckCertExpiry()
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	jsonSuccess(w, map[string]interface{}{
 		"count": len(certs),
 		"certs": certs,
 	})

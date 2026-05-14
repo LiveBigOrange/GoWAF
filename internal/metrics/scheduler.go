@@ -76,4 +76,8 @@ func (s *Scheduler) cleanup() {
 	if err := s.manager.CleanupMinuteStats(); err != nil {
 		log.Printf("[WARN] 分钟数据清理失败: %v", err)
 	}
+	if err := s.manager.CleanupHourlyStats(); err != nil {
+		log.Printf("[WARN] 小时数据清理失败: %v", err)
+	}
+	s.manager.CleanupSystemStats(90)
 }

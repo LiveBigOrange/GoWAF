@@ -66,7 +66,7 @@ func (d *PathTraversalDetector) compilePatterns() {
 	d.patterns = make([]*regexp.Regexp, 0, len(patternEntries))
 	d.patternDescs = make([]string, 0, len(patternEntries))
 	for _, entry := range patternEntries {
-		if re, err := regexp.Compile(entry.pattern); err == nil {
+		if re, err := compileRegex(entry.pattern); err == nil {
 			d.patterns = append(d.patterns, re)
 			d.patternDescs = append(d.patternDescs, entry.description)
 		} else {

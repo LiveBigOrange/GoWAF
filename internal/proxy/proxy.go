@@ -1,51 +1,79 @@
-﻿package proxy
+package proxy
 
 import (
-	"bytes"
-	"context"
+	crypto_rand "crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
-	"io"
-	"net"
 	"net/http"
 	"net/http/httputil"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
-	"gowaf-demo/internal/backend"
-	"gowaf-demo/internal/config"
-	"gowaf-demo/internal/detector"
-	"gowaf-demo/internal/event"
-	"gowaf-demo/internal/limiter"
-	"gowaf-demo/internal/logger"
-	"gowaf-demo/internal/metrics"
-	"gowaf-demo/internal/proxyconfig"
-	"gowaf-demo/internal/rules"
-	"gowaf-demo/internal/stats"
-	"gowaf-demo/internal/web/middleware"
+	"gowaf/internal/acme"
+	"gowaf/internal/backend"
+	"gowaf/internal/bot"
+	"gowaf/internal/config"
+	"gowaf/internal/detector"
+	"gowaf/internal/dlprule"
+	"gowaf/internal/limiter"
+	"gowaf/internal/metrics"
+	"gowaf/internal/notify"
+	"gowaf/internal/pathbodylimit"
+	"gowaf/internal/proxyconfig"
+	"gowaf/internal/ratelimit"
+	"gowaf/internal/reqheader"
+	"gowaf/internal/respheader"
+	"gowaf/internal/rules"
+	"gowaf/internal/vpatch"
 
-	"github.com/google/uuid"
+	"gowaf/internal/apischema"
 )
 
+var IntelCollectFn func(eventType string, eventData map[string]interface{})
+
 type WAFProxy struct {
-	ruleEngine        *rules.Engine
-	limiter           *limiter.IPRateLimiter
-	cfg               *config.Config
-	backendManager    *backend.Manager
-	metricsManager    *metrics.Manager
-	proxy             *httputil.ReverseProxy
-	detectorManager   *detector.Manager
-	proxyConfigMgr    *proxyconfig.Manager
+	ruleEngine             *rules.Engine
+	limiter                *limiter.IPRateLimiter
+	cfg                    *config.Config
+	backendManager         *backend.Manager
+	metricsManager         *metrics.Manager
+	proxy                  *httputil.ReverseProxy
+	detectorManager        *detector.Manager
+	proxyConfigMgr         *proxyconfig.Manager
+	rateLimitEngine        *ratelimit.Engine
+	rateLimitKeyCfg        limiter.RateLimitKeyConfig
+	notifyEngine           *notify.Engine
+	botManager             *bot.Manager
+	vpatchManager          *vpatch.Manager
+	respHeaderMgr          *respheader.Manager
+	pathBodyLimitMgr       *pathbodylimit.Manager
+	dlpRuleMgr             *dlprule.Manager
+	apiSchemaMgr           *apischema.Manager
+	reqHeaderMgr           *reqheader.Manager
+	acmeMgr                *acme.Manager
+	maxRequestBodyProvider MaxRequestBodyProvider
+	metricEventCh          chan metricEvent
+	metricStopCh           chan struct{}
+	metricDropCount        uint64
+	trustedProxyMatcher    *trustedProxyMatcher
 }
 
 func NewWAFProxy(cfg *config.Config, engine *rules.Engine, lim *limiter.IPRateLimiter, bm *backend.Manager, mm *metrics.Manager, pcm *proxyconfig.Manager) (*WAFProxy, error) {
 	p := &WAFProxy{
-		ruleEngine:      engine,
-		limiter:         lim,
-		cfg:             cfg,
-		backendManager:  bm,
-		metricsManager:  mm,
-		detectorManager: detector.NewManager(), // 初始化检测管理器
-		proxyConfigMgr:  pcm, // 初始化代理配置管理器
+		ruleEngine:          engine,
+		limiter:             lim,
+		cfg:                 cfg,
+		backendManager:      bm,
+		metricsManager:      mm,
+		detectorManager:     detector.NewManager(),
+		proxyConfigMgr:      pcm,
+		metricEventCh:       make(chan metricEvent, 1000),
+		metricStopCh:        make(chan struct{}),
+		trustedProxyMatcher: newTrustedProxyMatcher(cfg.TrustedProxies),
 	}
 
 	p.proxy = &httputil.ReverseProxy{
@@ -53,13 +81,17 @@ func NewWAFProxy(cfg *config.Config, engine *rules.Engine, lim *limiter.IPRateLi
 		ModifyResponse: p.modifyResponse,
 		ErrorHandler:   p.errorHandler,
 		Transport: &http.Transport{
-			MaxIdleConns:        500,
-			MaxIdleConnsPerHost: 100,
-			IdleConnTimeout:     90 * time.Second,
-			DisableCompression:  true,
-			ForceAttemptHTTP2:   true,
+			MaxIdleConns:          500,
+			MaxIdleConnsPerHost:   100,
+			IdleConnTimeout:       90 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			DisableCompression:    cfg.Performance.DisableCompression,
+			ForceAttemptHTTP2:     true,
 		},
 	}
+
+	go p.metricEventWorker()
 	return p, nil
 }
 
@@ -70,558 +102,59 @@ func (p *WAFProxy) ApplyDetectorConfig(detectorType string, enabled bool) {
 	}
 }
 
-func (p *WAFProxy) director(req *http.Request) {
-	// 获取请求的Host（域名或IP）
-	host := req.Host
-	if strings.Contains(host, ":") {
-		// 移除端口号
-		parts := strings.Split(host, ":")
-		host = parts[0]
-	}
-
-	// 根据域名选择后端
-	var upstreamAddr string
-	var backendIDs []string
-
-	// 1. 尝试根据域名获取配置
-	if p.proxyConfigMgr != nil {
-		domainCfg, err := p.proxyConfigMgr.GetDomainByName(host)
-		if err == nil && domainCfg != nil && domainCfg.Enabled && len(domainCfg.BackendIDs) > 0 {
-			backendIDs = domainCfg.BackendIDs
-		}
-
-		// 2. 如果没有找到域名配置，尝试使用"default"配置
-		if len(backendIDs) == 0 {
-			defaultCfg, err := p.proxyConfigMgr.GetDomainByName("default")
-			if err == nil && defaultCfg != nil && defaultCfg.Enabled && len(defaultCfg.BackendIDs) > 0 {
-				backendIDs = defaultCfg.BackendIDs
-			}
-		}
-	}
-
-	// 3. 根据后端ID列表选择后端
-	if len(backendIDs) > 0 && p.backendManager != nil {
-		// 轮询选择后端
-		for _, id := range backendIDs {
-			b := p.backendManager.SelectBackendByID(id)
-			if b != nil {
-				upstreamAddr = b.Address
-				break
-			}
-		}
-	}
-
-	// 4. 如果还是没有找到，使用默认后端选择
-	if upstreamAddr == "" && p.backendManager != nil {
-		b := p.backendManager.SelectBackend()
-		if b != nil {
-			upstreamAddr = b.Address
-		}
-	}
-
-	// 5. 最终默认值
-	if upstreamAddr == "" {
-		upstreamAddr = "127.0.0.1:8000"
-	}
-
-	req.URL.Scheme = "http"
-	req.URL.Host = upstreamAddr
-	req.Host = upstreamAddr
-
-	clientIP := getClientIP(req, p.cfg.TrustedProxies)
-	req.Header.Set("X-Real-IP", clientIP)
-	if prior := req.Header.Get("X-Forwarded-For"); prior != "" {
-		req.Header.Set("X-Forwarded-For", prior+", "+clientIP)
-	} else {
-		req.Header.Set("X-Forwarded-For", clientIP)
-	}
-}
-
-func (p *WAFProxy) modifyResponse(resp *http.Response) error {
-	resp.Header.Set("X-Content-Type-Options", "nosniff")
-	resp.Header.Set("X-Frame-Options", "DENY")
-	resp.Header.Set("X-XSS-Protection", "1; mode=block")
-	resp.Header.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-	resp.Header.Del("Server")
-	resp.Header.Del("X-Powered-By")
-
-	if resp.Request != nil && resp.Request.URL.Scheme == "https" {
-		if resp.Header.Get("Strict-Transport-Security") == "" {
-			resp.Header.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-		}
-	}
-
-	for _, cookie := range resp.Cookies() {
-		if !cookie.HttpOnly {
-			cookie.HttpOnly = true
-		}
-		if !cookie.Secure && resp.Request != nil && resp.Request.URL.Scheme == "https" {
-			cookie.Secure = true
-		}
-		if cookie.SameSite == 0 {
-			cookie.SameSite = http.SameSiteLaxMode
-		}
-	}
-
-	if resp.Request != nil {
-		ctx := context.WithValue(resp.Request.Context(), "resp_status", resp.StatusCode)
-		*resp.Request = *resp.Request.WithContext(ctx)
-	}
-
-	// 响应体敏感数据检测
-	if p.detectorManager != nil && p.detectorManager.IsDetectorEnabled("sensitive_data") {
-		contentType := resp.Header.Get("Content-Type")
-		if contentType != "" && (strings.Contains(contentType, "text/") || strings.Contains(contentType, "json") || strings.Contains(contentType, "javascript")) {
-			if resp.Body != nil {
-				bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024+1))
-				if err == nil && int64(len(bodyBytes)) <= 1024*1024 {
-					results := p.detectorManager.DetectString(string(bodyBytes))
-					if p.detectorManager.HasAttack(results) {
-						attackTypes := p.detectorManager.GetAttackTypes(results)
-						var sensitiveDetails []string
-						for _, res := range results {
-							if res.Detected {
-								if res.RuleID > 0 && res.RuleDesc != "" {
-									sensitiveDetails = append(sensitiveDetails, fmt.Sprintf("[Rule#%d|%s] %s", res.RuleID, res.RuleDesc, res.Pattern))
-								} else {
-									sensitiveDetails = append(sensitiveDetails, res.Pattern)
-								}
-							}
-						}
-						sensitiveDetail := strings.Join(sensitiveDetails, ", ")
-						if resp.Request != nil {
-							clientIP := getClientIP(resp.Request, p.cfg.TrustedProxies)
-							p.recordBlock(clientIP, resp.Request.URL.Path, "", "", "敏感数据泄露:"+strings.Join(attackTypes, ","), http.StatusOK, getRequestID(resp.Request), "", time.Now(), resp.Request, sensitiveDetail, "body")
-						}
-					}
-					resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-					resp.ContentLength = int64(len(bodyBytes))
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-func (p *WAFProxy) errorHandler(w http.ResponseWriter, r *http.Request, err error) {
-	upstreamAddr := p.getUpstreamAddr()
-	// 安全获取request_id,避免panic
-	requestID := getRequestID(r)
-	
-	// 使用新的日志格式记录错误
-	log := logger.NewAccessLog().
-		SetClientIP(getClientIP(r, p.cfg.TrustedProxies)).
-		SetMethod(r.Method).
-		SetPath(r.URL.Path).
-		SetStatus(http.StatusBadGateway).
-		SetAction("error").
-		SetRequestID(requestID).
-		SetUpstreamAddr(upstreamAddr).
-		SetHost(r.Host).
-		SetQuery(r.URL.RawQuery).
-		SetUserAgent(r.Header.Get("User-Agent")).
-		SetReferer(r.Header.Get("Referer")).
-		SetContentType(r.Header.Get("Content-Type"))
-	
-	logger.Write(*log)
-	http.Error(w, "Bad Gateway", http.StatusBadGateway)
-}
-
-// getUpstreamAddr 获取上游服务器地址
-func (p *WAFProxy) getUpstreamAddr() string {
-	if p.backendManager != nil {
-		b := p.backendManager.SelectBackend()
-		if b != nil {
-			return b.Address
-		}
-	}
-	return "127.0.0.1:8000"
-}
-
-func (p *WAFProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	start := time.Now()
-	requestID := uuid.New().String()
-	ctx := context.WithValue(r.Context(), "request_id", requestID)
-	r = r.WithContext(ctx)
-
-	clientIP := getClientIP(r, p.cfg.TrustedProxies)
-	userAgent := r.Header.Get("User-Agent")
-	upstreamAddr := p.getUpstreamAddr()
-
-	// 统计活跃连接
-	stats.IncTotal()
-	stats.IncActiveConn()
-	defer stats.DecActiveConn()
-
-	// 记录总请求数到 metrics
-	if p.metricsManager != nil {
-		p.metricsManager.IncTotalRequest()
-	}
-
-	// 1. IP 黑名单检查
-	if ipResult := p.ruleEngine.IsIPBlocked(clientIP); ipResult.Matched {
-		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "IP黑名单", http.StatusForbidden, requestID, upstreamAddr, start, r, ipResult.Detail, "ip")
-		http.Error(w, "Forbidden", http.StatusForbidden)
-		return
-	}
-
-	// 1.5 GeoIP阻断检查
-	if p.metricsManager != nil {
-		if geoInfo := p.metricsManager.GetGeoInfo(clientIP); geoInfo != nil {
-			if geoInfo.CountryISO != "" {
-				if geoResult := p.ruleEngine.IsGeoBlocked(geoInfo.CountryISO); geoResult.Matched {
-					p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "GeoIP阻断:"+geoInfo.CountryISO, http.StatusForbidden, requestID, upstreamAddr, start, r, geoResult.Detail, "geo")
-					http.Error(w, "Forbidden", http.StatusForbidden)
-					return
-				}
-			}
-		}
-	}
-
-	// 1.6 HTTP方法限制检查
-	if methodResult := p.ruleEngine.IsMethodAllowed(r.Method); methodResult.Matched {
-		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "HTTP方法限制", http.StatusMethodNotAllowed, requestID, upstreamAddr, start, r, methodResult.Detail, "method")
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// 2. 路径黑/白名单检查（白名单优先）
-	if pathResult := p.ruleEngine.CheckPath(r.URL.Path); pathResult.Matched {
-		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "路径黑名单", http.StatusForbidden, requestID, upstreamAddr, start, r, pathResult.Detail, "path")
-		http.Error(w, "Forbidden", http.StatusForbidden)
-		return
-	}
-
-	// 3. UA 黑/白名单检查
-	if uaResult := p.ruleEngine.CheckUA(userAgent); uaResult.Matched {
-		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "UA黑名单", http.StatusForbidden, requestID, upstreamAddr, start, r, uaResult.Detail, "ua")
-		http.Error(w, "Forbidden", http.StatusForbidden)
-		return
-	}
-
-	// 4. 限流检查
-	if p.limiter != nil {
-		if !p.limiter.Allow(clientIP) {
-			p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "限流", http.StatusTooManyRequests, requestID, upstreamAddr, start, r, "", "")
-			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
-			return
-		}
-	}
-
-	// 4.5 路径级限流检查
-	if p.ruleEngine != nil {
-		if !p.ruleEngine.CheckPathRateLimit(r.URL.Path) {
-			p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "路径限流", http.StatusTooManyRequests, requestID, upstreamAddr, start, r, "", "")
-			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
-			return
-		}
-	}
-
-	// 5. 攻击检测 (SQL注入、XSS、命令注入等)
+// ApplyObservationMode 应用观察模式配置
+func (p *WAFProxy) ApplyObservationMode(detectorType string, observationMode bool) {
 	if p.detectorManager != nil {
-		// 读取请求体用于检测（POST/PUT/PATCH），检测后恢复Body供后续使用
-		var body string
-		if r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH" {
-			if r.Body != nil {
-				maxBodySize := int64(10 * 1024 * 1024)
-				if configuredMax := middleware.GetMaxRequestBody(); configuredMax > 0 {
-					maxBodySize = configuredMax
-				}
-				bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, maxBodySize+1))
-				if err != nil {
-					body = ""
-				} else if int64(len(bodyBytes)) > maxBodySize {
-					// 请求体过大，拒绝请求
-					p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "请求体过大", http.StatusRequestEntityTooLarge, requestID, upstreamAddr, start, r, "", "")
-					http.Error(w, "Request Entity Too Large", http.StatusRequestEntityTooLarge)
-					return
-				} else {
-					body = string(bodyBytes)
-				}
-				// 恢复请求体，供反向代理读取
-				r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-				r.ContentLength = int64(len(bodyBytes))
-			}
-		}
-		results := p.detectorManager.DetectRequestWithBody(r, body)
-		if p.detectorManager.HasAttack(results) {
-			attackTypes := p.detectorManager.GetAttackTypes(results)
-			attackType := strings.Join(attackTypes, ",")
-			var matchDetails, matchLocations []string
-			for _, res := range results {
-				if res.Detected {
-					detail := res.Pattern
-					if res.RuleID > 0 && res.RuleDesc != "" {
-						detail = fmt.Sprintf("[Rule#%d|%s] %s", res.RuleID, res.RuleDesc, res.Pattern)
-					} else if res.RuleID > 0 {
-						detail = fmt.Sprintf("[Rule#%d] %s", res.RuleID, res.Pattern)
-					} else if res.RuleDesc != "" {
-						detail = fmt.Sprintf("[%s] %s", res.RuleDesc, res.Pattern)
-					}
-					matchDetails = append(matchDetails, detail)
-					if res.Location != "" {
-						matchLocations = append(matchLocations, res.Location)
-					}
-				}
-			}
-			matchDetail := strings.Join(matchDetails, ", ")
-			matchLocation := strings.Join(matchLocations, ", ")
-			p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "攻击检测:"+attackType, http.StatusForbidden, requestID, upstreamAddr, start, r, matchDetail, matchLocation)
-			http.Error(w, "Forbidden: Attack Detected", http.StatusForbidden)
-			return
-		}
+		p.detectorManager.SetObservationMode(detectorType, observationMode)
 	}
-
-	// 使用自定义 ResponseWriter 捕获响应状态码和大小
-	rw := &responseWriter{ResponseWriter: w}
-
-	// 正常转发
-	p.proxy.ServeHTTP(rw, r)
-
-	// 获取实际响应状态码
-	respStatus := rw.statusCode
-	if respStatus == 0 {
-		respStatus = http.StatusOK
-	}
-
-	// 统计延迟和错误
-	latencyMs := uint64(time.Since(start).Milliseconds())
-	stats.AddLatency(latencyMs)
-	if respStatus >= 400 {
-		stats.IncError()
-	}
-
-	// 统计网络流量
-	inboundBytes := uint64(estimateRequestSize(r))
-	outboundBytes := uint64(rw.bytesWritten)
-	stats.AddNetworkBytes(inboundBytes, outboundBytes)
-
-	// 记录分钟级统计数据（实时监控）
-	if p.metricsManager != nil {
-		latency := time.Since(start).Seconds() * 1000 // 转换为毫秒
-		// QPS由metrics模块统计，这里不再估算
-		p.metricsManager.RecordMinuteStats(1, 0, 0, latency, int64(inboundBytes), int64(outboundBytes))
-	}
-
-	// 使用新的日志格式记录正常请求（使用实际响应状态码）
-	log := logger.NewAccessLog().
-		SetClientIP(clientIP).
-		SetMethod(r.Method).
-		SetPath(r.URL.Path).
-		SetStatus(respStatus).
-		SetAction("pass").
-		SetRequestID(requestID).
-		SetUpstreamAddr(upstreamAddr).
-		SetHost(r.Host).
-		SetQuery(r.URL.RawQuery).
-		SetUserAgent(userAgent).
-		SetReferer(r.Header.Get("Referer")).
-		SetContentType(r.Header.Get("Content-Type")).
-		SetLatency(time.Since(start)).
-		SetBodySize(rw.bytesWritten).
-		SetRequestSize(int64(estimateRequestSize(r))).  // 使用完整请求大小
-		SetProtocol(r.Proto).                            // 记录HTTP协议版本
-		SetScheme(getScheme(r))                          // 记录请求协议
-
-	logger.Write(*log)
 }
 
-// recordBlock 记录拦截事件
-func (p *WAFProxy) recordBlock(clientIP, path, method, userAgent, rule string, statusCode int, requestID, backendAddr string, start time.Time, r *http.Request, matchDetail, matchLocation string) {
-	stats.IncBlocked()
-	stats.IncBlockedIP(clientIP, rule)
-	stats.IncBlockedPath(path, method, clientIP)
-	stats.IncRuleHit(rule)
-	
-	// 计算延迟时间
-	latencyMs := time.Since(start).Seconds() * 1000
-	
-	// 计算地理位置
-	var geoCountry, geoCity, geoFlag string
-	if p.metricsManager != nil {
-		geo := p.metricsManager.GetGeoLocation(clientIP)
-		geoCountry = geo.Country
-		geoCity = geo.City
-		geoFlag = geo.Flag
-	}
-
-	// 保存到内存事件缓冲
-	event.AddEvent(clientIP, r.Host, path, r.URL.RawQuery, method, userAgent, 
-		r.Header.Get("Referer"), r.Header.Get("Content-Type"), rule, statusCode, requestID, latencyMs, geoCountry, geoCity, geoFlag, matchDetail, matchLocation, "block", "", r.Proto, getScheme(r), int64(estimateRequestSize(r)))
-
-	// 保存到 metrics 数据库
-	if p.metricsManager != nil {
-		p.metricsManager.IncBlockedRequest() // 增加拦截计数
-		p.metricsManager.SaveEvent(clientIP, r.Host, path, r.URL.RawQuery, method, userAgent, 
-			r.Header.Get("Referer"), r.Header.Get("Content-Type"), rule, statusCode, requestID, latencyMs, geoCountry, geoCity, geoFlag, matchDetail, matchLocation, "block", "", r.Proto, getScheme(r), int64(estimateRequestSize(r)), 0, "")
-		p.metricsManager.IncTopStat("blocked_ip", clientIP)
-		p.metricsManager.IncTopStat("attacked_path", path)
-		p.metricsManager.IncRuleHit(rule)
-
-		// 记录分钟级统计数据（实时监控）
-		// QPS由metrics模块统计，这里不再估算
-		inboundBytes := int64(estimateRequestSize(r))
-		p.metricsManager.RecordMinuteStats(1, 1, 0, latencyMs, inboundBytes, 0)
-	}
-
-	// 使用新的日志格式记录拦截请求
-	log := logger.NewAccessLog().
-		SetClientIP(clientIP).
-		SetMethod(method).
-		SetPath(path).
-		SetStatus(statusCode).
-		SetAction("block").
-		SetRequestID(requestID).
-		SetUpstreamAddr(backendAddr).
-		SetRuleID(rule).
-		SetHost(r.Host).
-		SetQuery(r.URL.RawQuery).
-		SetUserAgent(userAgent).
-		SetReferer(r.Header.Get("Referer")).
-		SetContentType(r.Header.Get("Content-Type")).
-		SetLatency(time.Since(start)).
-		SetRequestSize(int64(estimateRequestSize(r))).
-		SetProtocol(r.Proto).
-		SetScheme(getScheme(r)).
-		SetMatchDetail(matchDetail).
-		SetMatchLocation(matchLocation).
-		SetGeoCountry(geoCountry).
-		SetGeoCity(geoCity).
-		SetGeoFlag(geoFlag)
-	
-	logger.Write(*log)
+// SetRateLimitEngine 设置智能限流引擎
+func (p *WAFProxy) SetRateLimitEngine(e *ratelimit.Engine) {
+	p.rateLimitEngine = e
 }
 
-// getClientIP 获取客户端真实IP,验证可信代理
-func getClientIP(r *http.Request, trustedProxies []string) string {
-	remoteAddr := r.RemoteAddr
-	if ip, _, err := net.SplitHostPort(remoteAddr); err == nil {
-		remoteAddr = ip
-	}
-
-	// 检查直接连接的客户端是否为可信代理
-	isTrusted := isTrustedProxy(remoteAddr, trustedProxies)
-
-	// 只有来自可信代理的请求才信任 X-Forwarded-For 和 X-Real-IP
-	if isTrusted {
-		// 优先使用 X-Real-IP
-		if xri := r.Header.Get("X-Real-IP"); xri != "" {
-			return xri
-		}
-		// 然后使用 X-Forwarded-For 的第一个IP
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			ips := strings.Split(xff, ",")
-			if len(ips) > 0 {
-				return strings.TrimSpace(ips[0])
-			}
-		}
-	}
-
-	// 否则使用直接连接的IP
-	return remoteAddr
+// SetBotManager 设置Bot管理器
+func (p *WAFProxy) SetBotManager(m *bot.Manager) {
+	p.botManager = m
 }
 
-// isTrustedProxy 检查IP是否在可信代理列表中
-func isTrustedProxy(ipStr string, trustedProxies []string) bool {
-	if len(trustedProxies) == 0 {
-		// 如果没有配置可信代理,默认信任本地连接
-		return ipStr == "127.0.0.1" || ipStr == "::1"
-	}
-
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
-		return false
-	}
-
-	for _, trusted := range trustedProxies {
-		// 支持CIDR格式
-		if strings.Contains(trusted, "/") {
-			_, cidr, err := net.ParseCIDR(trusted)
-			if err == nil && cidr.Contains(ip) {
-				return true
-			}
-		} else {
-			// 单个IP
-			if trusted == ipStr {
-				return true
-			}
-		}
-	}
-	return false
+// SetVPatchManager 设置虚拟补丁管理器
+func (p *WAFProxy) SetVPatchManager(m *vpatch.Manager) {
+	p.vpatchManager = m
 }
 
-// getRequestID 安全获取request_id,避免panic
-func getRequestID(r *http.Request) string {
-	if r == nil {
-		return ""
-	}
-	ctx := r.Context()
-	if ctx == nil {
-		return ""
-	}
-	val := ctx.Value("request_id")
-	if val == nil {
-		return ""
-	}
-	// 安全类型断言
-	if id, ok := val.(string); ok {
-		return id
-	}
-	return ""
+// SetRespHeaderManager 设置响应头管理器
+func (p *WAFProxy) SetRespHeaderManager(m *respheader.Manager) {
+	p.respHeaderMgr = m
 }
 
-// estimateRequestSize 估算请求大小
-func estimateRequestSize(r *http.Request) int {
-	size := 0
-	// 请求行: METHOD + URL + HTTP版本
-	size += len(r.Method) + len(r.URL.String()) + 10
-	// 请求头
-	for k, v := range r.Header {
-		size += len(k) + 2 // ": "
-		for _, vv := range v {
-			size += len(vv) + 2 // "\r\n"
-		}
-	}
-	// 请求体
-	if r.ContentLength > 0 {
-		size += int(r.ContentLength)
-	}
-	return size
+func (p *WAFProxy) SetACMEManager(m *acme.Manager) {
+	p.acmeMgr = m
 }
 
-// getScheme 获取请求协议
-func getScheme(r *http.Request) string {
-	if r.TLS != nil {
-		return "https"
-	}
-	return "http"
+// SetMaxRequestBodyProvider 设置最大请求体大小提供者，解耦与middleware包的依赖
+func (p *WAFProxy) SetMaxRequestBodyProvider(provider MaxRequestBodyProvider) {
+	p.maxRequestBodyProvider = provider
 }
 
-// responseWriter 自定义 ResponseWriter，捕获响应状态码和写入字节数
-type responseWriter struct {
-	http.ResponseWriter
-	statusCode   int
-	bytesWritten int64
-	wroteHeader  bool
+func (p *WAFProxy) SetReqHeaderManager(m *reqheader.Manager) {
+	p.reqHeaderMgr = m
 }
 
-func (rw *responseWriter) WriteHeader(code int) {
-	if !rw.wroteHeader {
-		rw.statusCode = code
-		rw.wroteHeader = true
-	}
-	rw.ResponseWriter.WriteHeader(code)
+// SetPathBodyLimitManager 设置路径级请求体限制管理器
+func (p *WAFProxy) SetPathBodyLimitManager(m *pathbodylimit.Manager) {
+	p.pathBodyLimitMgr = m
 }
 
-func (rw *responseWriter) Write(b []byte) (int, error) {
-	if !rw.wroteHeader {
-		rw.statusCode = http.StatusOK
-		rw.wroteHeader = true
-	}
-	n, err := rw.ResponseWriter.Write(b)
-	rw.bytesWritten += int64(n)
-	return n, err
+// SetDLPRuleManager 设置DLP规则管理器
+func (p *WAFProxy) SetDLPRuleManager(m *dlprule.Manager) {
+	p.dlpRuleMgr = m
+}
+
+// SetAPISchemaManager 设置API Schema管理器
+func (p *WAFProxy) SetAPISchemaManager(m *apischema.Manager) {
+	p.apiSchemaMgr = m
 }
 
 // GetLimiter 返回限流器实例，供 Handler 层调用
@@ -629,3 +162,162 @@ func (p *WAFProxy) GetLimiter() *limiter.IPRateLimiter {
 	return p.limiter
 }
 
+func (p *WAFProxy) SetRateLimitKeyConfig(cfg limiter.RateLimitKeyConfig) {
+	p.rateLimitKeyCfg = cfg
+}
+
+func (p *WAFProxy) SetNotifyEngine(e *notify.Engine) {
+	p.notifyEngine = e
+}
+
+func (p *WAFProxy) GetRateLimitKeyConfig() limiter.RateLimitKeyConfig {
+	return p.rateLimitKeyCfg
+}
+
+var (
+	wafGlobalEnabled   = true
+	wafGlobalEnabledMu sync.RWMutex
+)
+
+func IsWAFGlobalEnabled() bool {
+	wafGlobalEnabledMu.RLock()
+	defer wafGlobalEnabledMu.RUnlock()
+	return wafGlobalEnabled
+}
+
+func SetGlobalEnabled(enabled bool) {
+	wafGlobalEnabledMu.Lock()
+	defer wafGlobalEnabledMu.Unlock()
+	wafGlobalEnabled = enabled
+}
+
+var powDifficulty atomic.Int32
+
+func init() {
+	powDifficulty.Store(4)
+}
+
+func SetPoWDifficulty(d int) {
+	if d > 0 && d <= 6 {
+		powDifficulty.Store(int32(d))
+	}
+}
+
+var (
+	powChallenges   = make(map[string]int)
+	powChallengesMu sync.RWMutex
+
+	jsChallenges   = make(map[string]time.Time)
+	jsChallengesMu sync.RWMutex
+)
+
+func storePoWChallenge(challenge string, difficulty int) {
+	powChallengesMu.Lock()
+	powChallenges[challenge] = difficulty
+	powChallengesMu.Unlock()
+}
+
+func getPoWDifficulty(challenge string) (int, bool) {
+	powChallengesMu.RLock()
+	diff, ok := powChallenges[challenge]
+	powChallengesMu.RUnlock()
+	return diff, ok
+}
+
+func (p *WAFProxy) verifyPoW(r *http.Request) bool {
+	cookie, err := r.Cookie("gowaf_pow")
+	if err != nil {
+		return false
+	}
+	parts := strings.SplitN(cookie.Value, ":", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	challenge := parts[0]
+	nonceStr := parts[1]
+
+	difficulty, ok := getPoWDifficulty(challenge)
+	if !ok || difficulty <= 0 || difficulty > 6 {
+		return false
+	}
+	nonce, err := strconv.ParseInt(nonceStr, 10, 64)
+	if err != nil {
+		return false
+	}
+	hash := sha256.Sum256([]byte(challenge + strconv.FormatInt(nonce, 10)))
+	hashHex := hex.EncodeToString(hash[:])
+	prefix := strings.Repeat("0", difficulty)
+	if !strings.HasPrefix(hashHex, prefix) {
+		return false
+	}
+
+	powChallengesMu.Lock()
+	delete(powChallenges, challenge)
+	powChallengesMu.Unlock()
+	return true
+}
+
+func (p *WAFProxy) verifyJSChallenge(r *http.Request) bool {
+	cookie, err := r.Cookie("gowaf_js_challenge")
+	if err != nil || cookie.Value == "" {
+		return false
+	}
+	jsChallengesMu.Lock()
+	_, ok := jsChallenges[cookie.Value]
+	if ok {
+		delete(jsChallenges, cookie.Value)
+	}
+	jsChallengesMu.Unlock()
+	return ok
+}
+
+func (p *WAFProxy) generatePoWChallenge(w http.ResponseWriter, r *http.Request) string {
+	challengeBytes := make([]byte, 16)
+	if _, err := crypto_rand.Read(challengeBytes); err != nil {
+		now := time.Now().UnixNano()
+		for i := 0; i < 16; i++ {
+			challengeBytes[i] = byte((now >> (i * 4)) & 0xFF)
+		}
+	}
+	challenge := hex.EncodeToString(challengeBytes)
+	difficulty := int(powDifficulty.Load())
+	storePoWChallenge(challenge, difficulty)
+
+	jsTokenBytes := make([]byte, 16)
+	if _, err := crypto_rand.Read(jsTokenBytes); err != nil {
+		now := time.Now().UnixNano()
+		for i := 0; i < 16; i++ {
+			jsTokenBytes[i] = byte((now >> (i * 4)) & 0xFF)
+		}
+	}
+	jsToken := hex.EncodeToString(jsTokenBytes)
+	jsChallengesMu.Lock()
+	jsChallenges[jsToken] = time.Now()
+	jsChallengesMu.Unlock()
+
+	powPage := fmt.Sprintf(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>安全验证</title>
+<style>body{font-family:system-ui;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#f5f5f5}
+.box{text-align:center;padding:40px;background:white;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.1)}
+h3{color:#2c3e50;margin-bottom:16px}.status{color:#95a5a6;font-size:13px;margin-top:12px}
+.bar{width:200px;height:6px;background:#e8e9ed;border-radius:3px;margin:12px auto;overflow:hidden}
+.bar-fill{height:100%%;background:#409eff;border-radius:3px;transition:width .3s}
+</style></head><body><div class="box">
+<h3>安全验证</h3><div class="bar"><div class="bar-fill" id="pb" style="width:0%%"></div></div>
+<div class="status" id="st">正在计算验证码...</div>
+</div><script>
+var ch="%s",diff=%d,jsTok="%s";
+function sha256(s){var h=new TextEncoder().encode(s);return crypto.subtle.digest('SHA-256',h).then(function(b){return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0')}).join('')})}
+function solve(){var n=0,limit=2000000,bs=5000;
+function batch(){for(var i=0;i<bs&&n<limit;i++,n++){sha256(ch+n.toString()).then(function(h){if(document.getElementById('st').textContent.indexOf('通过')>=0)return;
+if(h.substring(0,diff)==='0'.repeat(diff)){document.getElementById('st').textContent='验证通过，正在跳转...';document.getElementById('pb').style.width='100%%';
+document.cookie='gowaf_pow='+ch+':'+n.toString()+'; Path=/; Max-Age=300; SameSite=Strict';
+document.cookie='gowaf_js_challenge='+jsTok+'; Path=/; Max-Age=300; SameSite=Lax';
+setTimeout(function(){location.reload()},800)}})}document.getElementById('pb').style.width=Math.min(90,n/limit*100)+'%%';requestAnimationFrame(batch)}
+batch()}solve();
+</script></body></html>`, challenge, difficulty, jsToken)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	w.Write([]byte(powPage))
+	return challenge
+}

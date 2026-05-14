@@ -52,19 +52,14 @@
                 <tbody id="domainList"></tbody>
             </table>
             <div class="pagination" id="pagination" style="display:none;">
-                <div class="pagination-info">
-                    <span id="pageInfo">第1 页 / 第1 页</span>
-                    <select class="page-size-select" id="pageSize" onchange="changePageSize()">
-                        <option value="5">5 条</option>
-                        <option value="10" selected>10 条</option>
-                        <option value="20">20 条</option>
-                        <option value="50">50 条</option>
-                    </select>
-                </div>
-                <div class="pagination-btns">
-                    <button class="pagination-btn" id="prevBtn" onclick="prevPage()">上一页</button>
-                    <button class="pagination-btn" id="nextBtn" onclick="nextPage()">下一页</button>
-                </div>
+                <span id="pageInfo" style="color:#888;font-size:13px;white-space:nowrap;"></span>
+                <div class="pagination-btns" id="pageBtns"></div>
+                <select class="page-size-select" id="pageSize" onchange="changePageSize()">
+                    <option value="5">5条/页</option>
+                    <option value="10" selected>10条/页</option>
+                    <option value="20">20条/页</option>
+                    <option value="50">50条/页</option>
+                </select>
             </div>
             </div>
         </div>
@@ -83,9 +78,11 @@
                 <p class="tip">选择一个或多个代理端口，如同时选择HTTP(80)和HTTPS(443)</p>
             </div>
             <div class="form-group">
-                <label>后端服务（可多选）</label>
-                <div id="backendCheckboxes" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; border-radius: 6px; padding: 10px;"></div>
-                <p class="tip">选择一个或多个后端服务，请求将轮询转发到选中的服务器</p>
+                <label>后端服务组</label>
+                <select id="groupSelect" style="width:100%;">
+                    <option value="">请选择后端服务组</option>
+                </select>
+                <p class="tip">选择一个后端服务组，请求将按组的负载均衡策略转发到组内后端。在「后端服务」页面管理组。</p>
             </div>
             <div class="form-group">
                 <label>证书（HTTPS用）</label>
@@ -110,24 +107,24 @@
             </div>
         </div>
     </div>
-    <script>
+    <script nonce="{{.CSPNonce}}">
         (function() {
             var editingId = null;
             var backends = [];
             var certs = [];
             var proxies = [];
+            var groups = [];
             var allData = [];
             var currentPage = 1;
             var pageSize = 10;
-            var dataLoaded = false; // 标记基础数据是否已加载
+            var dataLoaded = false;
+
+            function polLabel(p){
+                var m={'round_robin':'轮询','weighted_round_robin':'加权轮询','least_connections':'最少连接','ip_hash':'IP Hash','url_hash':'URL Hash','random':'加权随机'};
+                return m[p]||p;
+            }
 
             // XSS防护函数
-            function escapeHtml(text) {
-                if (text == null) return '';
-                var div = document.createElement('div');
-                div.textContent = text;
-                return div.innerHTML;
-            }
 
             // 域名验证函数
             function validateDomain() {
@@ -198,36 +195,28 @@
                 return Array.from(checkboxes).map(cb => cb.value);
             }
 
-            function renderBackendCheckboxes(selectedIds) {
-                var container = document.getElementById('backendCheckboxes');
-                if (!container) return;
-                if (backends.length === 0) {
-                    container.innerHTML = '<p style="color:#95a5a6;">暂无后端服务，请先添加</p>';
-                    return;
-                }
-                container.innerHTML = '';
-                backends.forEach(b => {
-                    var div = document.createElement('div');
-                    div.className = 'backend-checkbox';
-                    var checked = selectedIds.includes(b.id) ? 'checked' : '';
-                    var statusColor = b.healthy ? '#27ae60' : '#e74c3c';
-                    var statusText = b.healthy ? '健康' : '不健康';
-                    div.innerHTML = '<label>' +
-                        '<input type="checkbox" value="' + escapeHtml(b.id) + '" ' + checked + '>' +
-                        '<span><code>' + escapeHtml(b.address) + '</code> <small style="color:' + statusColor + '">(' + statusText + ')</small></span>' +
-                        '</label>';
-                    container.appendChild(div);
+            function renderGroupDropdown(selectedGroupId) {
+                var select = document.getElementById('groupSelect');
+                if (!select) return;
+                select.innerHTML = '<option value="">请选择后端服务组</option>';
+                groups.forEach(function(g){
+                    if(g.enabled){
+                        var opt = document.createElement('option');
+                        opt.value = g.id;
+                        opt.textContent = g.name + ' (' + polLabel(g.lb_policy) + ', ' + (g.member_cnt||0) + '个后端)';
+                        if(g.id === selectedGroupId) opt.selected = true;
+                        select.appendChild(opt);
+                    }
                 });
             }
-            
-            function getSelectedBackendIds() {
-                var checkboxes = document.querySelectorAll('#backendCheckboxes input[type="checkbox"]:checked');
-                return Array.from(checkboxes).map(cb => cb.value);
+
+            function getSelectedGroupId() {
+                return document.getElementById('groupSelect').value;
             }
             
             function loadCerts() {
-                return fetch('/api/cert/list').then(r => r.json()).then(data => {
-                    certs = data || [];
+                return fetch('/api/cert/list').then(r => r.json()).then(resp => {
+                    certs = resp.data || [];
                     var sel = document.getElementById('certId');
                     if (sel) {
                         var opts = ['<option value=""></option>'];
@@ -285,9 +274,19 @@
                             proxyNames = names.join(', ');
                         }
                     }
-                    var backendNames = item.backend_ids && item.backend_ids.length > 0
-                        ? item.backend_ids.map(id => backends.find(b => b.id === id)?.address).filter(Boolean).join(', ')
-                        : '-';
+                    var backendInfo = '-';
+                    var backendIsDeleted = false;
+                    if (item.group_id) {
+                        var g = groups.find(function(x){return x.id===item.group_id;});
+                        if (g) {
+                            backendInfo = g.name + ' (' + polLabel(g.lb_policy) + ')';
+                        } else {
+                            backendInfo = '组已删除';
+                            backendIsDeleted = true;
+                        }
+                    } else if (item.backend_ids && item.backend_ids.length > 0) {
+                        backendInfo = item.backend_ids.map(function(id){return backends.find(function(b){return b.id===id;})?.address;}).filter(Boolean).join(', ');
+                    }
                     var certName = '-';
                     if (item.cert_id) {
                         var cert = certs.find(c => c.id === item.cert_id);
@@ -300,7 +299,7 @@
                     var safeItemJson = JSON.stringify(item).replace(/"/g, '&quot;');
                     tr.innerHTML = '<td>' + escapeHtml(item.domain) + '</td>' +
                         '<td>' + escapeHtml(proxyNames) + '</td>' +
-                        '<td>' + escapeHtml(backendNames) + '</td>' +
+                        '<td>' + (backendIsDeleted ? '<span style="color:#e74c3c;">' + escapeHtml(backendInfo) + '</span>' : escapeHtml(backendInfo)) + '</td>' +
                         '<td>' + (item.cert_id ? escapeHtml(certName) : '-') + '</td>' +
                         '<td>' + (item.force_https ? '是' : '否') + '</td>' +
                         '<td><span class="status-badge ' + (item.enabled ? 'status-enabled' : 'status-disabled') + '">' + (item.enabled ? '已启用' : '已禁用') + '</span></td>' +
@@ -312,10 +311,13 @@
                 });
                 
                 // 更新分页信息
-                document.getElementById('pageInfo').textContent = '第' + currentPage + ' 页 / 第' + totalPages + ' 页（共' + allData.length + ' 条）';
-                document.getElementById('prevBtn').disabled = currentPage <= 1;
-                document.getElementById('nextBtn').disabled = currentPage >= totalPages;
-                pagination.style.display = 'flex';
+                if (totalPages <= 1) {
+                    pagination.style.display = 'none';
+                } else {
+                    document.getElementById('pageInfo').textContent = '共 ' + allData.length + ' 条';
+                    renderPageBtns(currentPage, totalPages);
+                    pagination.style.display = 'flex';
+                }
             }
             
             // 事件委托处理编辑和删除
@@ -342,20 +344,35 @@
                 }
             });
             
-            function prevPage() {
-                if (currentPage > 1) {
-                    currentPage--;
-                    renderData();
+            function goPage(p) { var total = Math.ceil(allData.length / pageSize); if (p < 1) p = 1; if (p > total) p = total; currentPage = p; renderData(); }
+            window.goPage = goPage;
+
+            function renderPageBtns(cur, total) {
+                var c = document.getElementById('pageBtns');
+                var h = '';
+                if (total <= 1) { c.innerHTML = ''; return; }
+                if (total <= 5) {
+                    h += '<button class="pagination-btn" onclick="goPage(' + (cur - 1) + ')"' + (cur <= 1 ? ' disabled' : '') + '>‹</button>';
+                    for (var i = 1; i <= total; i++) {
+                        h += '<button class="pagination-btn' + (i === cur ? ' active' : '') + '" onclick="goPage(' + i + ')">' + i + '</button>';
+                    }
+                    h += '<button class="pagination-btn" onclick="goPage(' + (cur + 1) + ')"' + (cur >= total ? ' disabled' : '') + '>›</button>';
+                } else {
+                    h += '<button class="pagination-btn" onclick="goPage(1)"' + (cur <= 1 ? ' disabled' : '') + '>«</button>';
+                    h += '<button class="pagination-btn" onclick="goPage(' + (cur - 1) + ')"' + (cur <= 1 ? ' disabled' : '') + '>‹</button>';
+                    var start = Math.max(1, cur - 2);
+                    var end = Math.min(total, cur + 2);
+                    if (start > 1) { h += '<button class="pagination-btn" onclick="goPage(1)">1</button>'; if (start > 2) h += '<span style="padding:0 6px;color:#999;">...</span>'; }
+                    for (var i = start; i <= end; i++) {
+                        h += '<button class="pagination-btn' + (i === cur ? ' active' : '') + '" onclick="goPage(' + i + ')">' + i + '</button>';
+                    }
+                    if (end < total) { if (end < total - 1) h += '<span style="padding:0 6px;color:#999;">...</span>'; h += '<button class="pagination-btn" onclick="goPage(' + total + ')">' + total + '</button>'; }
+                    h += '<button class="pagination-btn" onclick="goPage(' + (cur + 1) + ')"' + (cur >= total ? ' disabled' : '') + '>›</button>';
+                    h += '<button class="pagination-btn" onclick="goPage(' + total + ')"' + (cur >= total ? ' disabled' : '') + '>»</button>';
                 }
+                c.innerHTML = h;
             }
-            
-            function nextPage() {
-                var totalPages = Math.ceil(allData.length / pageSize);
-                if (currentPage < totalPages) {
-                    currentPage++;
-                    renderData();
-                }
-            }
+            window.renderPageBtns = renderPageBtns;
             
             function changePageSize() {
                 pageSize = parseInt(document.getElementById('pageSize').value);
@@ -365,7 +382,7 @@
 
             function showAddModal() {
                 if (!dataLoaded) {
-                    alert('数据正在加载中，请稍后...');
+                    showToast('error', '数据正在加载中，请稍后...');
                     return;
                 }
                 editingId = null;
@@ -374,7 +391,7 @@
                 document.getElementById('domainError').style.display = 'none';
                 document.getElementById('saveBtn').disabled = false;
                 renderProxyCheckboxes([]);
-                renderBackendCheckboxes([]);
+                renderGroupDropdown('');
                 document.getElementById('certId').value = '';
                 document.getElementById('forceHttps').checked = false;
                 document.getElementById('enabled').checked = true;
@@ -387,7 +404,7 @@
 
             function editDomain(item) {
                 if (!dataLoaded) {
-                    alert('数据正在加载中，请稍后...');
+                    showToast('error', '数据正在加载中，请稍后...');
                     return;
                 }
                 editingId = item.id;
@@ -396,7 +413,7 @@
                 document.getElementById('domainError').style.display = 'none';
                 document.getElementById('saveBtn').disabled = false;
                 renderProxyCheckboxes(item.proxy_ids || []);
-                renderBackendCheckboxes(item.backend_ids || []);
+                renderGroupDropdown(item.group_id || '');
                 document.getElementById('certId').value = item.cert_id || '';
                 document.getElementById('forceHttps').checked = item.force_https;
                 document.getElementById('enabled').checked = item.enabled;
@@ -405,26 +422,27 @@
 
             function saveDomain() {
                 if (!validateDomain()) {
-                    alert('请检查域名格式');
+                    showToast('error', '请检查域名格式');
                     return;
                 }
 
                 var data = {
                     domain: document.getElementById('domain').value.trim(),
                     proxy_ids: getSelectedProxyIds(),
-                    backend_ids: getSelectedBackendIds(),
+                    backend_ids: [],
+                    group_id: getSelectedGroupId(),
                     cert_id: document.getElementById('certId').value,
                     force_https: document.getElementById('forceHttps').checked,
                     enabled: document.getElementById('enabled').checked
                 };
 
                 if (data.proxy_ids.length === 0) {
-                    alert('请至少选择一个代理端口');
+                    showToast('error', '请至少选择一个代理端口');
                     return;
                 }
 
-                if (data.backend_ids.length === 0) {
-                    alert('请至少选择一个后端服务');
+                if (!data.group_id) {
+                    showToast('error', '请选择一个后端服务组');
                     return;
                 }
 
@@ -442,41 +460,29 @@
                 }).then(r => r.json()).then(res => {
                     if (res.success) { 
                         closeModal(); 
-                        fetch('/api/domain/list').then(r => r.json()).then(d => {
-                            allData = d || [];
+                        fetch('/api/domain/list').then(r => r.json()).then(resp => {
+                            allData = resp.data || [];
                             renderData();
                         }).catch(function(e) { console.error('重新加载失败', e); });
                     } else {
-                        alert('保存失败: ' + (res.error || '未知错误'));
+                        showToast('error', '保存失败: ' + (res.error || '未知错误'));
                     }
                 }).catch(err => {
                     console.error('保存失败:', err);
-                    alert('保存失败: ' + err.message);
+                    showToast('error', '保存失败: ' + err.message);
                 }).finally(function() { btn.disabled = false; });
             }
             
             function deleteDomain(id) {
                 if (!id) {
-                    alert('无效的域名ID');
+                    showToast('error', '无效的域名ID');
                     return;
                 }
-                if (!confirm('确定删除？')) return;
-                fetch('/api/domain/delete', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({id: id})
-                }).then(r => r.json()).then(res => { 
-                    if (res.success) {
-                        fetch('/api/domain/list').then(r => r.json()).then(d => {
-                            allData = d || [];
-                            renderData();
-                        }).catch(function(e) { console.error('重新加载失败', e); });
-                    } else {
-                        alert('删除失败: ' + (res.error || '未知错误'));
-                    }
-                }).catch(err => {
-                    console.error('删除失败:', err);
-                    alert('删除失败: ' + err.message);
+                WAF.confirmDelete('确定删除？', '/api/domain/delete', {id: id}, function() {
+                    fetch('/api/domain/list').then(r => r.json()).then(resp => {
+                        allData = resp.data || [];
+                        renderData();
+                    }).catch(function(e) { console.error('重新加载失败', e); });
                 });
             }
 
@@ -485,12 +491,19 @@
                 fetch('/api/proxy/list').then(r => r.json()),
                 fetch('/api/backend/list').then(r => r.json()),
                 fetch('/api/cert/list').then(r => r.json()),
-                fetch('/api/domain/list').then(r => r.json())
-            ]).then(([pRes, bRes, cRes, dRes]) => {
-                proxies = (pRes.status === 'fulfilled' ? pRes.value : null) || [];
-                backends = (bRes.status === 'fulfilled' ? bRes.value : null) || [];
-                certs = (cRes.status === 'fulfilled' ? cRes.value : null) || [];
-                allData = (dRes.status === 'fulfilled' ? dRes.value : null) || [];
+                fetch('/api/domain/list').then(r => r.json()),
+                fetch('/api/backend/group/list').then(r => r.json())
+            ]).then(([pRes, bRes, cRes, dRes, gRes]) => {
+                var pv = pRes.status === 'fulfilled' ? pRes.value : null;
+                var bv = bRes.status === 'fulfilled' ? bRes.value : null;
+                var cv = cRes.status === 'fulfilled' ? cRes.value : null;
+                var dv = dRes.status === 'fulfilled' ? dRes.value : null;
+                var gv = gRes.status === 'fulfilled' ? gRes.value : null;
+                proxies = (pv && pv.success && pv.data) ? pv.data : [];
+                backends = (bv && bv.success && bv.data) ? bv.data : [];
+                certs = (cv && cv.success && cv.data) ? cv.data : [];
+                allData = (dv && dv.success && dv.data) ? dv.data : [];
+                groups = (gv && gv.success && gv.data) ? gv.data : [];
                 dataLoaded = true;
                 // 渲染证书下拉框
                 var sel = document.getElementById('certId');
@@ -505,15 +518,13 @@
                 renderData();
             }).catch(err => {
                 console.error('初始化数据加载失败:', err);
-                alert('加载配置失败，请刷新页面重试');
+                showToast('error', '加载配置失败，请刷新页面重试');
             });
 
             // 暴露必要的函数给全局（供内联onclick使用，但部分已用事件委托替代）
             window.showAddModal = showAddModal;
             window.closeModal = closeModal;
             window.saveDomain = saveDomain;
-            window.prevPage = prevPage;
-            window.nextPage = nextPage;
             window.changePageSize = changePageSize;
             window.validateDomain = validateDomain;
         })();

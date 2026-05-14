@@ -1,0 +1,201 @@
+{{define "bot"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bot管理 - GoWAF</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/common.css">
+    <link rel="stylesheet" href="/static/css/bot.css">
+</head>
+<body>
+    {{template "sidebar" .}}
+    <div class="main scroll-page">
+        <div class="card">
+            <div class="page-header">
+                <h2>Bot 管理</h2>
+                <div class="desc">基于 User-Agent 的机器人识别与管控 — 预置 28 种已知 Bot，支持自定义正则规则。拦截策略可按分类配置，支持拦截/记录/放行三种模式。</div>
+            </div>
+            <div class="stats-bar">
+                <div class="stat-card ac-se"><div class="label">搜索引擎</div><div class="value" id="stat-se">-</div></div>
+                <div class="stat-card ac-social"><div class="label">社交爬虫</div><div class="value" id="stat-social">-</div></div>
+                <div class="stat-card ac-monitor"><div class="label">监控工具</div><div class="value" id="stat-monitor">-</div></div>
+                <div class="stat-card ac-scraper"><div class="label">爬虫</div><div class="value" id="stat-scraper">-</div></div>
+                <div class="stat-card ac-malicious"><div class="label">恶意</div><div class="value" id="stat-malicious">-</div></div>
+                <div class="stat-card ac-human"><div class="label">人类</div><div class="value" id="stat-human">-</div></div>
+                <div class="stat-card ac-unknown"><div class="label">未知</div><div class="value" id="stat-unknown">-</div></div>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <div class="tab active" data-tab="known" onclick="switchTab('known')">已知Bot</div>
+            <div class="tab" data-tab="custom" onclick="switchTab('custom')">自定义规则</div>
+            <div class="tab" data-tab="policy" onclick="switchTab('policy')">拦截策略</div>
+            <div class="tab" data-tab="test" onclick="switchTab('test')">UA测试</div>
+        </div>
+
+        <!-- 已知Bot -->
+        <div class="tab-content active" id="tab-known">
+            <div class="card">
+                <div class="toolbar">
+                    <input type="text" class="search-input" id="knownSearch" placeholder="搜索Bot名称..." oninput="filterKnownBots()">
+                    <div class="spacer"></div>
+                </div>
+                <div id="knownBotList"></div>
+            </div>
+        </div>
+
+        <!-- 自定义规则 -->
+        <div class="tab-content" id="tab-custom">
+            <div class="card">
+                <div class="toolbar">
+                    <input type="text" class="search-input" id="customSearch" placeholder="搜索规则..." oninput="filterCustomRules()">
+                    <div class="spacer"></div>
+                    <button class="btn btn-p btn-sm" onclick="showAddModal()">+ 添加规则</button>
+                </div>
+                <table class="tbl" id="customTable">
+                    <thead>
+                        <tr>
+                            <th class="cb-col"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
+                            <th>名称</th>
+                            <th>分类</th>
+                            <th>UA匹配</th>
+                            <th>白名单</th>
+                            <th>启用</th>
+                            <th>命中</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="customBody"></tbody>
+                </table>
+                <div class="toolbar" style="margin-top:10px">
+                    <button class="btn btn-d btn-sm" onclick="batchDelete()" id="batchDeleteBtn" disabled>批量删除</button>
+                    <button class="btn btn-s btn-sm" onclick="batchToggle(true)" id="batchEnableBtn" disabled>批量启用</button>
+                    <button class="btn btn-s btn-sm" onclick="batchToggle(false)" id="batchDisableBtn" disabled>批量禁用</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 拦截策略 -->
+        <div class="tab-content" id="tab-policy">
+            <div class="card">
+                <div class="section-title">分类拦截策略</div>
+                <div class="policy-batch">
+                    <span class="pb-label">快速设置：</span>
+                    <button onclick="batchSetPolicy('block')">全部拦截</button>
+                    <button onclick="batchSetPolicy('record')">全部记录</button>
+                    <button onclick="batchSetPolicy('allow')">全部放行</button>
+                </div>
+                <div class="policy-grid" id="policyGrid"></div>
+            </div>
+        </div>
+
+        <!-- UA测试 -->
+        <div class="tab-content" id="tab-test">
+            <div class="card">
+                <div class="test-box">
+                    <h4>UA 识别测试</h4>
+                    <div class="test-presets" id="testPresets"></div>
+                    <div class="test-row">
+                        <div class="fld">
+                            <label>User-Agent</label>
+                            <input type="text" id="testUA" placeholder="输入 User-Agent 字符串">
+                        </div>
+                        <button class="btn btn-p" onclick="testClassify()">测试</button>
+                    </div>
+                    <div class="test-flags">
+                        <label><input type="checkbox" id="testCookies"> 有Cookies</label>
+                        <label><input type="checkbox" id="testReferer"> 有Referer</label>
+                        <label><input type="checkbox" id="testAcceptLang"> 有Accept-Language</label>
+                    </div>
+                    <div class="test-result" id="testResult"></div>
+                    <div class="test-history" id="testHistory"></div>
+                </div>
+
+                <div class="top-bots">
+                    <h4>TOP Bot 访问</h4>
+                    <div id="topBotsList"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 添加规则弹窗 -->
+        <div class="modal" id="addModal">
+            <div class="modal-box">
+                <h3 id="modalTitle">添加自定义规则</h3>
+                <div class="fld">
+                    <label>规则名称</label>
+                    <input type="text" id="editName" placeholder="例如: EvilBot">
+                </div>
+                <div class="fld">
+                    <label>分类</label>
+                    <select id="editCategory">
+                        <option value="search_engine">搜索引擎</option>
+                        <option value="social_crawler">社交爬虫</option>
+                        <option value="monitor">监控工具</option>
+                        <option value="scraper">爬虫</option>
+                        <option value="malicious">恶意</option>
+                    </select>
+                </div>
+                <div class="fld">
+                    <label>UA 正则匹配</label>
+                    <input type="text" id="editPattern" placeholder="例如: (?i)evilbot">
+                </div>
+                <div class="chk-row">
+                    <input type="checkbox" id="editWhitelisted">
+                    <label for="editWhitelisted">白名单（放行）</label>
+                </div>
+                <div class="chk-row" style="margin-bottom:4px">
+                    <input type="checkbox" id="editEnabled" checked>
+                    <label for="editEnabled">启用该规则</label>
+                </div>
+                <div class="mf">
+                    <button type="button" class="btn btn-s" onclick="closeAddModal()">取消</button>
+                    <button type="button" class="btn btn-p" onclick="saveRule()">保存</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 编辑规则弹窗 -->
+        <div class="modal" id="editModal">
+            <div class="modal-box">
+                <h3>编辑规则</h3>
+                <input type="hidden" id="editId">
+                <div class="fld">
+                    <label>规则名称</label>
+                    <input type="text" id="editName2">
+                </div>
+                <div class="fld">
+                    <label>分类</label>
+                    <select id="editCategory2">
+                        <option value="search_engine">搜索引擎</option>
+                        <option value="social_crawler">社交爬虫</option>
+                        <option value="monitor">监控工具</option>
+                        <option value="scraper">爬虫</option>
+                        <option value="malicious">恶意</option>
+                    </select>
+                </div>
+                <div class="fld">
+                    <label>UA 正则匹配</label>
+                    <input type="text" id="editPattern2">
+                </div>
+                <div class="chk-row">
+                    <input type="checkbox" id="editWhitelisted2">
+                    <label for="editWhitelisted2">白名单</label>
+                </div>
+                <div class="chk-row" style="margin-bottom:4px">
+                    <input type="checkbox" id="editEnabled2">
+                    <label for="editEnabled2">启用</label>
+                </div>
+                <div class="mf">
+                    <button type="button" class="btn btn-s" onclick="closeEditModal()">取消</button>
+                    <button type="button" class="btn btn-p" onclick="updateRule()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+<script nonce="{{.CSPNonce}}" src="/static/js/bot_page.js"></script>
+</body>
+</html>
+{{end}}

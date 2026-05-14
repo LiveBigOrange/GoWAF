@@ -28,23 +28,23 @@ func (d *HeaderInjectionDetector) compilePatterns() {
 		{`(?i)%0d%0a`, "CRLF编码注入"},
 		{`(?i)%0d`, "CR编码注入"},
 		{`(?i)%0a`, "LF编码注入"},
-		{`\r\n`, "CRLF注入"},
-		{`\r`, "CR注入"},
-		{`\n`, "LF注入"},
+		{"\r\n", "CRLF注入"},
+		{"\r", "CR注入"},
+		{"\n", "LF注入"},
 		{`(?i)%0d%0a%0d%0a`, "双重CRLF编码"},
 		{`(?i)%0d%0acontent-type:`, "CRLF注入Content-Type"},
 		{`(?i)%0d%0aset-cookie:`, "CRLF注入Set-Cookie"},
 		{`(?i)%0d%0alocation:`, "CRLF注入Location"},
-		{`(?i)\r\ncontent-type:`, "CRLF注入Content-Type2"},
-		{`(?i)\r\nset-cookie:`, "CRLF注入Set-Cookie2"},
-		{`(?i)\r\nlocation:`, "CRLF注入Location2"},
+		{"(?i)\r\ncontent-type:", "CRLF注入Content-Type2"},
+		{"(?i)\r\nset-cookie:", "CRLF注入Set-Cookie2"},
+		{"(?i)\r\nlocation:", "CRLF注入Location2"},
 		{`(?i)%0d%0aHTTP/`, "CRLF注入HTTP响应"},
-		{`(?i)\r\nHTTP/`, "CRLF注入HTTP响应2"},
+		{"(?i)\r\nHTTP/", "CRLF注入HTTP响应2"},
 	}
 	d.patterns = make([]*regexp.Regexp, 0, len(patternEntries))
 	d.patternDescs = make([]string, 0, len(patternEntries))
 	for _, entry := range patternEntries {
-		if re, err := regexp.Compile(entry.pattern); err == nil {
+		if re, err := compileRegex(entry.pattern); err == nil {
 			d.patterns = append(d.patterns, re)
 			d.patternDescs = append(d.patternDescs, entry.description)
 		} else {
