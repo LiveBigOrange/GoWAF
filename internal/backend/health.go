@@ -37,7 +37,8 @@ func NewHealthChecker(manager *Manager, checkInterval int) *HealthChecker {
 			Timeout: 5 * time.Second,
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{
-					MinVersion: tls.VersionTLS12,
+					MinVersion:         tls.VersionTLS12,
+					InsecureSkipVerify: true,
 				},
 				IdleConnTimeout: 30 * time.Second,
 			},

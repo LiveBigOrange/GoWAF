@@ -518,7 +518,10 @@ function changePassword() {
         method:'POST', headers:{'Content-Type':'application/json', 'X-CSRF-Token': getCSRFToken()},
         body:JSON.stringify({old_password:cur, new_password:neu})
     }).then(r => r.json()).then(function(resp) {
-        if (resp.success) { showToast('success','密码已修改'); closeModal(); }
+        if (resp.success) {
+            showToast('success','密码已修改，即将重新登录');
+            setTimeout(function() { window.location.href = '/logout'; }, 1500);
+        }
         else showToast('error', resp.error || '修改失败');
     }).catch(function(){showToast('error','请求失败');});
 }

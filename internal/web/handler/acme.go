@@ -68,8 +68,8 @@ func APIACMEConfig(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, "保存配置失败", http.StatusInternalServerError)
 			return
 		}
-		deps.ACMEManager.UpdateConfig(email, validDomains)
-		jsonSuccess(w, map[string]string{"message": "ACME配置已更新"})
+		go deps.ACMEManager.UpdateConfig(email, validDomains)
+		jsonSuccess(w, map[string]string{"message": "ACME配置已更新，证书申请已在后台启动"})
 		return
 	}
 

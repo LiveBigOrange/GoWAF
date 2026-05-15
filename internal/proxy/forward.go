@@ -114,6 +114,9 @@ func (p *WAFProxy) director(req *http.Request) {
 	} else {
 		req.Header.Set("X-Forwarded-Proto", "http")
 	}
+	if originalHost := req.Host; originalHost != "" {
+		req.Header.Set("X-Forwarded-Host", originalHost)
+	}
 }
 
 func (p *WAFProxy) modifyResponse(resp *http.Response) error {

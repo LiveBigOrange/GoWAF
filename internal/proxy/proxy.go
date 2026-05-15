@@ -3,6 +3,7 @@ package proxy
 import (
 	crypto_rand "crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -88,6 +89,9 @@ func NewWAFProxy(cfg *config.Config, engine *rules.Engine, lim *limiter.IPRateLi
 			ExpectContinueTimeout: 1 * time.Second,
 			DisableCompression:    cfg.Performance.DisableCompression,
 			ForceAttemptHTTP2:     true,
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
 		},
 	}
 
