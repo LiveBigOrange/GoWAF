@@ -6,8 +6,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"gowaf/internal/logger"
 )
 
 type DetectionResult struct {
@@ -276,19 +274,15 @@ func (m *Manager) detectWithDetectors(method, path, query, body string, headers 
 		sqlAnalysis := m.syntaxAnalyzer.AnalyzeSQLInjection(combined)
 		if sqlAnalysis.IsLikelyInjection {
 			reason := strings.Join(sqlAnalysis.Reasons, ", ")
-			if !observedSnapshot["sql_injection"] {
-				results = append(results, DetectionResult{
-					Detected:   true,
-					AttackType: "sql_injection",
-					Pattern:    reason,
-					Location:   "syntax",
-					RuleID:     0,
-					RuleDesc:   "syntax_analysis",
-					Confidence: sqlAnalysis.RiskScore,
-				})
-			} else {
-				logger.Warn("OBSERVE: sql_injection syntax_analysis pattern=%q", reason)
-			}
+			results = append(results, DetectionResult{
+				Detected:   true,
+				AttackType: "sql_injection",
+				Pattern:    reason,
+				Location:   "syntax",
+				RuleID:     0,
+				RuleDesc:   "syntax_analysis",
+				Confidence: sqlAnalysis.RiskScore,
+			})
 		}
 	}
 
@@ -339,42 +333,34 @@ func (m *Manager) detectSequential(
 			continue
 		}
 		if detected, pattern, location, ruleID, ruleDesc := det.fn(method, path, query, body, hdrMap); detected {
-			if observedSnapshot[det.name] {
-				logger.Warn("OBSERVE: %s detected pattern=%q location=%s ruleID=%d ruleDesc=%q", det.name, pattern, location, ruleID, ruleDesc)
-			} else {
+			results = append(results, DetectionResult{
+				Detected:   true,
+				AttackType: det.name,
+				Pattern:    pattern,
+				Location:   location,
+				RuleID:     ruleID,
+				RuleDesc:   ruleDesc,
+				Confidence: 0.7,
+			})
+			*resultsPtr = results
+			if shortCircuit && !observedSnapshot[det.name] {
+				return append([]DetectionResult(nil), results...)
+			}
+		}
+		if decodedQuery != "" {
+			if detected, pattern, location, ruleID, ruleDesc := det.fn(method, path, decodedQuery, body, hdrMap); detected {
 				results = append(results, DetectionResult{
 					Detected:   true,
 					AttackType: det.name,
 					Pattern:    pattern,
-					Location:   location,
+					Location:   location + "_decoded",
 					RuleID:     ruleID,
 					RuleDesc:   ruleDesc,
 					Confidence: 0.7,
 				})
 				*resultsPtr = results
-				if shortCircuit {
+				if shortCircuit && !observedSnapshot[det.name] {
 					return append([]DetectionResult(nil), results...)
-				}
-			}
-		}
-		if decodedQuery != "" {
-			if detected, pattern, location, ruleID, ruleDesc := det.fn(method, path, decodedQuery, body, hdrMap); detected {
-				if observedSnapshot[det.name] {
-					logger.Warn("OBSERVE: %s detected pattern=%q location=%s_decoded ruleID=%d ruleDesc=%q", det.name, pattern, location, ruleID, ruleDesc)
-				} else {
-					results = append(results, DetectionResult{
-						Detected:   true,
-						AttackType: det.name,
-						Pattern:    pattern,
-						Location:   location + "_decoded",
-						RuleID:     ruleID,
-						RuleDesc:   ruleDesc,
-						Confidence: 0.7,
-					})
-					*resultsPtr = results
-					if shortCircuit {
-						return append([]DetectionResult(nil), results...)
-					}
 				}
 			}
 		}
@@ -464,19 +450,15 @@ func (m *Manager) detectParallel(
 
 	var results []DetectionResult
 	for pr := range ch {
-		if pr.observed {
-			logger.Warn("OBSERVE: %s detected pattern=%q location=%s ruleID=%d ruleDesc=%q", pr.attackType, pr.pattern, pr.location, pr.ruleID, pr.ruleDesc)
-		} else {
-			results = append(results, DetectionResult{
-				Detected:   true,
-				AttackType: pr.attackType,
-				Pattern:    pr.pattern,
-				Location:   pr.location,
-				RuleID:     pr.ruleID,
-				RuleDesc:   pr.ruleDesc,
-				Confidence: 0.7,
-			})
-		}
+		results = append(results, DetectionResult{
+			Detected:   true,
+			AttackType: pr.attackType,
+			Pattern:    pr.pattern,
+			Location:   pr.location,
+			RuleID:     pr.ruleID,
+			RuleDesc:   pr.ruleDesc,
+			Confidence: 0.7,
+		})
 	}
 
 	return results
@@ -639,7 +621,6 @@ func (m *Manager) CheckIPReputation(ip string) (bool, string) {
 func (m *Manager) DetectResponse(body string, statusCode int) []DetectionResult {
 	results := make([]DetectionResult, 0)
 	enabledSnapshot := m.enabledDetectors.Load().(map[string]bool)
-	observedSnapshot := m.observationModes.Load().(map[string]bool)
 	if enabledSnapshot["error_leak"] && m.errorLeakDetector != nil {
 		if detected, pattern, location, ruleID, ruleDesc := m.errorLeakDetector.DetectResponse(body, statusCode); detected {
 			results = append(results, DetectionResult{
@@ -655,19 +636,15 @@ func (m *Manager) DetectResponse(body string, statusCode int) []DetectionResult 
 	}
 	if enabledSnapshot["sensitive_data"] && m.sensitiveDetector != nil {
 		if detected, pattern, ruleID, ruleDesc := m.sensitiveDetector.Detect(body); detected {
-			if observedSnapshot["sensitive_data"] {
-				logger.Warn("OBSERVE: sensitive_data detected in response pattern=%q ruleID=%d", pattern, ruleID)
-			} else {
-				results = append(results, DetectionResult{
-					Detected:   true,
-					AttackType: "sensitive_data",
-					Pattern:    pattern,
-					Location:   "response_body",
-					RuleID:     ruleID,
-					RuleDesc:   ruleDesc,
-					Confidence: 0.6,
-				})
-			}
+			results = append(results, DetectionResult{
+				Detected:   true,
+				AttackType: "sensitive_data",
+				Pattern:    pattern,
+				Location:   "response_body",
+				RuleID:     ruleID,
+				RuleDesc:   ruleDesc,
+				Confidence: 0.6,
+			})
 		}
 	}
 	return results

@@ -9,6 +9,7 @@ import (
 
 	"gowaf/internal/blockpage"
 	"gowaf/internal/bot"
+	"gowaf/internal/detector"
 	"gowaf/internal/logger"
 	"gowaf/internal/masker"
 	"gowaf/internal/metrics"
@@ -325,11 +326,23 @@ func (p *WAFProxy) checkAttackDetection(w http.ResponseWriter, r *http.Request, 
 	if !p.detectorManager.HasAttack(results) {
 		return false
 	}
-	attackTypes := p.detectorManager.GetAttackTypes(results)
-	attackType := strings.Join(attackTypes, ",")
-	var matchDetails, matchLocations, ruleIDStrs []string
+
+	var blockResults, observeResults []detector.DetectionResult
 	for _, res := range results {
-		if res.Detected {
+		if !res.Detected {
+			continue
+		}
+		if p.detectorManager.IsObservationMode(res.AttackType) {
+			observeResults = append(observeResults, res)
+		} else {
+			blockResults = append(blockResults, res)
+		}
+	}
+
+	if len(observeResults) > 0 {
+		var obsTypes, obsDetails []string
+		for _, res := range observeResults {
+			obsTypes = append(obsTypes, res.AttackType)
 			detail := res.Pattern
 			if res.RuleID > 0 && res.RuleDesc != "" {
 				detail = fmt.Sprintf("[Rule#%d|%s] %s", res.RuleID, res.RuleDesc, res.Pattern)
@@ -338,18 +351,63 @@ func (p *WAFProxy) checkAttackDetection(w http.ResponseWriter, r *http.Request, 
 			} else if res.RuleDesc != "" {
 				detail = fmt.Sprintf("[%s] %s", res.RuleDesc, res.Pattern)
 			}
-			matchDetails = append(matchDetails, detail)
-			if res.Location != "" {
-				matchLocations = append(matchLocations, res.Location)
-			}
-			if res.RuleID > 0 {
-				ruleIDStrs = append(ruleIDStrs, fmt.Sprintf("%d", res.RuleID))
-			}
+			obsDetails = append(obsDetails, detail)
+		}
+		obsType := strings.Join(obsTypes, ",")
+		obsDetail := strings.Join(obsDetails, ", ")
+		log := logger.NewAccessLog().
+			SetClientIP(clientIP).
+			SetMethod(r.Method).
+			SetPath(masker.MaskPath(r.URL.Path)).
+			SetStatus(http.StatusOK).
+			SetAction("observe").
+			SetRequestID(requestID).
+			SetUpstreamAddr(getUpstream()).
+			SetRuleID("观察模式:" + obsType).
+			SetHost(r.Host).
+			SetQuery(masker.MaskQuery(r.URL.RawQuery)).
+			SetUserAgent(userAgent).
+			SetReferer(r.Header.Get("Referer")).
+			SetContentType(r.Header.Get("Content-Type")).
+			SetLatency(time.Since(start)).
+			SetProtocol(r.Proto).
+			SetScheme(getScheme(r)).
+			SetMatchDetail(masker.MaskMatchDetail(obsDetail))
+		logger.Write(*log)
+	}
+
+	if len(blockResults) == 0 {
+		return false
+	}
+
+	attackTypes := make([]string, 0)
+	seenTypes := make(map[string]bool)
+	var matchDetails, matchLocations, ruleIDStrs []string
+	for _, res := range blockResults {
+		if !seenTypes[res.AttackType] {
+			attackTypes = append(attackTypes, res.AttackType)
+			seenTypes[res.AttackType] = true
+		}
+		detail := res.Pattern
+		if res.RuleID > 0 && res.RuleDesc != "" {
+			detail = fmt.Sprintf("[Rule#%d|%s] %s", res.RuleID, res.RuleDesc, res.Pattern)
+		} else if res.RuleID > 0 {
+			detail = fmt.Sprintf("[Rule#%d] %s", res.RuleID, res.Pattern)
+		} else if res.RuleDesc != "" {
+			detail = fmt.Sprintf("[%s] %s", res.RuleDesc, res.Pattern)
+		}
+		matchDetails = append(matchDetails, detail)
+		if res.Location != "" {
+			matchLocations = append(matchLocations, res.Location)
+		}
+		if res.RuleID > 0 {
+			ruleIDStrs = append(ruleIDStrs, fmt.Sprintf("%d", res.RuleID))
 		}
 	}
 	matchDetail := strings.Join(matchDetails, ", ")
 	matchLocation := strings.Join(matchLocations, ", ")
 	ruleIDStr := strings.Join(ruleIDStrs, ",")
+	attackType := strings.Join(attackTypes, ",")
 	if p.rateLimitEngine != nil {
 		for _, at := range attackTypes {
 			p.rateLimitEngine.RecordFeedback(ratelimit.RequestInfo{

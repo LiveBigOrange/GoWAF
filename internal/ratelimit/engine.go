@@ -558,6 +558,36 @@ func (e *Engine) adjustWeights(cfg *Config) {
 			cfg.mu.Unlock()
 		}
 	}
+
+	e.normalizeWeights(cfg)
+}
+
+func (e *Engine) normalizeWeights(cfg *Config) {
+	cfg.mu.Lock()
+	defer cfg.mu.Unlock()
+
+	sum := cfg.W_RequestRate + cfg.W_BlockRate + cfg.W_ErrorRatio + cfg.W_PathDiv + cfg.W_RuleDiv +
+		cfg.W_UADiv + cfg.W_IntervalVar + cfg.W_SensitivePath + cfg.W_GeoAnomaly + cfg.W_CookieAnomaly +
+		cfg.W_MethodAnomaly + cfg.W_RefererAnomaly + cfg.W_BodyAnomaly
+
+	if sum <= 0 || math.Abs(sum-1.0) < 0.001 {
+		return
+	}
+
+	scale := 1.0 / sum
+	cfg.W_RequestRate *= scale
+	cfg.W_BlockRate *= scale
+	cfg.W_ErrorRatio *= scale
+	cfg.W_PathDiv *= scale
+	cfg.W_RuleDiv *= scale
+	cfg.W_UADiv *= scale
+	cfg.W_IntervalVar *= scale
+	cfg.W_SensitivePath *= scale
+	cfg.W_GeoAnomaly *= scale
+	cfg.W_CookieAnomaly *= scale
+	cfg.W_MethodAnomaly *= scale
+	cfg.W_RefererAnomaly *= scale
+	cfg.W_BodyAnomaly *= scale
 }
 
 func (e *Engine) SetAutoBlocker(a *AutoBlocker) {
