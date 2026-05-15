@@ -62,6 +62,13 @@ func (d *SensitiveDataDetector) GetPatternCount() int {
 	return len(d.patterns)
 }
 
+// setPatterns 从外部设置检测规则（用于数据库驱动热加载）
+func (d *SensitiveDataDetector) setPatterns(patterns []*sensitivePattern) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.patterns = patterns
+}
+
 func (d *SensitiveDataDetector) EnablePattern(name string, enabled bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()

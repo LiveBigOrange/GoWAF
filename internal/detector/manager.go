@@ -1,7 +1,9 @@
 package detector
 
 import (
+	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -648,4 +650,101 @@ func (m *Manager) DetectResponse(body string, statusCode int) []DetectionResult 
 		}
 	}
 	return results
+}
+
+// ReloadRules 从数据库重新加载指定检测器的规则到内存
+func (m *Manager) ReloadRules(detectorType string, rules []DetectionRule) {
+	if detectorType == "sensitive_data" {
+		var sensPatterns []*sensitivePattern
+		for _, rule := range rules {
+			if !rule.Enabled {
+				continue
+			}
+			re, err := compileRegex(rule.Pattern)
+			if err != nil {
+				log.Printf("[WARN] ReloadRules: %s 正则编译失败 %q: %v", detectorType, rule.Pattern, err)
+				continue
+			}
+			sensPatterns = append(sensPatterns, &sensitivePattern{
+				name:    rule.Description,
+				regex:   re,
+				enabled: true,
+			})
+		}
+		if len(sensPatterns) > 0 {
+			m.sensitiveDetector.setPatterns(sensPatterns)
+			log.Printf("[INFO] ReloadRules: %s 已加载 %d 条规则", detectorType, len(sensPatterns))
+		}
+		return
+	}
+
+	var patterns []*regexp.Regexp
+	var descs []string
+
+	for _, rule := range rules {
+		if !rule.Enabled {
+			continue
+		}
+		re, err := compileRegex(rule.Pattern)
+		if err != nil {
+			log.Printf("[WARN] ReloadRules: %s 正则编译失败 %q: %v", detectorType, rule.Pattern, err)
+			continue
+		}
+		patterns = append(patterns, re)
+		descs = append(descs, rule.Description)
+	}
+
+	if len(patterns) == 0 {
+		return
+	}
+
+	switch detectorType {
+	case "sql_injection":
+		m.sqlDetector.setPatterns(patterns, descs)
+	case "xss":
+		m.xssDetector.setPatterns(patterns, descs)
+	case "command_injection":
+		m.cmdDetector.setPatterns(patterns, descs)
+	case "path_traversal":
+		m.pathDetector.setPatterns(patterns, descs)
+	case "header_injection":
+		m.headerDetector.setPatterns(patterns, descs)
+	case "ssrf":
+		m.ssrfDetector.setPatterns(patterns, descs)
+	case "file_upload":
+		m.fileUploadDetector.setPatterns(patterns, descs)
+	case "error_leak":
+		m.errorLeakDetector.setPatterns(patterns, descs)
+	case "request_smuggling":
+		m.smuggingDetector.setPatterns(patterns, descs)
+	case "xxe":
+		m.xxeDetector.setPatterns(patterns, descs)
+	case "nosql":
+		m.nosqlDetector.setPatterns(patterns, descs)
+	case "ssti":
+		m.sstiDetector.setPatterns(patterns, descs)
+	default:
+		return
+	}
+	log.Printf("[INFO] ReloadRules: %s 已加载 %d 条规则", detectorType, len(patterns))
+}
+
+// LoadAllRulesFromDB 从数据库加载所有检测器规则到内存
+func (m *Manager) LoadAllRulesFromDB(cm *ConfigManager) {
+	detectorTypes := []string{
+		"sql_injection", "xss", "command_injection", "path_traversal",
+		"header_injection", "sensitive_data", "ssrf", "file_upload",
+		"error_leak", "request_smuggling", "xxe", "nosql", "ssti",
+	}
+	for _, dt := range detectorTypes {
+		rules, err := cm.ListRules(dt)
+		if err != nil {
+			log.Printf("[WARN] LoadAllRulesFromDB: 获取 %s 规则失败: %v", dt, err)
+			continue
+		}
+		if len(rules) == 0 {
+			continue
+		}
+		m.ReloadRules(dt, rules)
+	}
 }

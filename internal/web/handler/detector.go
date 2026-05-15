@@ -168,6 +168,13 @@ func APIDetectorAddRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if deps.DetectorManager != nil {
+		rules, rerr := deps.DetectorConfigManager.ListRules(req.DetectorType)
+		if rerr == nil {
+			deps.DetectorManager.ReloadRules(req.DetectorType, rules)
+		}
+	}
+
 	jsonSuccess(w, nil)
 }
 
@@ -186,10 +193,17 @@ func APIDetectorRemoveRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := deps.DetectorConfigManager.RemoveRule(req.RuleID)
+	detectorType, err := deps.DetectorConfigManager.RemoveRule(req.RuleID)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	if deps.DetectorManager != nil && detectorType != "" {
+		rules, rerr := deps.DetectorConfigManager.ListRules(detectorType)
+		if rerr == nil {
+			deps.DetectorManager.ReloadRules(detectorType, rules)
+		}
 	}
 
 	jsonSuccess(w, nil)
@@ -215,6 +229,16 @@ func APIDetectorToggleRule(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	if deps.DetectorManager != nil {
+		rule, rerr := deps.DetectorConfigManager.GetRuleByID(req.RuleID)
+		if rerr == nil {
+			rules, lerr := deps.DetectorConfigManager.ListRules(rule.DetectorType)
+			if lerr == nil {
+				deps.DetectorManager.ReloadRules(rule.DetectorType, rules)
+			}
+		}
 	}
 
 	jsonSuccess(w, nil)

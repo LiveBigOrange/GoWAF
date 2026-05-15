@@ -727,20 +727,26 @@ func (cm *ConfigManager) AddCustomRule(detectorType, pattern, description string
 	return err
 }
 
-// RemoveRule 删除规则(只能删除自定义规则)
-func (cm *ConfigManager) RemoveRule(ruleID int) error {
+// RemoveRule 删除规则(只能删除自定义规则)，返回被删除规则的detectorType
+func (cm *ConfigManager) RemoveRule(ruleID int) (string, error) {
+	var detectorType string
+	err := cm.db.QueryRow("SELECT detector_type FROM detection_rules WHERE id = ? AND rule_type = 'custom'", ruleID).Scan(&detectorType)
+	if err != nil {
+		return "", fmt.Errorf("custom rule not found: %d", ruleID)
+	}
+
 	result, err := cm.db.Exec(`
 		DELETE FROM detection_rules 
 		WHERE id = ? AND rule_type = 'custom'
 	`, ruleID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	n, _ := result.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("custom rule not found: %d", ruleID)
+		return "", fmt.Errorf("custom rule not found: %d", ruleID)
 	}
-	return nil
+	return detectorType, nil
 }
 
 // ToggleRule 切换规则启用状态
@@ -758,6 +764,22 @@ func (cm *ConfigManager) ToggleRule(ruleID int, enabled bool) error {
 		return fmt.Errorf("rule not found: %d", ruleID)
 	}
 	return nil
+}
+
+// GetRuleByID 根据ID获取规则
+func (cm *ConfigManager) GetRuleByID(ruleID int) (*DetectionRule, error) {
+	var rule DetectionRule
+	var enabled int
+	err := cm.db.QueryRow(`
+		SELECT id, detector_type, rule_type, pattern, description, enabled, created_at
+		FROM detection_rules
+		WHERE id = ?
+	`, ruleID).Scan(&rule.ID, &rule.DetectorType, &rule.RuleType, &rule.Pattern, &rule.Description, &enabled, &rule.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	rule.Enabled = enabled == 1
+	return &rule, nil
 }
 
 // GetStats 获取检测器统计信息

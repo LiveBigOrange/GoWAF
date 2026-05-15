@@ -119,6 +119,14 @@ func (d *XXEDetector) DetectRequest(method, path, query, body string, headers ma
 	return false, "", "", 0, ""
 }
 
+// setPatterns 从外部设置检测规则（用于数据库驱动热加载）
+func (d *XXEDetector) setPatterns(patterns []*regexp.Regexp, descs []string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.patterns = patterns
+	d.patternDescs = descs
+}
+
 func (d *XXEDetector) GetPatternCount() int {
 	d.mu.RLock()
 	defer d.mu.RUnlock()

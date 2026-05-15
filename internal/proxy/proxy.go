@@ -113,6 +113,11 @@ func (p *WAFProxy) ApplyObservationMode(detectorType string, observationMode boo
 	}
 }
 
+// GetDetectorManager 获取检测器管理器
+func (p *WAFProxy) GetDetectorManager() *detector.Manager {
+	return p.detectorManager
+}
+
 // SetRateLimitEngine 设置智能限流引擎
 func (p *WAFProxy) SetRateLimitEngine(e *ratelimit.Engine) {
 	p.rateLimitEngine = e

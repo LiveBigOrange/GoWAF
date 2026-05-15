@@ -37,6 +37,7 @@ type AppDeps struct {
 	MetricsManager        *metrics.Manager
 	ProxyConfigManager    *proxyconfig.Manager
 	DetectorConfigManager *detector.ConfigManager
+	DetectorManager       *detector.Manager
 	BotManager            *bot.Manager
 	VPatchManager         *vpatch.Manager
 	ComplianceGenerator   *compliance.Generator

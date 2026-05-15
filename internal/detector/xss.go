@@ -181,6 +181,14 @@ func (d *XSSDetector) DetectRequest(method, path, query, body string, headers ma
 	return false, "", "", 0, ""
 }
 
+// setPatterns 从外部设置检测规则（用于数据库驱动热加载）
+func (d *XSSDetector) setPatterns(patterns []*regexp.Regexp, descs []string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.patterns = patterns
+	d.patternDescs = descs
+}
+
 // GetPatternCount 获取规则数量
 func (d *XSSDetector) GetPatternCount() int {
 	d.mu.RLock()

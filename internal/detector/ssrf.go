@@ -160,6 +160,14 @@ func (d *SSRFDetector) DetectRequest(method, path, query, body string, headers m
 	return false, "", "", 0, ""
 }
 
+// setPatterns 从外部设置检测规则（用于数据库驱动热加载）
+func (d *SSRFDetector) setPatterns(patterns []*regexp.Regexp, descs []string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.patterns = patterns
+	d.patternDescs = descs
+}
+
 func (d *SSRFDetector) GetPatternCount() int {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
