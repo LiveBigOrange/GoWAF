@@ -7,6 +7,18 @@
 
 ## [Unreleased]
 
+## [1.1.7] - 2025-05-15
+
+### 修复
+- **登录认证 - 默认密码无法登录**：`config.yaml` 中 `auth.password` 默认为空字符串，首次启动无法生成密码哈希导致登录验证失败。已在 `BUGFIX_LOG.md` 中说明解决方案：设置 `auth.password` 为实际密码后重启
+- **登录认证 - 非 localhost IP 无法登录**：登录成功后设置的 session/csrf_token cookie 硬编码 `Secure: true`，HTTP 连接下浏览器不发送 cookie。已改为 `r.TLS != nil` 动态判断
+- **登录认证 - Cookie SameSite 过严**：`SameSite: StrictMode` 在跨站场景下导致问题，已改为 `LaxMode`
+- **配置说明 - allowed_cidrs 为空时的行为**：文档明确 `allowed_cidrs` 为空时默认只允许本机访问，非全部允许
+
+### 变更
+- Cookie `Secure` 属性改为根据 TLS 状态动态判断（`r.TLS != nil`）
+- Cookie `SameSite` 属性从 `StrictMode` 改为 `LaxMode`
+
 ## [1.1.6] - 2025-05-14
 
 ### 修复

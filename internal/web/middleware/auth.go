@@ -332,8 +332,8 @@ func Auth(next http.Handler) http.Handler {
 				Value:    csrfCookie.Value,
 				Path:     "/",
 				HttpOnly: false,
-				Secure:   true,
-				SameSite: http.SameSiteStrictMode,
+				Secure:   r.TLS != nil,
+				SameSite: http.SameSiteLaxMode,
 				MaxAge:   int(sessionTTL.Seconds()),
 			})
 		} else {
@@ -347,8 +347,8 @@ func Auth(next http.Handler) http.Handler {
 				Value:    newCsrfToken,
 				Path:     "/",
 				HttpOnly: false,
-				Secure:   true,
-				SameSite: http.SameSiteStrictMode,
+				Secure:   r.TLS != nil,
+				SameSite: http.SameSiteLaxMode,
 				MaxAge:   int(sessionTTL.Seconds()),
 			})
 			bindCSRFToSession(sessionToken, newCsrfToken)

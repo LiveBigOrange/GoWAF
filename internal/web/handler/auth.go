@@ -643,8 +643,8 @@ func LoginPage(w http.ResponseWriter, r *http.Request) {
 			Value:    token,
 			Path:     "/",
 			HttpOnly: true,
-			Secure:   true,
-			SameSite: http.SameSiteStrictMode,
+			Secure:   r.TLS != nil,
+			SameSite: http.SameSiteLaxMode,
 			MaxAge:   secCfg.Session.TTL * 3600,
 		})
 		http.SetCookie(w, &http.Cookie{
@@ -652,8 +652,8 @@ func LoginPage(w http.ResponseWriter, r *http.Request) {
 			Value:    csrfToken,
 			Path:     "/",
 			HttpOnly: false,
-			Secure:   true,
-			SameSite: http.SameSiteStrictMode,
+			Secure:   r.TLS != nil,
+			SameSite: http.SameSiteLaxMode,
 			MaxAge:   secCfg.Session.TTL * 3600,
 		})
 		// 清除captcha_id cookie

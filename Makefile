@@ -2,7 +2,7 @@
 
 # 变量定义
 APP_NAME := gowaf
-VERSION := 1.1.6
+VERSION := 1.1.7
 BUILD_DIR := build
 GO := go
 GOFLAGS := -v
