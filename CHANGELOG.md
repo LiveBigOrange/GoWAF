@@ -7,6 +7,26 @@
 
 ## [Unreleased]
 
+## [1.1.12] - 2026-05-17
+
+### 重构
+- **项目结构重组**：将 `internal/` 下33个扁平包重组为4层架构（domain/infra/cert/pkg），消除反向依赖、合并碎片包、补充包文档
+  - `domain/` 业务领域层：proxy、security、gateway、auxiliary、proxyconfig
+  - `infra/` 基础设施层：config、storage、logger、event、notify
+  - `cert/` 证书与更新域：acme、geoipupdater
+  - `pkg/xutil/` 通用工具域：合并 netutil + timeutil
+  - 依赖方向规则：domain→infra 允许，infra→domain 禁止，pkg→内部包 禁止
+
+### 修复
+- **[严重] 拦截日志查询时区不一致**：`intercept_events` 表以 UTC 写入，但查询使用本地时间，UTC+8 下存在8小时偏移导致数据不显示。修复：dashboard.go 中5处查询时间改为 UTC
+- **[严重] logDB 未注入 logger**：`logger.InitWithRotationAndDB()` 在 logDB 创建前调用且传 nil，导致日志不写入数据库。修复：新增 `logger.SetDB()` 方法，logDB 创建后调用
+- **[中等] 拦截日志降级逻辑缺陷**：查询成功但返回0条时错误降级到内存缓冲（容量仅200条）。修复：仅当 `GetEvents` 返回 error 时降级
+- **[低] pageSize 上限与前端不匹配**：前端请求 `page_size=10000`，后端限制 >1000 重置为100。修复：上限从 1000 调整为 10000
+- **[低] 管理界面端口被 Hyper-V 保留**：Windows Hyper-V 保留端口 9085-9184 包含默认端口 9090。修复：默认端口从 9090 改为 8090
+
+### 变更
+- 管理界面默认端口从 `0.0.0.0:9090` 改为 `0.0.0.0:8090`（⚠️ 破坏性变更，需更新外部端口映射）
+
 ## [1.1.7] - 2025-05-15
 
 ### 修复

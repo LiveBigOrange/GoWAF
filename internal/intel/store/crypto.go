@@ -10,7 +10,7 @@ import (
 	"os"
 	"sync"
 
-	"gowaf/internal/logger"
+	"gowaf/internal/infra/logger"
 )
 
 var (

@@ -2,8 +2,8 @@ package merger
 
 import (
 	"gowaf/internal/intel/store"
-	"gowaf/internal/logger"
-	"gowaf/internal/rules"
+	"gowaf/internal/infra/logger"
+	"gowaf/internal/domain/security/rules"
 )
 
 type IPRuleEntry struct {

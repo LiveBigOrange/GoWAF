@@ -9,7 +9,7 @@ import (
 	"gowaf/internal/intel/client"
 	"gowaf/internal/intel/merger"
 	"gowaf/internal/intel/store"
-	"gowaf/internal/logger"
+	"gowaf/internal/infra/logger"
 )
 
 type Poller struct {

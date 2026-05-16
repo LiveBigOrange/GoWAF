@@ -6,7 +6,7 @@ import (
 
 	"gowaf/internal/intel/config"
 	"gowaf/internal/intel/store"
-	"gowaf/internal/logger"
+	"gowaf/internal/infra/logger"
 )
 
 type Collector struct {

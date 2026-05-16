@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"gowaf/internal/logger"
+	"gowaf/internal/infra/logger"
 )
 
 func migrateAddColumn(db *sql.DB, table, column, definition string) {

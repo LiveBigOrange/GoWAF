@@ -5,9 +5,9 @@ import (
 	"net/http/pprof"
 
 	"gowaf/internal/backend"
-	"gowaf/internal/web"
-	"gowaf/internal/web/handler"
-	"gowaf/internal/web/middleware"
+	"gowaf/internal/domain/gateway"
+	"gowaf/internal/domain/gateway/handler"
+	"gowaf/internal/domain/gateway/middleware"
 
 	"github.com/gorilla/mux"
 )
@@ -15,7 +15,7 @@ import (
 func setupRouter(backendManager *backend.Manager) *mux.Router {
 	router := mux.NewRouter()
 
-	staticHandler := web.FileServerWithMIME(web.GetStaticFS())
+	staticHandler := gateway.FileServerWithMIME(gateway.GetStaticFS())
 	router.PathPrefix("/static/").Handler(http.StripPrefix("/static/", staticHandler))
 
 	router.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {

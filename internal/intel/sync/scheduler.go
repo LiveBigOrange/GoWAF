@@ -12,7 +12,7 @@ import (
 	"gowaf/internal/intel/license"
 	"gowaf/internal/intel/merger"
 	"gowaf/internal/intel/store"
-	"gowaf/internal/logger"
+	"gowaf/internal/infra/logger"
 )
 
 type Scheduler struct {

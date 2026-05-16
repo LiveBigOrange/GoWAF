@@ -9,9 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gowaf/internal/logger"
-	"gowaf/internal/netutil"
-	"gowaf/internal/timeutil"
+	"gowaf/internal/infra/logger"
+	"gowaf/internal/pkg/xutil"
 )
 
 const maxConcurrentChecks = 32
@@ -117,7 +116,7 @@ func (hc *HealthChecker) checkBackend(b *Backend) {
 	if err != nil {
 		host = b.Address
 	}
-	if netutil.IsPrivateIP(host) {
+	if xutil.IsPrivateIP(host) {
 		logger.Debug("[Backend] 健康检查跳过私有IP地址: %s", b.Address)
 		return
 	}
@@ -172,7 +171,7 @@ func (hc *HealthChecker) handleSuccess(b *Backend) {
 			for _, mb := range hc.manager.backends {
 				if mb.ID == b.ID {
 					mb.Healthy = true
-					mb.LastCheck = timeutil.FormatRFC3339(time.Now())
+					mb.LastCheck = xutil.FormatRFC3339(time.Now())
 					break
 				}
 			}
@@ -215,7 +214,7 @@ func (hc *HealthChecker) handleFail(b *Backend) {
 		for _, mb := range hc.manager.backends {
 			if mb.ID == b.ID {
 				mb.Healthy = false
-				mb.LastCheck = timeutil.FormatRFC3339(time.Now())
+				mb.LastCheck = xutil.FormatRFC3339(time.Now())
 				break
 			}
 		}

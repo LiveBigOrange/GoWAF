@@ -1,6 +1,6 @@
 admin:
-    addr: 127.0.0.1:9090
-    allowed_cidrs: []
+    addr: 0.0.0.0:8090
+    allowed_cidrs: ["0.0.0.0/0", "::/0"]
     admin_log: ./admin.log
     username: admin
     passwordhash: $2a$10$RfCQNqMF3iwQhK9YmaD5befGDQh0fZtQ3vfrqCC.p3/zQVZncRzzC
@@ -34,7 +34,7 @@ log:
             latency_us: false
 auth:
     username: admin
-    password: ""
+    password: "admin123."
 tls:
     cert_dir: ./certs
     acme_email: ""

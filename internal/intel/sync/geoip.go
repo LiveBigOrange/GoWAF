@@ -12,7 +12,7 @@ import (
 
 	"gowaf/internal/intel/client"
 	"gowaf/internal/intel/store"
-	"gowaf/internal/logger"
+	"gowaf/internal/infra/logger"
 )
 
 type GeoIPSyncer struct {

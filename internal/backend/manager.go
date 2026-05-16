@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gowaf/internal/timeutil"
+	"gowaf/internal/pkg/xutil"
 )
 
 // Backend 后端服务器配置
@@ -722,7 +722,7 @@ func (m *Manager) MarkHealthy(id string, healthy bool) {
 	for _, b := range m.backends {
 		if b.ID == id {
 			b.Healthy = healthy
-			b.LastCheck = timeutil.FormatRFC3339(time.Now())
+			b.LastCheck = xutil.FormatRFC3339(time.Now())
 			if healthy {
 				m.failCount[id] = 0
 				m.recoverCount[id] = 0

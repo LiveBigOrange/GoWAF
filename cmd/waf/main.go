@@ -17,17 +17,17 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
-	"gowaf/internal/acme"
+	"gowaf/internal/cert/acme"
 	"gowaf/internal/apischema"
 	"gowaf/internal/backend"
-	"gowaf/internal/bot"
-	"gowaf/internal/compliance"
-	"gowaf/internal/config"
-	"gowaf/internal/configversion"
-	"gowaf/internal/database"
-	"gowaf/internal/detector"
-	"gowaf/internal/dlprule"
-	"gowaf/internal/geoipupdater"
+	"gowaf/internal/domain/security/bot"
+	"gowaf/internal/domain/auxiliary/compliance"
+	"gowaf/internal/infra/config/config"
+	"gowaf/internal/infra/config/configversion"
+	"gowaf/internal/infra/storage/database"
+	"gowaf/internal/domain/security/detector"
+	"gowaf/internal/domain/security/dlprule"
+	"gowaf/internal/cert/geoipupdater"
 	intelalerts "gowaf/internal/intel/alerts"
 	intelclient "gowaf/internal/intel/client"
 	intelemergency "gowaf/internal/intel/emergency"
@@ -36,23 +36,23 @@ import (
 	intelstore "gowaf/internal/intel/store"
 	intelsync "gowaf/internal/intel/sync"
 	intelupload "gowaf/internal/intel/upload"
-	"gowaf/internal/limiter"
-	"gowaf/internal/logdb"
-	"gowaf/internal/logger"
-	"gowaf/internal/metrics"
-	"gowaf/internal/notify"
-	"gowaf/internal/pathbodylimit"
-	"gowaf/internal/proxy"
-	"gowaf/internal/proxyconfig"
-	"gowaf/internal/ratelimit"
-	"gowaf/internal/reqheader"
-	"gowaf/internal/respheader"
-	"gowaf/internal/rules"
-	"gowaf/internal/sessionsafe"
-	"gowaf/internal/stats"
-	"gowaf/internal/vpatch"
-	"gowaf/internal/web/handler"
-	"gowaf/internal/web/middleware"
+	"gowaf/internal/domain/security/limiter"
+	"gowaf/internal/infra/storage/logdb"
+	"gowaf/internal/infra/logger"
+	"gowaf/internal/infra/storage/metrics"
+	"gowaf/internal/infra/notify"
+	"gowaf/internal/domain/proxy/pathbodylimit"
+	"gowaf/internal/domain/proxy"
+	"gowaf/internal/domain/proxyconfig"
+	"gowaf/internal/domain/security/ratelimit"
+	"gowaf/internal/domain/auxiliary/reqheader"
+	"gowaf/internal/domain/auxiliary/respheader"
+	"gowaf/internal/domain/security/rules"
+	"gowaf/internal/domain/auxiliary/sessionsafe"
+	"gowaf/internal/infra/storage/stats"
+	"gowaf/internal/domain/security/vpatch"
+	"gowaf/internal/domain/gateway/handler"
+	"gowaf/internal/domain/gateway/middleware"
 
 	"github.com/gorilla/mux"
 )
@@ -139,6 +139,8 @@ func initConfigAndDB() (*config.Config, *database.Manager, *logdb.LogDB) {
 	}
 
 	logger.Info("正在初始化核心配置...")
+	apischema.RegisterSessionConfigInit(middleware.InitSessionConfig)
+	apischema.RegisterRateLimitConfigInit(middleware.InitRateLimitConfig)
 	config.InitCoreConfigs(cfg, configDB.GetDB())
 
 	logger.Info("正在初始化日志系统...")
@@ -151,6 +153,7 @@ func initConfigAndDB() (*config.Config, *database.Manager, *logdb.LogDB) {
 	if err != nil {
 		logger.Fatal("初始化日志数据库失败: %v", err)
 	}
+	logger.SetDB(logDB)
 
 	return cfg, configDB, logDB
 }

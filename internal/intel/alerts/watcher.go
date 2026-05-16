@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"gowaf/internal/intel/store"
-	"gowaf/internal/logger"
+	"gowaf/internal/infra/logger"
 )
 
 type Watcher struct {
