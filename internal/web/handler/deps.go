@@ -53,6 +53,7 @@ type AppDeps struct {
 	WAFProxy interface {
 		ApplyDetectorConfig(detectorType string, enabled bool)
 		ApplyObservationMode(detectorType string, observationMode bool)
+		GetDetectorManager() *detector.Manager
 		GetRateLimitKeyConfig() limiter.RateLimitKeyConfig
 		SetRateLimitKeyConfig(limiter.RateLimitKeyConfig)
 	}

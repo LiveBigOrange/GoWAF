@@ -671,10 +671,8 @@ func (m *Manager) ReloadRules(detectorType string, rules []DetectionRule) {
 				enabled: true,
 			})
 		}
-		if len(sensPatterns) > 0 {
-			m.sensitiveDetector.setPatterns(sensPatterns)
-			log.Printf("[INFO] ReloadRules: %s 已加载 %d 条规则", detectorType, len(sensPatterns))
-		}
+		m.sensitiveDetector.setPatterns(sensPatterns)
+		log.Printf("[INFO] ReloadRules: %s 已加载 %d 条规则", detectorType, len(sensPatterns))
 		return
 	}
 
@@ -692,10 +690,6 @@ func (m *Manager) ReloadRules(detectorType string, rules []DetectionRule) {
 		}
 		patterns = append(patterns, re)
 		descs = append(descs, rule.Description)
-	}
-
-	if len(patterns) == 0 {
-		return
 	}
 
 	switch detectorType {

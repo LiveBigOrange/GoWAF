@@ -170,9 +170,11 @@ func APIDetectorAddRule(w http.ResponseWriter, r *http.Request) {
 
 	if deps.DetectorManager != nil {
 		rules, rerr := deps.DetectorConfigManager.ListRules(req.DetectorType)
-		if rerr == nil {
-			deps.DetectorManager.ReloadRules(req.DetectorType, rules)
+		if rerr != nil {
+			jsonError(w, "规则热加载失败: "+rerr.Error(), http.StatusInternalServerError)
+			return
 		}
+		deps.DetectorManager.ReloadRules(req.DetectorType, rules)
 	}
 
 	jsonSuccess(w, nil)
@@ -201,9 +203,11 @@ func APIDetectorRemoveRule(w http.ResponseWriter, r *http.Request) {
 
 	if deps.DetectorManager != nil && detectorType != "" {
 		rules, rerr := deps.DetectorConfigManager.ListRules(detectorType)
-		if rerr == nil {
-			deps.DetectorManager.ReloadRules(detectorType, rules)
+		if rerr != nil {
+			jsonError(w, "规则热加载失败: "+rerr.Error(), http.StatusInternalServerError)
+			return
 		}
+		deps.DetectorManager.ReloadRules(detectorType, rules)
 	}
 
 	jsonSuccess(w, nil)
@@ -233,12 +237,16 @@ func APIDetectorToggleRule(w http.ResponseWriter, r *http.Request) {
 
 	if deps.DetectorManager != nil {
 		rule, rerr := deps.DetectorConfigManager.GetRuleByID(req.RuleID)
-		if rerr == nil {
-			rules, lerr := deps.DetectorConfigManager.ListRules(rule.DetectorType)
-			if lerr == nil {
-				deps.DetectorManager.ReloadRules(rule.DetectorType, rules)
-			}
+		if rerr != nil {
+			jsonError(w, "规则热加载失败: "+rerr.Error(), http.StatusInternalServerError)
+			return
 		}
+		rules, lerr := deps.DetectorConfigManager.ListRules(rule.DetectorType)
+		if lerr != nil {
+			jsonError(w, "规则热加载失败: "+lerr.Error(), http.StatusInternalServerError)
+			return
+		}
+		deps.DetectorManager.ReloadRules(rule.DetectorType, rules)
 	}
 
 	jsonSuccess(w, nil)

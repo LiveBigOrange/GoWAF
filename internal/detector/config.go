@@ -73,27 +73,27 @@ func (cm *ConfigManager) migrateLegacyDetectorNames() error {
 	if err != nil {
 		return fmt.Errorf("failed to check legacy detector name: %w", err)
 	}
-	if oldCount == 0 {
-		return nil
-	}
-	var newCount int
-	err = cm.db.QueryRow("SELECT COUNT(*) FROM detector_config WHERE detector_type = 'request_smuggling'").Scan(&newCount)
-	if err != nil {
-		return fmt.Errorf("failed to check new detector name: %w", err)
-	}
-	if newCount > 0 {
-		_, err = cm.db.Exec("DELETE FROM detector_config WHERE detector_type = 'request_smugging'")
+	if oldCount > 0 {
+		var newCount int
+		err = cm.db.QueryRow("SELECT COUNT(*) FROM detector_config WHERE detector_type = 'request_smuggling'").Scan(&newCount)
 		if err != nil {
-			return fmt.Errorf("failed to delete legacy detector config: %w", err)
+			return fmt.Errorf("failed to check new detector name: %w", err)
 		}
-		_, err = cm.db.Exec("DELETE FROM detection_rules WHERE detector_type = 'request_smugging'")
-	} else {
-		_, err = cm.db.Exec("UPDATE detector_config SET detector_type = 'request_smuggling' WHERE detector_type = 'request_smugging'")
-		if err != nil {
-			return fmt.Errorf("failed to migrate legacy detector name: %w", err)
+		if newCount > 0 {
+			_, err = cm.db.Exec("DELETE FROM detector_config WHERE detector_type = 'request_smugging'")
+			if err != nil {
+				return fmt.Errorf("failed to delete legacy detector config: %w", err)
+			}
+		} else {
+			_, err = cm.db.Exec("UPDATE detector_config SET detector_type = 'request_smuggling' WHERE detector_type = 'request_smugging'")
+			if err != nil {
+				return fmt.Errorf("failed to migrate legacy detector name: %w", err)
+			}
 		}
-		_, err = cm.db.Exec("UPDATE detection_rules SET detector_type = 'request_smuggling' WHERE detector_type = 'request_smugging'")
 	}
+
+	// 迁移 detection_rules 表中的错误拼写（即使 detector_config 无旧记录，detection_rules 也可能有）
+	_, err = cm.db.Exec("UPDATE detection_rules SET detector_type = 'request_smuggling' WHERE detector_type = 'request_smugging'")
 	if err != nil {
 		return fmt.Errorf("failed to migrate legacy detection rules: %w", err)
 	}
@@ -584,7 +584,7 @@ func (cm *ConfigManager) initBuiltinRules() error {
 		{`^\s*\d+\s*,\s*\d+`, "多个Content-Length值"},
 	}
 	for _, rule := range smuggingRules {
-		_, err := cm.db.Exec(`INSERT OR IGNORE INTO detection_rules (detector_type, rule_type, pattern, description) VALUES (?, 'builtin', ?, ?)`, "request_smugging", rule.pattern, rule.description)
+		_, err := cm.db.Exec(`INSERT OR IGNORE INTO detection_rules (detector_type, rule_type, pattern, description) VALUES (?, 'builtin', ?, ?)`, "request_smuggling", rule.pattern, rule.description)
 		if err != nil {
 			return err
 		}
