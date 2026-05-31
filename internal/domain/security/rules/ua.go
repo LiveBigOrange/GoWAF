@@ -9,7 +9,7 @@ import (
 // ----------------- UA 规则 -----------------
 
 func (e *Engine) buildUARules() ([]uaRule, []uaRule) {
-	rows, err := e.db.Query("SELECT rule_type, match_type, pattern FROM ua_rules WHERE enabled=1")
+	rows, err := e.db.Query("SELECT rule_type, match_type, pattern, COALESCE(source,'local') FROM ua_rules WHERE enabled=1 AND COALESCE(source,'local') != 'migrated'")
 	if err != nil {
 		return nil, nil
 	}
@@ -17,11 +17,11 @@ func (e *Engine) buildUARules() ([]uaRule, []uaRule) {
 
 	var whitelist, blacklist []uaRule
 	for rows.Next() {
-		var ruleType, matchType, pattern string
-		if err := rows.Scan(&ruleType, &matchType, &pattern); err != nil {
+		var ruleType, matchType, pattern, source string
+		if err := rows.Scan(&ruleType, &matchType, &pattern, &source); err != nil {
 			continue
 		}
-		rule := uaRule{Pattern: pattern, MatchType: matchType}
+		rule := uaRule{Pattern: pattern, MatchType: matchType, Source: source}
 		if matchType == "regex" {
 			re, err := regexp.Compile(pattern)
 			if err != nil {

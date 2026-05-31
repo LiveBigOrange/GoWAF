@@ -13,7 +13,7 @@
 <body>
     {{template "sidebar" .}}
     <div class="main">
-        <div class="card">
+        <div class="card" style="flex:1;min-height:0;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:8px;">
                 <h3>代理配置列表</h3>
                 <button class="btn btn-primary" onclick="showAddModal()">+ 添加代理</button>
@@ -23,21 +23,16 @@
                 <thead><tr><th>监听地址</th><th>协议</th><th>状态</th><th>操作</th></tr></thead>
                 <tbody id="proxyList"></tbody>
             </table>
-            <div class="pagination" id="pagination" style="display:none;">
-                <div class="pagination-info">
-                    <span id="pageInfo">第1 页 / 第1 页</span>
-                    <select class="page-size-select" id="pageSize" onchange="changePageSize()">
-                        <option value="5">5 条</option>
-                        <option value="10" selected>10 条</option>
-                        <option value="20">20 条</option>
-                        <option value="50">50 条</option>
-                    </select>
-                </div>
-                <div class="pagination-btns">
-                    <button class="pagination-btn" id="prevBtn" onclick="prevPage()">上一页</button>
-                    <button class="pagination-btn" id="nextBtn" onclick="nextPage()">下一页</button>
-                </div>
             </div>
+            <div class="pagination" id="pagination" style="display:none;">
+                <span id="pageInfo" style="color:#888;font-size:13px;white-space:nowrap;"></span>
+                <div class="pagination-btns" id="pageBtns"></div>
+                <select class="page-size-select" id="pageSize" onchange="changePageSize()">
+                    <option value="5">5 条/页</option>
+                    <option value="10" selected>10 条/页</option>
+                    <option value="20">20 条/页</option>
+                    <option value="50">50 条/页</option>
+                </select>
             </div>
         </div>
     </div>
@@ -74,6 +69,7 @@
             </div>
         </div>
     </div>
+    <script nonce="{{.CSPNonce}}" src="/static/js/log_pagination.js"></script>
     <script nonce="{{.CSPNonce}}" src="/static/js/proxyconfig_page.js"></script>
 </body>
 </html>

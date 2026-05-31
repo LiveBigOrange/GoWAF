@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"gowaf/internal/domain/security/dlprule"
 )
 
 type DetectionResult struct {
@@ -140,6 +142,11 @@ func NewManager() *Manager {
 }
 
 // SetPerfConfig 设置性能优化配置
+// SetDLPManager 注入DLP引擎引用到敏感数据检测器
+func (m *Manager) SetDLPManager(mgr *dlprule.Manager) {
+	m.sensitiveDetector.SetDLPManager(mgr)
+}
+
 func (m *Manager) SetPerfConfig(cfg PerfConfig) {
 	m.configMu.Lock()
 	defer m.configMu.Unlock()
@@ -618,6 +625,22 @@ func (m *Manager) CheckIPReputation(ip string) (bool, string) {
 		return false, ""
 	}
 	return m.ipReputation.Check(ip)
+}
+
+// CheckPathTraversal 独立执行路径遍历检测（供异步特征提取使用）
+func (m *Manager) CheckPathTraversal(path, query, body string) (bool, string, string, int, string) {
+	if m.pathDetector == nil {
+		return false, "", "", 0, ""
+	}
+	return m.pathDetector.DetectRequest("GET", path, query, body, nil)
+}
+
+// CheckSQLInjection 独立执行SQL注入检测（供异步特征提取使用）
+func (m *Manager) CheckSQLInjection(path, query, body string) (bool, string, string, int, string) {
+	if m.sqlDetector == nil {
+		return false, "", "", 0, ""
+	}
+	return m.sqlDetector.DetectRequest("GET", path, query, body, nil)
 }
 
 func (m *Manager) DetectResponse(body string, statusCode int) []DetectionResult {

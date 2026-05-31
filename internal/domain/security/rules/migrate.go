@@ -16,6 +16,7 @@ var allowedMigrateColumns = map[string]bool{
 	"category": true, "is_regex": true, "enabled": true,
 	"description": true, "match_type": true,
 	"source": true, "intel_rule_id": true, "intel_category": true,
+	"migrated_at": true,
 }
 
 func migrateColumn(db *sql.DB, table, column, definition string) {

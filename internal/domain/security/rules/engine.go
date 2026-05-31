@@ -163,6 +163,7 @@ func NewEngine(db *sql.DB) (*Engine, error) {
 	migrateColumn(db, "ua_rules", "source", "TEXT NOT NULL DEFAULT 'local'")
 	migrateColumn(db, "ua_rules", "intel_rule_id", "TEXT")
 	migrateColumn(db, "ua_rules", "intel_category", "TEXT")
+	migrateColumn(db, "ua_rules", "migrated_at", "DATETIME")
 	migrateColumn(db, "path_rules", "source", "TEXT NOT NULL DEFAULT 'local'")
 	migrateColumn(db, "path_rules", "intel_rule_id", "TEXT")
 	migrateColumn(db, "path_rules", "intel_category", "TEXT")
@@ -226,6 +227,7 @@ func NewEngine(db *sql.DB) (*Engine, error) {
 	}
 
 	e.initBuiltinRules()
+	e.MigrateUABlacklistToBot()
 
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)

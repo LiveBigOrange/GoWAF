@@ -55,7 +55,7 @@
             <div class="nav-group-items">
                 <a href="/detector" class="nav-item sub-item{{if eq .Active "detector"}} active{{end}}">攻击检测</a>
                 <a href="/bot" class="nav-item sub-item{{if eq .Active "bot"}} active{{end}}">Bot管理</a>
-                <a href="/ratelimit" class="nav-item sub-item{{if eq .Active "ratelimit"}} active{{end}}">全局限流</a>
+                <a href="/ratelimit" class="nav-item sub-item{{if eq .Active "ratelimit"}} active{{end}}" style="color:#95a5a6;text-decoration:line-through;" title="已废弃，请使用智能拦截">全局限流(已废弃)</a>
                 <a href="/notify" class="nav-item sub-item{{if eq .Active "notify"}} active{{end}}">告警通知</a>
                 <div class="nav-section-label">高级设置</div>
                 <a href="/vpatch" class="nav-item sub-item{{if eq .Active "vpatch"}} active{{end}}">虚拟补丁</a>

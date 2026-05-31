@@ -232,6 +232,11 @@ func (e *Engine) AddIPRuleWithSource(ruleType, ip, source, intelID string) error
 	return nil
 }
 
+// AddIPRuleBySource 添加IP规则（仅来源，无情报ID），满足IPRuleManager接口
+func (e *Engine) AddIPRuleBySource(ruleType, ip, source string) error {
+	return e.AddIPRuleWithSource(ruleType, ip, source, "")
+}
+
 // RemoveIPRuleByIntelID 根据IntelID删除IP规则
 func (e *Engine) RemoveIPRuleByIntelID(intelID string) {
 	e.configMu.Lock()

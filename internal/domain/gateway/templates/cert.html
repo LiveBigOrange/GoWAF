@@ -98,7 +98,7 @@
                 <span id="totalInfo" style="color:#888;font-size:13px;white-space:nowrap;"></span>
                 <div class="pagination-btns" id="pageBtns"></div>
                 <select class="page-size-select" id="pageSize" onchange="changePageSize()">
-                    <option value="10" selected>10条/页</option><option value="20">20条/页</option><option value="50">50条/页</option>
+                    <option value="10" selected>10 条/页</option><option value="20">20 条/页</option><option value="50">50 条/页</option>
                 </select>
             </div>
         </div>
@@ -247,6 +247,7 @@
         </div>
     </div>
 
+    <script src="/static/js/log_pagination.js"></script>
     <script>
 const $ = id => document.getElementById(id);
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
@@ -384,18 +385,7 @@ function renderPagination() {
     }
     $('pagination').style.display = 'flex';
     $('totalInfo').textContent = '共 ' + total + ' 条';
-
-    let btns = '';
-    btns += '<button class="btn btn-sm" onclick="goPage(' + (currentPage - 1) + ')" ' + (currentPage <= 1 ? 'disabled' : '') + '>上一页</button>';
-    for (let i = 1; i <= totalPages; i++) {
-        if (totalPages > 7 && Math.abs(i - currentPage) > 2 && i !== 1 && i !== totalPages) {
-            if (i === currentPage - 3 || i === currentPage + 3) btns += '<span style="padding:0 4px;">...</span>';
-            continue;
-        }
-        btns += '<button class="btn btn-sm ' + (i === currentPage ? 'btn-primary' : '') + '" onclick="goPage(' + i + ')">' + i + '</button>';
-    }
-    btns += '<button class="btn btn-sm" onclick="goPage(' + (currentPage + 1) + ')" ' + (currentPage >= totalPages ? 'disabled' : '') + '>下一页</button>';
-    $('pageBtns').innerHTML = btns;
+    RenderPageBtns('pageBtns', currentPage, totalPages, 'goPage');
 }
 
 function goPage(p) {

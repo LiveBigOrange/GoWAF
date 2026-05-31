@@ -14,22 +14,23 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gowaf/internal/cert/acme"
 	"gowaf/internal/backend"
+	"gowaf/internal/cert/acme"
+	"gowaf/internal/domain/auxiliary/reqheader"
+	"gowaf/internal/domain/auxiliary/respheader"
+	"gowaf/internal/domain/proxy/pathbodylimit"
+	"gowaf/internal/domain/proxyconfig"
+	"gowaf/internal/domain/security/asyncextract"
 	"gowaf/internal/domain/security/bot"
-	"gowaf/internal/infra/config/config"
 	"gowaf/internal/domain/security/detector"
 	"gowaf/internal/domain/security/dlprule"
 	"gowaf/internal/domain/security/limiter"
-	"gowaf/internal/infra/storage/metrics"
-	"gowaf/internal/infra/notify"
-	"gowaf/internal/domain/proxy/pathbodylimit"
-	"gowaf/internal/domain/proxyconfig"
 	"gowaf/internal/domain/security/ratelimit"
-	"gowaf/internal/domain/auxiliary/reqheader"
-	"gowaf/internal/domain/auxiliary/respheader"
 	"gowaf/internal/domain/security/rules"
 	"gowaf/internal/domain/security/vpatch"
+	"gowaf/internal/infra/config/config"
+	"gowaf/internal/infra/notify"
+	"gowaf/internal/infra/storage/metrics"
 
 	"gowaf/internal/apischema"
 )
@@ -56,6 +57,7 @@ type WAFProxy struct {
 	apiSchemaMgr           *apischema.Manager
 	reqHeaderMgr           *reqheader.Manager
 	acmeMgr                *acme.Manager
+	asyncExtractor         *asyncextract.AsyncFeatureExtractor
 	maxRequestBodyProvider MaxRequestBodyProvider
 	metricEventCh          chan metricEvent
 	metricStopCh           chan struct{}
@@ -164,6 +166,14 @@ func (p *WAFProxy) SetDLPRuleManager(m *dlprule.Manager) {
 // SetAPISchemaManager 设置API Schema管理器
 func (p *WAFProxy) SetAPISchemaManager(m *apischema.Manager) {
 	p.apiSchemaMgr = m
+}
+
+func (p *WAFProxy) SetAsyncExtractor(e *asyncextract.AsyncFeatureExtractor) {
+	p.asyncExtractor = e
+}
+
+func (p *WAFProxy) GetAsyncExtractor() *asyncextract.AsyncFeatureExtractor {
+	return p.asyncExtractor
 }
 
 // GetLimiter 返回限流器实例，供 Handler 层调用

@@ -7,35 +7,19 @@ import (
 
 	"gowaf/internal/domain/auxiliary/blockpage"
 	"gowaf/internal/domain/security/limiter"
-	"gowaf/internal/infra/storage/metrics"
 	"gowaf/internal/domain/security/ratelimit"
+	"gowaf/internal/infra/storage/metrics"
 )
 
-// checkRateLimits 限流检查（简单限流、路径级限流、智能限流）
+// checkRateLimits 限流检查（智能限流优先，路径级限流始终执行，简单限流仅作降级）
 func (p *WAFProxy) checkRateLimits(w http.ResponseWriter, r *http.Request, clientIP, userAgent, requestID string, getUpstream func() string, start time.Time, cachedGeoInfo *metrics.GeoIPInfo) bool {
 	smartLimitActive := false
 	if p.rateLimitEngine != nil {
 		rlc := p.rateLimitEngine.GetConfig()
 		smartLimitActive = rlc.GetEnabled()
 	}
-	if p.limiter != nil && !smartLimitActive {
-		rateLimitKey := limiter.ExtractKey(r, p.rateLimitKeyCfg)
-		if !p.limiter.Allow(rateLimitKey) {
-			p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "限流", http.StatusTooManyRequests, requestID, getUpstream(), start, r, "", "")
-			blockpage.RenderBlock(w, "rate_limit", http.StatusTooManyRequests, requestID, clientIP, "", r.Host)
-			return true
-		}
-	}
 
-	if p.ruleEngine != nil {
-		if !p.ruleEngine.CheckPathRateLimit(r.URL.Path) {
-			p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "路径限流", http.StatusTooManyRequests, requestID, getUpstream(), start, r, "", "")
-			blockpage.RenderBlock(w, "rate_limit", http.StatusTooManyRequests, requestID, clientIP, "", r.Host)
-			return true
-		}
-	}
-
-	if p.rateLimitEngine != nil {
+	if smartLimitActive {
 		reqInfo := ratelimit.RequestInfo{
 			IP:        clientIP,
 			Method:    r.Method,
@@ -107,6 +91,21 @@ func (p *WAFProxy) checkRateLimits(w http.ResponseWriter, r *http.Request, clien
 			p.rateLimitEngine.RecordFeedback(reqInfo)
 			w.Header().Set("Retry-After", "5")
 			p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "智能限流:"+decision.Reason, http.StatusTooManyRequests, requestID, getUpstream(), start, r, "", "")
+			blockpage.RenderBlock(w, "rate_limit", http.StatusTooManyRequests, requestID, clientIP, "", r.Host)
+			return true
+		}
+	} else if p.limiter != nil {
+		rateLimitKey := limiter.ExtractKey(r, p.rateLimitKeyCfg)
+		if !p.limiter.Allow(rateLimitKey) {
+			p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "限流", http.StatusTooManyRequests, requestID, getUpstream(), start, r, "", "")
+			blockpage.RenderBlock(w, "rate_limit", http.StatusTooManyRequests, requestID, clientIP, "", r.Host)
+			return true
+		}
+	}
+
+	if p.ruleEngine != nil {
+		if !p.ruleEngine.CheckPathRateLimit(r.URL.Path) {
+			p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "路径限流", http.StatusTooManyRequests, requestID, getUpstream(), start, r, "", "")
 			blockpage.RenderBlock(w, "rate_limit", http.StatusTooManyRequests, requestID, clientIP, "", r.Host)
 			return true
 		}

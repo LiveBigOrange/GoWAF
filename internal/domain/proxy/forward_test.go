@@ -279,3 +279,73 @@ func TestDetectDLPInResponse_NilRequest(t *testing.T) {
 		t.Errorf("Request为nil时不应修改响应, got %d", resp.StatusCode)
 	}
 }
+
+func TestDetectResponseBodyContent_BlockMode_MethodAndUserAgent(t *testing.T) {
+	p := newTestWAFProxy()
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/data", nil)
+	req.Header.Set("User-Agent", "TestBot/1.0")
+	ctx := context.WithValue(req.Context(), contextKeyRequestID, "test-req-id")
+	ctx = context.WithValue(ctx, contextKeyClientIP, "10.0.0.1")
+	req = req.WithContext(ctx)
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Request:    req,
+		Header:     http.Header{},
+	}
+	bodyCopy := []byte("error: mysql_connect() failed for sensitive data like password=123456")
+
+	p.detectResponseBodyContent(resp, bodyCopy)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("拦截模式不应修改响应状态码, got %d", resp.StatusCode)
+	}
+}
+
+func TestDetectSensitiveData_BlockMode_MethodAndUserAgent(t *testing.T) {
+	p := newTestWAFProxy()
+
+	req := httptest.NewRequest(http.MethodPut, "http://example.com/update", nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 TestAgent")
+	ctx := context.WithValue(req.Context(), contextKeyRequestID, "test-req-id")
+	ctx = context.WithValue(ctx, contextKeyClientIP, "192.168.1.1")
+	req = req.WithContext(ctx)
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Request:    req,
+		Header:     http.Header{},
+	}
+	bodyCopy := []byte("password=123456 and api_key=sk-abcdef1234567890")
+
+	p.detectSensitiveData(resp, bodyCopy)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("拦截模式不应修改响应状态码, got %d", resp.StatusCode)
+	}
+}
+
+func TestDetectDLPInResponse_BlockMode_MethodAndUserAgent(t *testing.T) {
+	p := newTestWAFProxy()
+	p.dlpRuleMgr = dlprule.NewManager(nil)
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/query", nil)
+	req.Header.Set("User-Agent", "DLPTestAgent/2.0")
+	ctx := context.WithValue(req.Context(), contextKeyRequestID, "test-req-id")
+	ctx = context.WithValue(ctx, contextKeyClientIP, "172.16.0.1")
+	req = req.WithContext(ctx)
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Request:    req,
+		Header:     http.Header{},
+	}
+	bodyCopy := []byte("some content with sensitive data")
+
+	p.detectDLPInResponse(resp, bodyCopy)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("无DLP匹配时不应修改响应状态码, got %d", resp.StatusCode)
+	}
+}

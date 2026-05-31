@@ -19,6 +19,8 @@ type ruleSnapshot struct {
 	allowedMethods map[string]bool
 
 	pathRateLimiters map[string]*pathLimiterEntry
+
+	pathDecoder *PathDecoder
 }
 
 // buildRuleSnapshot 从数据库构建完整规则快照
@@ -43,6 +45,7 @@ func (e *Engine) buildRuleSnapshot() *ruleSnapshot {
 		geoMode:           geoMode,
 		allowedMethods:    allowedMethods,
 		pathRateLimiters:  pathRateLimiters,
+		pathDecoder:       NewPathDecoder(true, 2),
 	}
 }
 

@@ -46,6 +46,9 @@
                     <input type="date" id="endDate" onchange="filterTable()">
                 </div>
                 <button onclick="clearFilters()">清除筛选</button>
+                <button class="auto-refresh-btn" id="autoRefreshBtn" onclick="toggleAutoRefresh()">
+                    <span class="ar-icon">⟳</span> <span id="arLabel">自动刷新</span>
+                </button>
             </div>
             <div class="list-container">
             <table class="log-table" id="detailTable">
@@ -81,21 +84,19 @@
             </div>
             </div>
             <div class="pagination" id="pagination" style="display:none;">
-                <div class="pagination-info">
-                    <span id="pageInfo">第1 页 / 第1 页</span>
-                    <select class="page-size-select" id="pageSize" onchange="changePageSize()">
-                        <option value="10" selected>10 条/页</option>
-                        <option value="20">20 条</option>
-                        <option value="50">50 条</option>
-                        <option value="100">100 条</option>
-                    </select>
-                </div>
-                <div class="pagination-btns">
-                    <button class="pagination-btn" id="prevBtn" onclick="prevPage()">上一页</button>
-                    <button class="pagination-btn" id="nextBtn" onclick="nextPage()">下一页</button>
-                </div>
+                <span id="pageInfo" style="color:#888;font-size:13px;white-space:nowrap;"></span>
+                <div class="pagination-btns" id="pageBtns"></div>
+                <select class="page-size-select" id="pageSize" onchange="changePageSize()">
+                    <option value="20">20 条/页</option>
+                    <option value="50" selected>50 条/页</option>
+                    <option value="100">100 条/页</option>
+                    <option value="200">200 条/页</option>
+                </select>
             </div>
     </div>
+    <script nonce="{{.CSPNonce}}" src="/static/js/log_autorefresh.js"></script>
+    <script nonce="{{.CSPNonce}}" src="/static/js/log_detail.js"></script>
+    <script nonce="{{.CSPNonce}}" src="/static/js/log_pagination.js"></script>
     <script nonce="{{.CSPNonce}}" src="/static/js/intercepts_table.js"></script>
     <script nonce="{{.CSPNonce}}" src="/static/js/intercepts_filter.js"></script>
 </body>

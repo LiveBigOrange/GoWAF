@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>限流配置 - GoWAF</title>
+    <title>限流配置(已废弃) - GoWAF</title>
     
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/common.css">
@@ -174,7 +174,7 @@
     <div class="main scroll-page">
         <div class="config-card" style="margin-bottom:20px">
             <div class="config-header">
-                <h2>当前配置</h2>
+                <h2 style="color:#95a5a6;">当前配置 <span style="font-size:13px;color:#e74c3c;font-weight:normal;">(已废弃)</span></h2>
                 <div>
                     <span class="status-badge" id="statusBadge">加载中...</span>
                     <button class="btn btn-primary" id="toggleBtn" style="margin-left: 10px; padding: 6px 16px; font-size: 13px;" onclick="toggleRateLimit()">启用</button>
@@ -218,7 +218,7 @@
         <div class="config-cards-row">
             <div class="config-card">
                 <div class="config-header">
-                    <h2>修改配置</h2>
+                    <h2 style="color:#95a5a6;">修改配置 <span style="font-size:13px;color:#e74c3c;font-weight:normal;">(已废弃)</span></h2>
                 </div>
                 
                 <form id="configForm">
@@ -243,7 +243,7 @@
 
             <div class="config-card">
                 <div class="config-header">
-                    <h2>限流键类型设置</h2>
+                    <h2 style="color:#95a5a6;">限流键类型设置 <span style="font-size:13px;color:#e74c3c;font-weight:normal;">(已废弃)</span></h2>
                 </div>
                 
                 <form id="keyConfigForm">
@@ -286,10 +286,48 @@
     
     <script nonce="{{.CSPNonce}}">
         (function() {
+            var isDeprecated = false;
+
+            function showDeprecatedUI() {
+                isDeprecated = true;
+                var statusBadge = document.getElementById('statusBadge');
+                statusBadge.textContent = '已废弃';
+                statusBadge.className = 'status-badge status-disabled';
+                document.getElementById('currentStatus').textContent = '已废弃';
+                document.getElementById('currentStatus').style.color = '#e74c3c';
+                document.getElementById('currentQps').textContent = '-';
+                document.getElementById('currentBurst').textContent = '-';
+                document.getElementById('currentKeyType').textContent = '-';
+                document.getElementById('toggleBtn').disabled = true;
+                document.getElementById('toggleBtn').style.opacity = '0.5';
+                document.getElementById('toggleBtn').style.cursor = 'not-allowed';
+
+                var infoBox = document.getElementById('infoBox');
+                infoBox.innerHTML = '<p><strong style="color: #e74c3c;">该功能已废弃并迁移至智能限流</strong></p>' +
+                    '<p>1. 简单限流功能已标记为 @Deprecated，API 返回 410 Gone</p>' +
+                    '<p>2. 所有配置已自动迁移至智能限流模块</p>' +
+                    '<p>3. 智能限流提供更精细的限流策略，支持动态阈值调整和自动封禁</p>' +
+                    '<p style="margin-top:10px;"><a href="/smartlimit" style="color:#409eff;font-weight:600;">前往智能限流页面 →</a></p>';
+                infoBox.style.borderLeftColor = '#e74c3c';
+
+                document.getElementById('qps').disabled = true;
+                document.getElementById('burst').disabled = true;
+                document.querySelector('#configForm .btn-primary').disabled = true;
+                document.getElementById('keyType').disabled = true;
+                document.querySelector('#keyConfigForm .btn-primary').disabled = true;
+            }
+
             function loadConfig() {
                 fetch('/api/ratelimit')
-                    .then(r => r.json())
-                    .then(resp => {
+                    .then(function(r) {
+                        if (r.status === 410) {
+                            showDeprecatedUI();
+                            return null;
+                        }
+                        return r.json();
+                    })
+                    .then(function(resp) {
+                        if (!resp) return;
                         var data = resp.data || {};
                         var statusBadge = document.getElementById('statusBadge');
                         var currentStatus = document.getElementById('currentStatus');
@@ -317,12 +355,10 @@
                             document.getElementById('burst').disabled = false;
                             document.querySelector('#configForm .btn-primary').disabled = false;
                             
-                            infoBox.innerHTML = `
-                                <p><strong style="color: #e74c3c;">⚠️ 限流功能当前未启用</strong></p>
-                                <p>1. 点击上方"启用"按钮即可启用限流功能</p>
-                                <p>2. 启用前请先配置QPS和Burst参数</p>
-                                <p>3. 启用后配置会自动保存，重启服务后仍然有效</p>
-                            `;
+                            infoBox.innerHTML = '<p><strong style="color: #e74c3c;">限流功能当前未启用</strong></p>' +
+                                '<p>1. 点击上方"启用"按钮即可启用限流功能</p>' +
+                                '<p>2. 启用前请先配置QPS和Burst参数</p>' +
+                                '<p>3. 启用后配置会自动保存，重启服务后仍然有效</p>';
                             infoBox.style.borderLeftColor = '#e74c3c';
                         }
                         
@@ -348,7 +384,7 @@
                             document.getElementById('burst').value = 200;
                         }
                     })
-                    .catch(e => {
+                    .catch(function(e) {
                         console.error('加载配置失败', e);
                         document.getElementById('statusBadge').textContent = '加载失败';
                         document.getElementById('statusBadge').className = 'status-badge status-disabled';
@@ -356,6 +392,10 @@
             }
 
             window.toggleRateLimit = function() {
+                if (isDeprecated) {
+                    showToast('error', '该功能已废弃，请使用智能限流');
+                    return;
+                }
                 var toggleBtn = document.getElementById('toggleBtn');
                 var isEnabled = toggleBtn.textContent === '禁用';
                 var newEnabled = !isEnabled;
@@ -382,8 +422,16 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ qps: qps, burst: burst, enabled: newEnabled })
                 })
-                .then(r => r.json())
-                .then(data => {
+                .then(function(r) {
+                    if (r.status === 410) {
+                        showDeprecatedUI();
+                        showToast('error', '该功能已废弃，请使用智能限流');
+                        return null;
+                    }
+                    return r.json();
+                })
+                .then(function(data) {
+                    if (!data) return;
                     if (data.success) {
                         showToast('success', '限流功能已' + action);
                         loadConfig();
@@ -391,7 +439,7 @@
                         showToast('error', '操作失败: ' + (data.error || '未知错误'));
                     }
                 })
-                .catch(e => {
+                .catch(function(e) {
                     console.error('操作失败', e);
                     showToast('error', '操作失败: ' + e.message);
                 });
@@ -399,6 +447,10 @@
 
             document.getElementById('configForm').addEventListener('submit', function(e) {
                 e.preventDefault();
+                if (isDeprecated) {
+                    showToast('error', '该功能已废弃，请使用智能限流');
+                    return;
+                }
                 
                 var qps = parseInt(document.getElementById('qps').value);
                 var burst = parseInt(document.getElementById('burst').value);
@@ -417,8 +469,16 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ qps: qps, burst: burst })
                 })
-                .then(r => r.json())
-                .then(data => {
+                .then(function(r) {
+                    if (r.status === 410) {
+                        showDeprecatedUI();
+                        showToast('error', '该功能已废弃，请使用智能限流');
+                        return null;
+                    }
+                    return r.json();
+                })
+                .then(function(data) {
+                    if (!data) return;
                     if (data.success) {
                         showToast('success', '配置保存成功');
                         loadConfig();
@@ -426,24 +486,31 @@
                         showToast('error', '保存失败: ' + (data.error || '未知错误'));
                     }
                 })
-                .catch(e => {
+                .catch(function(e) {
                     console.error('保存失败', e);
                     showToast('error', '保存失败: ' + e.message);
                 });
             });
 
             window.resetForm = function() {
-                loadConfig();
+                if (!isDeprecated) loadConfig();
             };
 
             window.resetKeyForm = function() {
-                loadKeyConfig();
+                if (!isDeprecated) loadKeyConfig();
             };
 
             function loadKeyConfig() {
                 fetch('/api/ratelimit-key')
-                    .then(r => r.json())
-                    .then(resp => {
+                    .then(function(r) {
+                        if (r.status === 410) {
+                            showDeprecatedUI();
+                            return null;
+                        }
+                        return r.json();
+                    })
+                    .then(function(resp) {
+                        if (!resp) return;
                         var data = resp.data || {};
                         document.getElementById('keyType').value = data.key_type || 'ip';
                         document.getElementById('headerName').value = data.header_name || '';
@@ -452,7 +519,7 @@
                         updateKeyTypeGroups();
                         document.getElementById('currentKeyType').textContent = displayKeyType(data.key_type || 'ip');
                     })
-                    .catch(e => {
+                    .catch(function(e) {
                         console.error('加载键类型配置失败', e);
                     });
             }
@@ -480,6 +547,10 @@
 
             document.getElementById('keyConfigForm').addEventListener('submit', function(e) {
                 e.preventDefault();
+                if (isDeprecated) {
+                    showToast('error', '该功能已废弃，请使用智能限流');
+                    return;
+                }
                 var keyType = document.getElementById('keyType').value;
                 var headerName = document.getElementById('headerName').value;
                 var cookieName = document.getElementById('cookieName').value;
@@ -495,8 +566,16 @@
                         session_key: sessionKey
                     })
                 })
-                .then(r => r.json())
-                .then(data => {
+                .then(function(r) {
+                    if (r.status === 410) {
+                        showDeprecatedUI();
+                        showToast('error', '该功能已废弃，请使用智能限流');
+                        return null;
+                    }
+                    return r.json();
+                })
+                .then(function(data) {
+                    if (!data) return;
                     if (data.success) {
                         showToast('success', '限流键类型配置已保存');
                         loadKeyConfig();
@@ -504,7 +583,7 @@
                         showToast('error', '保存失败: ' + (data.error || '未知错误'));
                     }
                 })
-                .catch(e => {
+                .catch(function(e) {
                     console.error('保存键类型配置失败', e);
                     showToast('error', '保存失败: ' + e.message);
                 });

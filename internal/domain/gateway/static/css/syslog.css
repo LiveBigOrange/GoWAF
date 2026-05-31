@@ -27,7 +27,7 @@
 .level-badge.level-error { background: #fdecea; color: #e74c3c; }
 .level-badge.level-fatal { background: #f8d7da; color: #c0392b; }
 
-.pagination { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; font-size: 13px; color: #596275; }
+.pagination { display: flex; justify-content: center; align-items: center; margin-top: auto; padding: 12px 0; font-size: 13px; color: #596275; gap: 12px; }
 .pagination-info { display: flex; align-items: center; gap: 10px; }
 .page-size-select { padding: 4px 8px; border: 1px solid #dce1e8; border-radius: 4px; font-size: 12px; background: #fff; }
 .pagination-btns { display: flex; gap: 6px; }
@@ -36,10 +36,3 @@
 .pagination-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .empty-message { text-align: center; padding: 40px; color: #95a5a6; font-size: 14px; }
-
-.auto-refresh-btn { padding: 8px 14px; border: 1px solid #dce1e8; border-radius: 4px; background: #fff; cursor: pointer; font-size: 13px; color: #596275; transition: all 0.2s; display: flex; align-items: center; gap: 4px; }
-.auto-refresh-btn:hover { border-color: #409eff; color: #409eff; }
-.auto-refresh-btn.active { background: #ecf5ff; border-color: #409eff; color: #409eff; }
-.auto-refresh-btn .ar-icon { font-size: 15px; }
-.auto-refresh-btn.active .ar-icon { animation: spin 1s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }

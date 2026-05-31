@@ -455,8 +455,11 @@
     setInterval(loadConfig, 15000);
 
     function loadRatelimitKeyConfig() {
-        fetch('/api/ratelimit-key').then(function(r){return r.json()}).then(function(resp){
-            if (!resp.success) return;
+        fetch('/api/ratelimit-key').then(function(r){
+            if (r.status === 410) return null;
+            return r.json();
+        }).then(function(resp){
+            if (!resp || !resp.success) return;
             var cfg = resp.data || {};
             var el = document.getElementById('ratelimitKeyType');
             if (el && cfg.key_type) el.value = cfg.key_type;
@@ -480,6 +483,10 @@
         fetch('/api/ratelimit-key', {
             method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify(data)
+        }).then(function(r){
+            if (r.status === 410) {
+                showToast('warning', '限流键类型配置已迁移至智能限流');
+            }
         }).catch(function(){});
     }
 

@@ -148,8 +148,7 @@
                 });
 
                 document.getElementById('pageInfo').textContent = '第' + currentPage + ' 页 / 第' + totalPages + ' 页（共' + allData.length + ' 条）';
-                document.getElementById('prevBtn').disabled = currentPage <= 1;
-                document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+                RenderPageBtns('pageBtns', currentPage, totalPages, 'goPage');
                 pagination.style.display = 'flex';
             }
 
@@ -210,8 +209,7 @@
                 }
             });
 
-            window.prevPage = function() { if (currentPage > 1) { currentPage--; renderData(); } };
-            window.nextPage = function() { var totalPages = Math.ceil(allData.length / pageSize); if (currentPage < totalPages) { currentPage++; renderData(); } };
+            window.goPage = function(p) { var total = Math.ceil(allData.length / pageSize); if (p < 1) p = 1; if (p > total) p = total; currentPage = p; renderData(); };
             window.changePageSize = function() { pageSize = parseInt(document.getElementById('pageSize').value); currentPage = 1; renderData(); };
 
             window.showAddModal = function() {

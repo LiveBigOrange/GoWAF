@@ -287,7 +287,7 @@ func (p *WAFProxy) detectResponseBodyContent(resp *http.Response, bodyCopy []byt
 
 	if len(blockResults) > 0 {
 		respAttackTypes := p.detectorManager.GetAttackTypes(blockResults)
-		p.recordBlock(clientIP, resp.Request.URL.Path, "", "", "响应异常:"+strings.Join(respAttackTypes, ","), http.StatusOK, requestID, "", time.Now(), resp.Request, "", "response")
+		p.recordBlock(clientIP, resp.Request.URL.Path, resp.Request.Method, resp.Request.Header.Get("User-Agent"), "响应异常:"+strings.Join(respAttackTypes, ","), http.StatusOK, requestID, "", time.Now(), resp.Request, "", "response")
 	}
 }
 
@@ -365,7 +365,7 @@ func (p *WAFProxy) detectSensitiveData(resp *http.Response, bodyCopy []byte) {
 			}
 		}
 		sensitiveDetail := strings.Join(sensitiveDetails, ", ")
-		p.recordBlock(clientIP, resp.Request.URL.Path, "", "", "敏感数据泄露:"+strings.Join(attackTypes, ","), http.StatusOK, requestID, "", time.Now(), resp.Request, sensitiveDetail, "body")
+		p.recordBlock(clientIP, resp.Request.URL.Path, resp.Request.Method, resp.Request.Header.Get("User-Agent"), "敏感数据泄露:"+strings.Join(attackTypes, ","), http.StatusOK, requestID, "", time.Now(), resp.Request, sensitiveDetail, "body")
 	}
 }
 
@@ -414,7 +414,7 @@ func (p *WAFProxy) detectDLPInResponse(resp *http.Response, bodyCopy []byte) {
 			SetMatchDetail(masker.MaskMatchDetail(obsDetail))
 		logger.Write(*log)
 	} else {
-		p.recordBlock(cIP, resp.Request.URL.Path, "", "", "DLP:"+strings.Join(dlpDetails, ","), http.StatusOK, requestID, "", time.Now(), resp.Request, "", "dlp")
+		p.recordBlock(cIP, resp.Request.URL.Path, resp.Request.Method, resp.Request.Header.Get("User-Agent"), "DLP:"+strings.Join(dlpDetails, ","), http.StatusOK, requestID, "", time.Now(), resp.Request, "", "dlp")
 		if hasBlock {
 			resp.StatusCode = http.StatusForbidden
 			resp.Body = io.NopCloser(strings.NewReader("Blocked by DLP policy"))

@@ -3,6 +3,8 @@ package rules
 import (
 	"fmt"
 	"regexp"
+
+	"gowaf/internal/infra/logger"
 )
 
 // ----------------- 路径规则 -----------------
@@ -65,13 +67,23 @@ func matchPath(path string, rule pathRule) bool {
 func (e *Engine) CheckPath(path string) RuleMatchResult {
 	snap := e.loadSnapshot()
 
+	decodedPath := path
+	if snap.pathDecoder != nil {
+		var decodeErr error
+		decodedPath, decodeErr = snap.pathDecoder.Decode(path)
+		if decodeErr != nil {
+			logger.Warn("路径解码失败，使用原始路径", "path", path, "err", decodeErr)
+			decodedPath = path
+		}
+	}
+
 	for _, rule := range snap.pathWhitelist {
-		if matchPath(path, rule) {
+		if matchPath(decodedPath, rule) {
 			return RuleMatchResult{}
 		}
 	}
 	for _, rule := range snap.pathBlacklist {
-		if matchPath(path, rule) {
+		if matchPath(decodedPath, rule) {
 			return RuleMatchResult{
 				Matched:   true,
 				RuleType:  "path_blacklist",

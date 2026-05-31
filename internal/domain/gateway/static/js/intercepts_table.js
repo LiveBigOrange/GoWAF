@@ -2,7 +2,7 @@
             var allData = [];
             var filteredData = [];
             var currentPage = 1;
-            var pageSize = 10;
+            var pageSize = 50;
             var currentViewMode = 'detail';
             var groupCurrentPage = 1;
             var groupPageSize = 20;
@@ -19,7 +19,7 @@
                 if (startDate) params.set('start', startDate);
                 if (endDate) params.set('end', endDate);
                 if (currentPage > 1) params.set('page', currentPage);
-                if (pageSize !== 10) params.set('size', pageSize);
+                if (pageSize !== 50) params.set('size', pageSize);
                 if (groupCurrentPage > 1) params.set('gpage', groupCurrentPage);
                 history.replaceState(null, '', '?' + params.toString());
             }
@@ -96,7 +96,7 @@
             var serverTotal = 0;
 
             function loadData() {
-                fetch('/api/intercepts?page=1&page_size=10000')
+                fetch('/api/intercepts?page=1&page_size=5000')
                     .then(r => {
                         if (!r.ok) throw new Error('HTTP ' + r.status);
                         return r.json();
@@ -251,32 +251,35 @@
                 });
 
                 document.getElementById('pageInfo').textContent = '第' + currentPage + ' 页 / 第' + totalPages + ' 页（共' + (serverTotal > filteredData.length ? serverTotal : filteredData.length) + ' 条）';
-                document.getElementById('prevBtn').disabled = currentPage <= 1;
-                document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+                RenderPageBtns('pageBtns', currentPage, totalPages, 'goPage');
                 pagination.style.display = 'flex';
             }
 
-            window.prevPage = function() { if (currentPage > 1) { currentPage--; renderData(); } };
-            window.nextPage = function() { var totalPages = Math.ceil(filteredData.length / pageSize); if (currentPage < totalPages) { currentPage++; renderData(); } };
-            window.changePageSize = function() { pageSize = parseInt(document.getElementById('pageSize').value); currentPage = 1; renderData(); };
+            window.goPage = function(p) { var total = Math.ceil((serverTotal > filteredData.length ? serverTotal : filteredData.length) / pageSize); if (p < 1) p = 1; if (p > total) p = total; currentPage = p; if (detailManager) detailManager.collapseAll(); renderData(); };
+            window.changePageSize = function() { pageSize = parseInt(document.getElementById('pageSize').value); currentPage = 1; if (detailManager) detailManager.collapseAll(); renderData(); };
 
             window.toggleDetail = function(index, e) {
                 var btn = e.target;
                 var row = btn.closest('tr');
+                var detailId = 'intercept-detail-' + index;
                 var existingDetail = row.nextElementSibling;
                 if (existingDetail && existingDetail.classList.contains('detail-row') && existingDetail.classList.contains('show')) {
                     existingDetail.remove();
                     btn.textContent = '查看详情';
+                    if (detailManager) detailManager.collapse(detailId);
                 } else {
                     var start = (currentPage - 1) * pageSize;
                     var item = filteredData[start + index];
                     if (!item) return;
                     var detailTr = document.createElement('tr');
                     detailTr.className = 'detail-row show';
+                    detailTr.setAttribute('data-detail-id', detailId);
                     var detailHtml = buildDetailHtml(item);
                     detailTr.innerHTML = '<td colspan="8"><div class="detail-content">' + detailHtml + '</div></td>';
                     row.after(detailTr);
                     btn.textContent = '收起详情';
+                    btn.setAttribute('data-detail-id', detailId);
+                    if (detailManager) detailManager.expand(detailId);
                 }
             };
 
@@ -526,4 +529,23 @@
             }
             initFilters();
             loadData();
+
+            var autoRefresh = LogAutoRefresh.create({
+                interval: 30000,
+                autoStart: false,
+                onRefresh: function() { loadData(); }
+            });
+
+            var detailManager = LogDetailManager.create({
+                autoRefresh: autoRefresh
+            });
+
+            window.toggleAutoRefresh = function() {
+                autoRefresh.toggle();
+            };
+
+            window.addEventListener('beforeunload', function() {
+                autoRefresh.destroy();
+                detailManager.destroy();
+            });
         })();

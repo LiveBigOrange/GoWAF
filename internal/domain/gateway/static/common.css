@@ -333,14 +333,14 @@ body {
 
 /* 卡片样式 */
 .card {
+    display: flex;
+    flex-direction: column;
     background: white;
     border-radius: 12px;
     padding: 24px;
     box-shadow: 0 2px 12px rgba(0,0,0,0.04);
 }
 .card.list-card {
-    display: flex;
-    flex-direction: column;
     min-height: 0;
 }
 
@@ -446,13 +446,13 @@ tbody tr:hover {
 /* 分页样式 - 固定在列表区域底部 */
 .pagination {
     display: flex;
-    justify-content: space-between;
+    justify-content: center;
     align-items: center;
-    margin-top: 12px;
+    margin-top: auto;
     padding: 10px 0;
     border-top: 1px solid #eee;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 12px;
     flex-shrink: 0;
 }
 
@@ -1163,3 +1163,11 @@ tbody tr:hover {
 /* 通用搜索框 */
 .search-input { padding: 8px 12px; border: 1px solid #dce1e8; border-radius: 6px; font-size: 13px; outline: none; transition: border-color 0.2s; }
 .search-input:focus { border-color: #409eff; box-shadow: 0 0 0 3px rgba(64,158,255,0.1); }
+
+/* 自动刷新按钮 - 公共样式 */
+.auto-refresh-btn { padding: 8px 14px; border: 1px solid #dce1e8; border-radius: 4px; background: #fff; cursor: pointer; font-size: 13px; color: #596275; transition: all 0.2s; display: inline-flex; align-items: center; gap: 4px; }
+.auto-refresh-btn:hover { border-color: #409eff; color: #409eff; }
+.auto-refresh-btn.active { background: #ecf5ff; border-color: #409eff; color: #409eff; }
+.auto-refresh-btn .ar-icon { font-size: 15px; display: inline-block; }
+.auto-refresh-btn.active .ar-icon { animation: ar-spin 1s linear infinite; }
+@keyframes ar-spin { to { transform: rotate(360deg); } }

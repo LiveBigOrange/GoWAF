@@ -22,7 +22,7 @@
 <body>
     {{template "sidebar" .}}
     <div class="main">
-        <div class="card list-card">
+        <div class="card list-card" style="flex:1;">
             <!-- 筛选栏 -->
             <div class="filter-bar">
                 <select id="filterType" class="styled-select" onchange="filterData()">
@@ -52,14 +52,15 @@
                 <tbody id="tableBody">
                 </tbody>
             </table>
+            </div>
             <div class="pagination" id="pagination" style="display:none;">
                 <span id="pageInfo" style="color:#888;font-size:13px;white-space:nowrap;"></span>
                 <div class="pagination-btns" id="pageBtns"></div>
                 <select class="page-size-select" id="pageSize" onchange="changePageSize()">
-                    <option value="5">5条/页</option>
-                    <option value="10" selected>10条/页</option>
-                    <option value="20">20条/页</option>
-                    <option value="50">50条/页</option>
+                    <option value="5">5 条/页</option>
+                    <option value="10" selected>10 条/页</option>
+                    <option value="20">20 条/页</option>
+                    <option value="50">50 条/页</option>
                 </select>
             </div>
             </div>
@@ -97,6 +98,7 @@
         </div>
     </div>
     
+    <script nonce="{{.CSPNonce}}" src="/static/js/log_pagination.js"></script>
     <script nonce="{{.CSPNonce}}">
         (function() {
             var allData = [];
@@ -316,39 +318,13 @@
                     pagination.style.display = 'none';
                 } else {
                     document.getElementById('pageInfo').textContent = '共 ' + filteredData.length + ' 条';
-                    renderPageBtns(currentPage, totalPages);
+                    RenderPageBtns('pageBtns', currentPage, totalPages, 'goPage');
                     pagination.style.display = 'flex';
                 }
             }
 
             window.goPage = function(p) { var total = Math.ceil(filteredData.length / pageSize); if (p < 1) p = 1; if (p > total) p = total; currentPage = p; renderData(); };
 
-            function renderPageBtns(cur, total) {
-                var c = document.getElementById('pageBtns');
-                var h = '';
-                if (total <= 1) { c.innerHTML = ''; return; }
-                if (total <= 5) {
-                    h += '<button class="pagination-btn" onclick="goPage(' + (cur - 1) + ')"' + (cur <= 1 ? ' disabled' : '') + '>‹</button>';
-                    for (var i = 1; i <= total; i++) {
-                        h += '<button class="pagination-btn' + (i === cur ? ' active' : '') + '" onclick="goPage(' + i + ')">' + i + '</button>';
-                    }
-                    h += '<button class="pagination-btn" onclick="goPage(' + (cur + 1) + ')"' + (cur >= total ? ' disabled' : '') + '>›</button>';
-                } else {
-                    h += '<button class="pagination-btn" onclick="goPage(1)"' + (cur <= 1 ? ' disabled' : '') + '>«</button>';
-                    h += '<button class="pagination-btn" onclick="goPage(' + (cur - 1) + ')"' + (cur <= 1 ? ' disabled' : '') + '>‹</button>';
-                    var start = Math.max(1, cur - 2);
-                    var end = Math.min(total, cur + 2);
-                    if (start > 1) { h += '<button class="pagination-btn" onclick="goPage(1)">1</button>'; if (start > 2) h += '<span style="padding:0 6px;color:#999;">...</span>'; }
-                    for (var i = start; i <= end; i++) {
-                        h += '<button class="pagination-btn' + (i === cur ? ' active' : '') + '" onclick="goPage(' + i + ')">' + i + '</button>';
-                    }
-                    if (end < total) { if (end < total - 1) h += '<span style="padding:0 6px;color:#999;">...</span>'; h += '<button class="pagination-btn" onclick="goPage(' + total + ')">' + total + '</button>'; }
-                    h += '<button class="pagination-btn" onclick="goPage(' + (cur + 1) + ')"' + (cur >= total ? ' disabled' : '') + '>›</button>';
-                    h += '<button class="pagination-btn" onclick="goPage(' + total + ')"' + (cur >= total ? ' disabled' : '') + '>»</button>';
-                }
-                c.innerHTML = h;
-            }
-            window.renderPageBtns = renderPageBtns;
             window.changePageSize = function() { pageSize = parseInt(document.getElementById('pageSize').value); currentPage = 1; renderData(); };
 
             window.addEventListener('click', function(event) {

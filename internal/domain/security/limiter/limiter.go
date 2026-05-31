@@ -23,12 +23,18 @@ type shard struct {
 	b   int
 }
 
+// IPRateLimiter 基于分片的IP限流器
+//
+// Deprecated: 请使用 ratelimit.Engine 替代。该类型将在未来版本移除。
 type IPRateLimiter struct {
 	shards   [shardCount]shard
 	enabled  atomic.Int32
 	stopChan chan struct{}
 }
 
+// NewIPRateLimiter 创建IP限流器
+//
+// Deprecated: 请使用 ratelimit.Engine 替代。该构造函数将在未来版本移除。
 func NewIPRateLimiter(r rate.Limit, b int) *IPRateLimiter {
 	i := &IPRateLimiter{
 		stopChan: make(chan struct{}),
@@ -153,4 +159,9 @@ func (i *IPRateLimiter) CleanupWithIdle(interval time.Duration, idleSeconds int6
 
 func (i *IPRateLimiter) Stop() {
 	close(i.stopChan)
+}
+
+// IsDeprecated 标记该限流器已废弃
+func (i *IPRateLimiter) IsDeprecated() bool {
+	return true
 }

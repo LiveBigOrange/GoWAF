@@ -3,7 +3,6 @@
     var allLines = [];
     var filteredLines = [];
     var autoRefreshEnabled = true;
-    var autoRefreshTimer = null;
     var pageSize = 50;
     var currentPage = 1;
 
@@ -65,6 +64,15 @@
         renderLogs();
     }
 
+    function applyFilterSilent() {
+        var keyword = (document.getElementById('searchKeyword').value || '').toLowerCase();
+        filteredLines = allLines;
+        if (keyword) {
+            filteredLines = filteredLines.filter(function(l) { return l.toLowerCase().indexOf(keyword) >= 0; });
+        }
+        renderLogs();
+    }
+
     function renderLogs() {
         var tbody = document.getElementById('logBody');
         if (!tbody) return;
@@ -88,19 +96,22 @@
             tbody.innerHTML = html;
         }
         document.getElementById('pageInfo').textContent = '第 ' + currentPage + ' 页 / 第 ' + totalPages + ' 页（共 ' + filteredLines.length + ' 条）';
-        document.getElementById('prevBtn').disabled = currentPage <= 1;
-        document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+        RenderPageBtns('pageBtns', currentPage, totalPages, 'goPage');
     }
 
-    window.loadLogs = function() {
+    window.loadLogs = function(silent) {
         fetch('/api/syslog/list?limit=5000&level=' + currentLevel)
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 if (data.success) {
                     allLines = (data.data || []).reverse();
-                    filteredLines = allLines;
                     updateStats();
-                    applyFilter();
+                    if (silent) {
+                        applyFilterSilent();
+                    } else {
+                        filteredLines = allLines;
+                        applyFilter();
+                    }
                 }
             })
             .catch(function(err) { console.error('加载系统日志失败:', err); });
@@ -115,13 +126,12 @@
         applyFilter();
     };
 
-    window.prevPage = function() {
-        if (currentPage > 1) { currentPage--; renderLogs(); }
-    };
-
-    window.nextPage = function() {
-        var totalPages = Math.max(1, Math.ceil(filteredLines.length / pageSize));
-        if (currentPage < totalPages) { currentPage++; renderLogs(); }
+    window.goPage = function(p) {
+        var total = Math.max(1, Math.ceil(filteredLines.length / pageSize));
+        if (p < 1) p = 1;
+        if (p > total) p = total;
+        currentPage = p;
+        renderLogs();
     };
 
     window.changePageSize = function() {
@@ -130,30 +140,19 @@
         renderLogs();
     };
 
+    var autoRefresh = LogAutoRefresh.create({
+        interval: 5000,
+        autoStart: true,
+        onRefresh: function() { loadLogs(true); }
+    });
+
     window.toggleAutoRefresh = function() {
-        autoRefreshEnabled = !autoRefreshEnabled;
-        var btn = document.getElementById('autoRefreshBtn');
-        var label = document.getElementById('arLabel');
-        if (autoRefreshEnabled) {
-            btn.classList.add('active');
-            label.textContent = '自动刷新 5s';
-            startAutoRefresh();
-        } else {
-            btn.classList.remove('active');
-            label.textContent = '已暂停';
-            stopAutoRefresh();
-        }
+        autoRefresh.toggle();
     };
 
-    function startAutoRefresh() {
-        stopAutoRefresh();
-        autoRefreshTimer = setInterval(function() { loadLogs(); }, 5000);
-    }
-
-    function stopAutoRefresh() {
-        if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
-    }
-
     loadLogs();
-    startAutoRefresh();
+
+    window.addEventListener('beforeunload', function() {
+        autoRefresh.destroy();
+    });
 })();

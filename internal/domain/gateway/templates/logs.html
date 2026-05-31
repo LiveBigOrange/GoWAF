@@ -37,12 +37,6 @@
         
         <!-- 筛选栏 -->
         <div class="filter-bar">
-            <select id="loadLimit" onchange="loadLogs()">
-                <option value="500">加载 500 条</option>
-                <option value="1000" selected>加载 1000 条</option>
-                <option value="2000">加载 2000 条</option>
-                <option value="5000">加载 5000 条</option>
-            </select>
             <select id="filterMethod" onchange="applyFilters()">
                 <option value="">所有方法</option>
                 <option value="GET">GET</option>
@@ -78,6 +72,9 @@
             <input type="text" id="filterPath" placeholder="筛选路径" oninput="applyFilters()" style="width: 200px; max-width: 100%;">
             <button class="btn btn-primary" onclick="loadLogs()" style="padding: 8px 16px; background: #409eff; color: white; border: none; border-radius: 4px; cursor: pointer;">刷新</button>
             <button class="btn" onclick="exportLogs()" style="padding: 8px 16px; background: #67c23a; color: white; border: none; border-radius: 4px; cursor: pointer;">导出</button>
+            <button class="auto-refresh-btn active" id="autoRefreshBtn" onclick="toggleAutoRefresh()">
+                <span class="ar-icon">⟳</span> <span id="arLabel">自动刷新 30s</span>
+            </button>
             <div class="view-mode-group" id="viewModeGroup">
                 <button class="view-mode-btn active" data-mode="detail" onclick="switchViewMode('detail')">明细视图</button>
                 <button class="view-mode-btn" data-mode="ip" onclick="switchViewMode('ip')">按IP</button>
@@ -126,22 +123,20 @@
         
         <!-- 分页 -->
         <div class="pagination" id="pagination" style="display:none;">
-            <div class="pagination-info">
-                <span id="pageInfo">第1 页 / 第1 页</span>
-                <select class="page-size-select" id="pageSize" onchange="changePageSize()">
-                    <option value="20">20 条</option>
-                    <option value="50" selected>50 条/页</option>
-                    <option value="100">100 条</option>
-                    <option value="200">200 条</option>
-                </select>
-            </div>
-            <div class="pagination-btns">
-                <button class="pagination-btn" id="prevBtn" onclick="prevPage()">上一页</button>
-                <button class="pagination-btn" id="nextBtn" onclick="nextPage()">下一页</button>
-            </div>
+            <span id="pageInfo" style="color:#888;font-size:13px;white-space:nowrap;"></span>
+            <div class="pagination-btns" id="pageBtns"></div>
+            <select class="page-size-select" id="pageSize" onchange="changePageSize()">
+                <option value="20">20 条/页</option>
+                <option value="50" selected>50 条/页</option>
+                <option value="100">100 条/页</option>
+                <option value="200">200 条/页</option>
+            </select>
         </div>
     </div>
     
+    <script nonce="{{.CSPNonce}}" src="/static/js/log_autorefresh.js"></script>
+    <script nonce="{{.CSPNonce}}" src="/static/js/log_detail.js"></script>
+    <script nonce="{{.CSPNonce}}" src="/static/js/log_pagination.js"></script>
     <script nonce="{{.CSPNonce}}" src="/static/js/logs_table.js"></script>
     <script nonce="{{.CSPNonce}}" src="/static/js/logs_export.js"></script>
 </body>

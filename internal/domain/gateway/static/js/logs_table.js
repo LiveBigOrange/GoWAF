@@ -84,8 +84,7 @@
             }
             
             window.loadLogs = function() {
-                var limit = document.getElementById('loadLimit').value;
-                fetch('/api/logs/list?limit=' + limit)
+                fetch('/api/logs/list?limit=5000')
                     .then(r => r.json())
                     .then(data => {
                         if (!data.success) {
@@ -138,6 +137,7 @@
 
                 if (!urlRestored) currentPage = 1;
                 urlRestored = false;
+                detailManager.collapseAll();
                 renderLogs();
                 syncURL();
             }
@@ -212,31 +212,25 @@
                 });
 
                 document.getElementById('pageInfo').textContent = '第' + currentPage + ' 页 / 第' + totalPages + ' 页（共' + filteredLogs.length + ' 条）';
-                document.getElementById('prevBtn').disabled = currentPage <= 1;
-                document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+                RenderPageBtns('pageBtns', currentPage, totalPages, 'goPage');
                 pagination.style.display = 'flex';
+                restoreExpandedDetails();
             }
             
-            window.prevPage = function() {
-                if (currentPage > 1) {
-                    currentPage--;
-                    renderLogs();
-                    syncURL();
-                }
-            };
-            
-            window.nextPage = function() {
-                var totalPages = Math.ceil(filteredLogs.length / pageSize);
-                if (currentPage < totalPages) {
-                    currentPage++;
-                    renderLogs();
-                    syncURL();
-                }
+            window.goPage = function(p) {
+                var total = Math.ceil(filteredLogs.length / pageSize);
+                if (p < 1) p = 1;
+                if (p > total) p = total;
+                currentPage = p;
+                detailManager.collapseAll();
+                renderLogs();
+                syncURL();
             };
             
             window.changePageSize = function() {
                 pageSize = parseInt(document.getElementById('pageSize').value);
                 currentPage = 1;
+                detailManager.collapseAll();
                 renderLogs();
                 syncURL();
             };
@@ -255,21 +249,52 @@
             window.toggleDetail = function(index, e) {
                 var btn = e.target;
                 var row = btn.closest('tr');
+                var detailId = 'log-detail-' + index;
                 var existingDetail = row.nextElementSibling;
                 if (existingDetail && existingDetail.classList.contains('detail-row') && existingDetail.classList.contains('show')) {
                     existingDetail.remove();
                     btn.textContent = '查看详情';
+                    detailManager.collapse(detailId);
                 } else {
                     var start = (currentPage - 1) * pageSize;
                     var log = filteredLogs[start + index];
                     if (!log) return;
                     var detailTr = document.createElement('tr');
                     detailTr.className = 'detail-row show';
+                    detailTr.setAttribute('data-detail-id', detailId);
                     detailTr.innerHTML = '<td colspan="10"><div class="detail-content">' + buildLogDetailHtml(log) + '</div></td>';
                     row.after(detailTr);
                     btn.textContent = '收起详情';
+                    btn.setAttribute('data-detail-id', detailId);
+                    detailManager.expand(detailId);
                 }
             };
+
+            function restoreExpandedDetails() {
+                var expandedIds = detailManager.getExpandedIds();
+                if (expandedIds.size === 0) return;
+                expandedIds.forEach(function(detailId) {
+                    var indexStr = detailId.replace('log-detail-', '');
+                    var index = parseInt(indexStr);
+                    if (isNaN(index)) return;
+                    var start = (currentPage - 1) * pageSize;
+                    var log = filteredLogs[start + index];
+                    if (!log) { detailManager.collapse(detailId); return; }
+                    var rows = document.getElementById('logBody').children;
+                    if (index >= rows.length) return;
+                    var row = rows[index];
+                    var btn = row.querySelector('.view-btn');
+                    var detailTr = document.createElement('tr');
+                    detailTr.className = 'detail-row show';
+                    detailTr.setAttribute('data-detail-id', detailId);
+                    detailTr.innerHTML = '<td colspan="10"><div class="detail-content">' + buildLogDetailHtml(log) + '</div></td>';
+                    row.after(detailTr);
+                    if (btn) {
+                        btn.textContent = '收起详情';
+                        btn.setAttribute('data-detail-id', detailId);
+                    }
+                });
+            }
 
             function buildLogDetailHtml(log) {
                 var statusClass = 'success';
@@ -524,7 +549,22 @@
             }
             loadLogs();
             
-            // 每30秒自动刷新
-            var refreshTimer = setInterval(loadLogs, 30000);
-            window.addEventListener('beforeunload', function() { clearInterval(refreshTimer); });
+            var autoRefresh = LogAutoRefresh.create({
+                interval: 30000,
+                autoStart: true,
+                onRefresh: function() { loadLogs(); }
+            });
+
+            var detailManager = LogDetailManager.create({
+                autoRefresh: autoRefresh
+            });
+
+            window.toggleAutoRefresh = function() {
+                autoRefresh.toggle();
+            };
+
+            window.addEventListener('beforeunload', function() {
+                autoRefresh.destroy();
+                detailManager.destroy();
+            });
         })();

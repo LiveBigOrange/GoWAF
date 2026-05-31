@@ -530,21 +530,19 @@
             paginationEl.style.display = "";
             var totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
             $("pageInfo").textContent = "\u7b2c" + currentPage + "\u9875 / \u7b2c" + totalPages + "\u9875\uff08\u5171" + filtered.length + "\u6761\uff09";
-            $("prevBtn").disabled = currentPage <= 1;
-            $("nextBtn").disabled = currentPage >= totalPages;
+            RenderPageBtns('pageBtns', currentPage, totalPages, 'goPage');
         }
     }
 
     // ========== Pagination ==========
 
-    window.prevPage = function () {
-        if (currentPage > 1) { currentPage--; renderData(); }
-    };
-
-    window.nextPage = function () {
+    window.goPage = function (p) {
         var filtered = getFilteredBackends();
-        var totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-        if (currentPage < totalPages) { currentPage++; renderData(); }
+        var total = Math.max(1, Math.ceil(filtered.length / pageSize));
+        if (p < 1) p = 1;
+        if (p > total) p = total;
+        currentPage = p;
+        renderData();
     };
 
     window.changePageSize = function () {

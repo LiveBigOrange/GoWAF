@@ -34,7 +34,7 @@
                     <span></span>
                     <button class="btn btn-primary" onclick="openModal()">+ 添加后端</button>
                 </div>
-                <div class="card">
+                <div class="card" style="flex:1;min-height:0;">
                     <div class="list-container">
                         <table>
                             <thead>
@@ -42,21 +42,16 @@
                             </thead>
                             <tbody id="tableBody"></tbody>
                         </table>
-                        <div class="pagination" id="pagination">
-                            <div class="pagination-info">
-                                <span id="pageInfo">第1 页 / 第1 页</span>
-                                <select class="page-size-select" id="pageSize" onchange="changePageSize()">
-                                    <option value="5">5 条</option>
-                                    <option value="10" selected>10 条</option>
-                                    <option value="20">20 条</option>
-                                    <option value="50">50 条</option>
-                                </select>
-                            </div>
-                            <div class="pagination-btns">
-                                <button class="pagination-btn" id="prevBtn" onclick="prevPage()">上一页</button>
-                                <button class="pagination-btn" id="nextBtn" onclick="nextPage()">下一页</button>
-                            </div>
-                        </div>
+                    </div>
+                    <div class="pagination" id="pagination">
+                        <span id="pageInfo" style="color:#888;font-size:13px;white-space:nowrap;"></span>
+                        <div class="pagination-btns" id="pageBtns"></div>
+                        <select class="page-size-select" id="pageSize" onchange="changePageSize()">
+                            <option value="5">5 条/页</option>
+                            <option value="10" selected>10 条/页</option>
+                            <option value="20">20 条/页</option>
+                            <option value="50">50 条/页</option>
+                        </select>
                     </div>
                 </div>
             </div>
@@ -199,6 +194,7 @@
         </div>
     </div>
 
+    <script nonce="{{.CSPNonce}}" src="/static/js/log_pagination.js"></script>
     <script nonce="{{.CSPNonce}}" src="/static/js/backend.js"></script>
 </body>
 </html>
