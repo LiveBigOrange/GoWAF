@@ -21,6 +21,7 @@ const (
 	contextKeyOriginalScheme  contextKey = "original_scheme"
 	contextKeyClientIP        contextKey = "client_ip"
 	contextKeyBody            contextKey = "body_bytes"
+	contextKeyBodyOriginalLen contextKey = "body_original_len"
 	contextKeySelectedBackend contextKey = "selected_backend"
 )
 
@@ -31,19 +32,25 @@ var bodyBufPool = sync.Pool{
 // readRequestBody 读取请求体并缓存到context中，避免重复读取。
 // 如果context中已有缓存则直接返回；否则从r.Body读取(限制maxBytes)，
 // 重放r.Body，并将结果存入context。返回读取的字节和是否超限。
+// 超限时r.ContentLength保留原始值，通过contextKeyBodyOriginalLen可获取原始大小。
 func readRequestBody(r *http.Request, maxBytes int64) ([]byte, bool, *http.Request) {
 	if cachedBody, ok := r.Context().Value(contextKeyBody).([]byte); ok {
-		return cachedBody, false, r
+		overLimit := int64(len(cachedBody)) > maxBytes
+		return cachedBody, overLimit, r
 	}
 	if r.Body == nil {
 		return nil, false, r
 	}
+	originalContentLength := r.ContentLength
 	buf := bodyBufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer bodyBufPool.Put(buf)
 
 	_, err := io.CopyN(buf, r.Body, maxBytes+1)
 	if err != nil && err != io.EOF {
+		r.Body.Close()
+		r.Body = io.NopCloser(bytes.NewReader(nil))
+		r.ContentLength = 0
 		return nil, false, r
 	}
 	bodyBytes := buf.Bytes()
@@ -51,8 +58,13 @@ func readRequestBody(r *http.Request, maxBytes int64) ([]byte, bool, *http.Reque
 	bodyCopy := make([]byte, len(bodyBytes))
 	copy(bodyCopy, bodyBytes)
 	r.Body = io.NopCloser(bytes.NewReader(bodyCopy))
-	r.ContentLength = int64(len(bodyCopy))
+	if overLimit {
+		r.ContentLength = originalContentLength
+	} else {
+		r.ContentLength = int64(len(bodyCopy))
+	}
 	ctx := context.WithValue(r.Context(), contextKeyBody, bodyCopy)
+	ctx = context.WithValue(ctx, contextKeyBodyOriginalLen, originalContentLength)
 	r = r.WithContext(ctx)
 	return bodyCopy, overLimit, r
 }

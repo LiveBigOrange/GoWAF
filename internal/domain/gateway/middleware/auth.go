@@ -453,8 +453,12 @@ func verifyCSRFSessionBinding(sessionToken, csrfToken string) bool {
 
 var maxRequestBody int64 = 0
 
-func SetMaxRequestBody(maxBytes int) {
-	atomic.StoreInt64(&maxRequestBody, int64(maxBytes))
+func SetMaxRequestBody(maxMB int) {
+	if maxMB <= 0 {
+		atomic.StoreInt64(&maxRequestBody, 0)
+		return
+	}
+	atomic.StoreInt64(&maxRequestBody, int64(maxMB)*1024*1024)
 }
 
 func GetMaxRequestBody() int64 {

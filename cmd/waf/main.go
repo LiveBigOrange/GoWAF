@@ -17,17 +17,35 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
-	"gowaf/internal/cert/acme"
 	"gowaf/internal/apischema"
 	"gowaf/internal/backend"
-	"gowaf/internal/domain/security/bot"
+	"gowaf/internal/cert/acme"
+	"gowaf/internal/cert/geoipupdater"
 	"gowaf/internal/domain/auxiliary/compliance"
-	"gowaf/internal/infra/config/config"
-	"gowaf/internal/infra/config/configversion"
-	"gowaf/internal/infra/storage/database"
+	"gowaf/internal/domain/auxiliary/reqheader"
+	"gowaf/internal/domain/auxiliary/respheader"
+	"gowaf/internal/domain/auxiliary/sessionsafe"
+	"gowaf/internal/domain/gateway/handler"
+	"gowaf/internal/domain/gateway/middleware"
+	"gowaf/internal/domain/proxy"
+	"gowaf/internal/domain/proxy/pathbodylimit"
+	"gowaf/internal/domain/proxyconfig"
+	"gowaf/internal/domain/security/asyncextract"
+	"gowaf/internal/domain/security/bot"
 	"gowaf/internal/domain/security/detector"
 	"gowaf/internal/domain/security/dlprule"
-	"gowaf/internal/cert/geoipupdater"
+	"gowaf/internal/domain/security/limiter"
+	"gowaf/internal/domain/security/ratelimit"
+	"gowaf/internal/domain/security/rules"
+	"gowaf/internal/domain/security/vpatch"
+	"gowaf/internal/infra/config/config"
+	"gowaf/internal/infra/config/configversion"
+	"gowaf/internal/infra/logger"
+	"gowaf/internal/infra/notify"
+	"gowaf/internal/infra/storage/database"
+	"gowaf/internal/infra/storage/logdb"
+	"gowaf/internal/infra/storage/metrics"
+	"gowaf/internal/infra/storage/stats"
 	intelalerts "gowaf/internal/intel/alerts"
 	intelclient "gowaf/internal/intel/client"
 	intelemergency "gowaf/internal/intel/emergency"
@@ -36,23 +54,6 @@ import (
 	intelstore "gowaf/internal/intel/store"
 	intelsync "gowaf/internal/intel/sync"
 	intelupload "gowaf/internal/intel/upload"
-	"gowaf/internal/domain/security/limiter"
-	"gowaf/internal/infra/storage/logdb"
-	"gowaf/internal/infra/logger"
-	"gowaf/internal/infra/storage/metrics"
-	"gowaf/internal/infra/notify"
-	"gowaf/internal/domain/proxy/pathbodylimit"
-	"gowaf/internal/domain/proxy"
-	"gowaf/internal/domain/proxyconfig"
-	"gowaf/internal/domain/security/ratelimit"
-	"gowaf/internal/domain/auxiliary/reqheader"
-	"gowaf/internal/domain/auxiliary/respheader"
-	"gowaf/internal/domain/security/rules"
-	"gowaf/internal/domain/auxiliary/sessionsafe"
-	"gowaf/internal/infra/storage/stats"
-	"gowaf/internal/domain/security/vpatch"
-	"gowaf/internal/domain/gateway/handler"
-	"gowaf/internal/domain/gateway/middleware"
 
 	"github.com/gorilla/mux"
 )
@@ -96,6 +97,7 @@ func main() {
 }
 
 type coreManagers struct {
+	configDB              *database.Manager
 	ruleEngine            *rules.Engine
 	backendManager        *backend.Manager
 	metricsManager        *metrics.Manager
@@ -222,6 +224,7 @@ func initCoreManagers(cfg *config.Config, configDB *database.Manager) *coreManag
 	}
 
 	return &coreManagers{
+		configDB:              configDB,
 		ruleEngine:            ruleEngine,
 		backendManager:        backendManager,
 		metricsManager:        metricsManager,
@@ -476,8 +479,11 @@ func initProxyService(cfg *config.Config, configDB *database.Manager, core *core
 	rateLimitEngine := ratelimit.NewEngine(rateLimitCfg)
 	wafProxy.SetRateLimitEngine(rateLimitEngine)
 
-	autoBlocker := ratelimit.NewAutoBlocker(core.ruleEngine, rateLimitCfg.AutoBlockThreshold, time.Duration(rateLimitCfg.AutoBlockDurationSec)*time.Second)
+	autoBlocker := ratelimit.NewAutoBlocker(core.ruleEngine, rateLimitCfg.AutoBlockThreshold, time.Duration(rateLimitCfg.AutoBlockDurationSec)*time.Second, configDB.GetDB())
 	rateLimitEngine.SetAutoBlocker(autoBlocker)
+	if err := autoBlocker.RecoverFromDB(); err != nil {
+		logger.Warn("autoblock状态恢复失败", "err", err)
+	}
 
 	go func() {
 		ticker := time.NewTicker(rateLimitCfg.CleanupInterval())
@@ -510,6 +516,15 @@ func initProxyService(cfg *config.Config, configDB *database.Manager, core *core
 		wafProxy.GetDetectorManager().LoadAllRulesFromDB(core.detectorConfigManager)
 		logger.Info("已从数据库加载检测器规则到内存")
 	}
+
+	if wafProxy.GetDetectorManager() != nil && sec.dlpRuleMgr != nil {
+		wafProxy.GetDetectorManager().SetDLPManager(sec.dlpRuleMgr)
+		logger.Info("已注入DLP引擎到敏感数据检测器")
+	}
+
+	asyncExtractor := asyncextract.NewAsyncFeatureExtractor(wafProxy.GetDetectorManager(), logDB.GetDB(), 4, 1024)
+	asyncExtractor.Start()
+	wafProxy.SetAsyncExtractor(asyncExtractor)
 
 	if err := proxyServerManager.StartAll(); err != nil {
 		logger.Warn("启动代理服务失败: %v", err)
@@ -706,6 +721,8 @@ func startAdminServer(cfg *config.Config, router *mux.Router, core *coreManagers
 				sec.vpatchMgr.Reload()
 				sec.botMgr.Reload()
 				sec.sessionSafeMgr.Reload()
+				_, _, _, maxReqBody, _ := config.GetPerformanceConfig(core.configDB.GetDB())
+				middleware.SetMaxRequestBody(maxReqBody)
 				if core.detectorConfigManager != nil {
 					if configs, err := core.detectorConfigManager.ListConfigs(); err == nil {
 						for _, dcfg := range configs {
@@ -724,6 +741,9 @@ func startAdminServer(cfg *config.Config, router *mux.Router, core *coreManagers
 			}
 			cancel()
 			proxyCtx.proxyServerManager.ShutdownAll()
+			if ae := proxyCtx.wafProxy.GetAsyncExtractor(); ae != nil {
+				ae.Stop()
+			}
 			logger.Info("所有服务已关闭")
 			return
 		}

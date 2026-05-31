@@ -8,12 +8,13 @@ import (
 	"time"
 
 	"gowaf/internal/domain/auxiliary/blockpage"
+	"gowaf/internal/domain/auxiliary/masker"
+	"gowaf/internal/domain/security/asyncextract"
 	"gowaf/internal/domain/security/bot"
 	"gowaf/internal/domain/security/detector"
-	"gowaf/internal/infra/logger"
-	"gowaf/internal/domain/auxiliary/masker"
-	"gowaf/internal/infra/storage/metrics"
 	"gowaf/internal/domain/security/ratelimit"
+	"gowaf/internal/infra/logger"
+	"gowaf/internal/infra/storage/metrics"
 	"gowaf/internal/infra/storage/stats"
 )
 
@@ -207,6 +208,7 @@ func (p *WAFProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // checkPreDetectionRules 执行检测前的规则检查（IP/Geo/Method/Path/UA/Bot）
 func (p *WAFProxy) checkPreDetectionRules(w http.ResponseWriter, r *http.Request, clientIP, userAgent, requestID string, getUpstream func() string, start time.Time, cachedGeoInfo *metrics.GeoIPInfo) bool {
 	if ipResult := p.ruleEngine.IsIPBlocked(clientIP); ipResult.Matched {
+		p.submitAsyncExtract(requestID, clientIP, r, "ip_blacklist")
 		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "IP黑名单", http.StatusForbidden, requestID, getUpstream(), start, r, ipResult.Detail, "ip")
 		blockpage.RenderBlock(w, "ip_blocked", http.StatusForbidden, requestID, clientIP, ipResult.Detail, r.Host)
 		return true
@@ -214,6 +216,7 @@ func (p *WAFProxy) checkPreDetectionRules(w http.ResponseWriter, r *http.Request
 
 	if p.detectorManager != nil {
 		if isBad, reason := p.detectorManager.CheckIPReputation(clientIP); isBad {
+			p.submitAsyncExtract(requestID, clientIP, r, "ip_reputation")
 			p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "IP信誉:"+reason, http.StatusForbidden, requestID, getUpstream(), start, r, reason, "ip_reputation")
 			blockpage.RenderBlock(w, "ip_reputation", http.StatusForbidden, requestID, clientIP, reason, r.Host)
 			return true
@@ -223,6 +226,7 @@ func (p *WAFProxy) checkPreDetectionRules(w http.ResponseWriter, r *http.Request
 	if cachedGeoInfo != nil {
 		if cachedGeoInfo.CountryISO != "" {
 			if geoResult := p.ruleEngine.IsGeoBlocked(cachedGeoInfo.CountryISO); geoResult.Matched {
+				p.submitAsyncExtract(requestID, clientIP, r, "geo_blocked")
 				p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "GeoIP阻断:"+cachedGeoInfo.CountryISO, http.StatusForbidden, requestID, getUpstream(), start, r, geoResult.Detail, "geo")
 				blockpage.RenderBlock(w, "geo_blocked", http.StatusForbidden, requestID, clientIP, geoResult.Detail, r.Host)
 				return true
@@ -231,20 +235,16 @@ func (p *WAFProxy) checkPreDetectionRules(w http.ResponseWriter, r *http.Request
 	}
 
 	if methodResult := p.ruleEngine.IsMethodAllowed(r.Method); methodResult.Matched {
+		p.submitAsyncExtract(requestID, clientIP, r, "method_blocked")
 		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "HTTP方法限制", http.StatusMethodNotAllowed, requestID, getUpstream(), start, r, methodResult.Detail, "method")
 		blockpage.RenderBlock(w, "method_blocked", http.StatusMethodNotAllowed, requestID, clientIP, methodResult.Detail, r.Host)
 		return true
 	}
 
 	if pathResult := p.ruleEngine.CheckPath(r.URL.Path); pathResult.Matched {
+		p.submitAsyncExtract(requestID, clientIP, r, "path_blacklist")
 		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "路径黑名单", http.StatusForbidden, requestID, getUpstream(), start, r, pathResult.Detail, "path")
 		blockpage.RenderBlock(w, "path_blocked", http.StatusForbidden, requestID, clientIP, pathResult.Detail, r.Host)
-		return true
-	}
-
-	if uaResult := p.ruleEngine.CheckUA(userAgent); uaResult.Matched {
-		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "UA黑名单", http.StatusForbidden, requestID, getUpstream(), start, r, uaResult.Detail, "ua")
-		blockpage.RenderBlock(w, "ua_blocked", http.StatusForbidden, requestID, clientIP, uaResult.Detail, r.Host)
 		return true
 	}
 
@@ -255,10 +255,18 @@ func (p *WAFProxy) checkPreDetectionRules(w http.ResponseWriter, r *http.Request
 		botResult := p.botManager.Classify(userAgent, hasCookies, hasReferer, hasAcceptLang)
 		bot.RecordClassification(botResult)
 		if p.botManager.ShouldBlock(botResult) {
+			p.submitAsyncExtract(requestID, clientIP, r, "bot_malicious")
 			p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "Bot拦截:"+botResult.Name, http.StatusForbidden, requestID, getUpstream(), start, r, botResult.Reason, "bot")
 			blockpage.RenderBlock(w, "bot_blocked", http.StatusForbidden, requestID, clientIP, botResult.Reason, r.Host)
 			return true
 		}
+	}
+
+	if uaResult := p.ruleEngine.CheckUA(userAgent); uaResult.Matched {
+		p.submitAsyncExtract(requestID, clientIP, r, "ua_blacklist")
+		p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "UA黑名单", http.StatusForbidden, requestID, getUpstream(), start, r, uaResult.Detail, "ua")
+		blockpage.RenderBlock(w, "ua_blocked", http.StatusForbidden, requestID, clientIP, uaResult.Detail, r.Host)
+		return true
 	}
 
 	return false
@@ -272,9 +280,22 @@ func (p *WAFProxy) checkAPISchema(w http.ResponseWriter, r *http.Request, client
 	var schemaBody []byte
 	if r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH" {
 		var overLimit bool
-		schemaBody, overLimit, r = readRequestBody(r, 1<<20)
+		schemaLimit := int64(1 << 20)
+		if p.maxRequestBodyProvider != nil {
+			if configuredMax := p.maxRequestBodyProvider.GetMaxRequestBody(); configuredMax > 0 {
+				schemaLimit = configuredMax
+			}
+		}
+		schemaBody, overLimit, r = readRequestBody(r, schemaLimit)
 		if overLimit {
-			logger.Warn("API Schema: 请求体超过1MB限制, path=%s", r.URL.Path)
+			actualSize := r.ContentLength
+			if actualSize <= 0 {
+				actualSize = int64(len(schemaBody))
+			}
+			detail := fmt.Sprintf("body大小:%d字节, 限制:%d字节(API Schema检查)", actualSize, schemaLimit)
+			p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "请求体过大", http.StatusRequestEntityTooLarge, requestID, getUpstream(), start, r, detail, "body")
+			blockpage.RenderBlock(w, "body_too_large", http.StatusRequestEntityTooLarge, requestID, clientIP, detail, r.Host)
+			return true
 		}
 		if len(schemaBody) == 0 && r.Body != nil {
 			logger.Warn("API Schema: 读取请求体为空或失败, path=%s", r.URL.Path)
@@ -315,8 +336,13 @@ func (p *WAFProxy) checkAttackDetection(w http.ResponseWriter, r *http.Request, 
 			bodyBytes, overLimit, r2 := readRequestBody(r, maxBodySize)
 			r = r2
 			if overLimit {
-				p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "请求体过大", http.StatusRequestEntityTooLarge, requestID, getUpstream(), start, r, "", "")
-				blockpage.RenderBlock(w, "body_too_large", http.StatusRequestEntityTooLarge, requestID, clientIP, "", r.Host)
+				actualSize := r.ContentLength
+				if actualSize <= 0 {
+					actualSize = int64(len(bodyBytes))
+				}
+				detail := fmt.Sprintf("body大小:%d字节, 限制:%d字节", actualSize, maxBodySize)
+				p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "请求体过大", http.StatusRequestEntityTooLarge, requestID, getUpstream(), start, r, detail, "body")
+				blockpage.RenderBlock(w, "body_too_large", http.StatusRequestEntityTooLarge, requestID, clientIP, detail, r.Host)
 				return true
 			}
 			body = string(bodyBytes)
@@ -432,8 +458,24 @@ func (p *WAFProxy) checkVPatch(w http.ResponseWriter, r *http.Request, clientIP,
 	query := r.URL.RawQuery
 	reqBody := ""
 	if r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH" {
-		bodyBytes, _, r2 := readRequestBody(r, 1<<20)
+		vpatchLimit := int64(1 << 20)
+		if p.maxRequestBodyProvider != nil {
+			if configuredMax := p.maxRequestBodyProvider.GetMaxRequestBody(); configuredMax > 0 {
+				vpatchLimit = configuredMax
+			}
+		}
+		bodyBytes, overLimit, r2 := readRequestBody(r, vpatchLimit)
 		r = r2
+		if overLimit {
+			actualSize := r.ContentLength
+			if actualSize <= 0 {
+				actualSize = int64(len(bodyBytes))
+			}
+			detail := fmt.Sprintf("body大小:%d字节, 限制:%d字节(VPatch检查)", actualSize, vpatchLimit)
+			p.recordBlock(clientIP, r.URL.Path, r.Method, userAgent, "请求体过大", http.StatusRequestEntityTooLarge, requestID, getUpstream(), start, r, detail, "body")
+			blockpage.RenderBlock(w, "body_too_large", http.StatusRequestEntityTooLarge, requestID, clientIP, detail, r.Host)
+			return true
+		}
 		reqBody = string(bodyBytes)
 	}
 	vpResult := p.vpatchManager.Check(r.URL.Path, query, reqBody)
@@ -507,4 +549,21 @@ func (p *WAFProxy) forwardRequest(w http.ResponseWriter, r *http.Request, client
 		SetScheme(getScheme(r))
 
 	logger.Write(*log)
+}
+
+// submitAsyncExtract 在前置规则短路时异步提交攻击特征提取
+func (p *WAFProxy) submitAsyncExtract(requestID, clientIP string, r *http.Request, sourceRule string) {
+	if p.asyncExtractor == nil {
+		return
+	}
+	p.asyncExtractor.Submit(asyncextract.ExtractRequest{
+		RequestID:  requestID,
+		ClientIP:   clientIP,
+		Method:     r.Method,
+		Path:       r.URL.Path,
+		Query:      r.URL.RawQuery,
+		UserAgent:  r.UserAgent(),
+		SourceRule: sourceRule,
+		Timestamp:  time.Now(),
+	})
 }

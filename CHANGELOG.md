@@ -7,6 +7,19 @@
 
 ## [Unreleased]
 
+## [1.1.13] - 2026-05-31
+
+### 修复
+- **[严重] 请求体大小限制单位转换错误**：`SetMaxRequestBody` 将 MB 值直接当作字节存储，导致配置 `max_request_body=10`（10MB）实际限制为 10 字节，任何正常请求都被拦截。修复：添加 `*1024*1024` MB→字节转换
+- **[严重] 请求体缓存导致大小限制检查被跳过**：`readRequestBody` 缓存命中时始终返回 `overLimit=false`，导致 `checkAPISchema` 先缓存 body 后，`checkAttackDetection` 的 body 大小限制检查被完全跳过。修复：缓存命中时根据当前 `maxBytes` 重新判断是否超限
+- **[严重] 路径级 body 限制(pathbodylimit)永远不生效**：由于全局 `maxBodySize` 值极小（单位转换 BUG），`pathLimit < maxBodySize` 条件永远为 false，路径级限制被短路。随单位转换修复自动解决
+- **[严重] API Schema/VPatch 检查的 body 限制不尊重全局配置**：`checkAPISchema` 和 `checkVPatch` 硬编码 1MB 限制，当 `max_request_body>1MB` 时配置完全无效，大于 1MB 的 body 始终被拦截。修复：使用 `maxRequestBody` 配置值作为限制
+- **[中等] 拦截信息不显示 body 实际大小**：body 超限拦截时 `recordBlock` 的 `matchDetail` 和 `matchLocation` 都传空字符串，无法得知 body 实际多大和限制多少。修复：记录 `body大小:X字节, 限制:Y字节`
+- **[中等] chunked encoding 时拦截详情显示 -1 字节**：chunked 传输时 `r.ContentLength=-1`，detail 信息显示 `body大小:-1字节`。修复：添加 `actualSize <= 0` 时回退到 `len(bodyBytes)` 的逻辑
+- **[中等] SIGHUP 热重载不更新 maxRequestBody**：SIGHUP 信号处理中重载了 pathbodylimit、rules 等模块，但遗漏了 `maxRequestBody`。修复：添加 `SetMaxRequestBody` 调用，且无条件调用以支持重置为 0
+- **[中等] checkAPISchema/checkVPatch 忽略 body 超限**：`checkAPISchema` 中 body 超 1MB 仅记录日志不拦截；`checkVPatch` 中 `overLimit` 返回值被丢弃。修复：超限时拦截并返回 413
+- **[中等] io.CopyN 读取失败时未重置 r.Body**：网络中断等导致 body 部分读取失败时，不完整的 `r.Body` 会被代理转发到后端。修复：关闭原始 body 并设为空 body
+
 ## [1.1.12] - 2026-05-17
 
 ### 重构
